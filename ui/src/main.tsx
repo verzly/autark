@@ -34,6 +34,7 @@ export default function App() {
   let output: HTMLDivElement | undefined;
   const currentApp = createMemo(() => state().apps.find(a => a.id === active()) ?? null);
   const openIds = () => state().settings.open_tabs;
+  const autarkVisible = () => active() === AUTARK_TAB || openIds().length === 0;
   const available = createMemo(() => state().apps.filter(a => `${a.name} ${a.description} ${a.id}`.toLowerCase().includes(search().toLowerCase())));
   const showChooser = () => { setSettingsOpen(false); setActive(null); setChooser(true); setSearch(""); setSelected(0); };
   const hideChooser = () => { setChooser(false); setActive(AUTARK_TAB); setSearch(""); setSelected(0); };
@@ -90,10 +91,10 @@ export default function App() {
     if (mockMode()) {
       const tabs = openIds().filter(x => x !== id), nextActive = active() === id ? tabs[tabs.length - 1] ?? AUTARK_TAB : active();
       setState(s => ({ ...s, settings: { ...s.settings, open_tabs: tabs, active_tab: nextActive === AUTARK_TAB ? null : nextActive } }));
-      if (active() === id) { setActive(nextActive); setChooser(nextActive === AUTARK_TAB); }
+      if (active() === id) { setActive(nextActive); setChooser(false); }
     } else void run(async () => {
       const next = await api.closeTab(id);
-      if (active() === id) { const nextActive = next.settings.active_tab ?? AUTARK_TAB; setActive(nextActive); setChooser(nextActive === AUTARK_TAB); }
+      if (active() === id) { const nextActive = next.settings.active_tab ?? AUTARK_TAB; setActive(nextActive); setChooser(false); }
       return next;
     });
   };
@@ -181,9 +182,9 @@ export default function App() {
       }}><Icon name="menu" /></button>
       <button class={`add-tab marketplace-tab ${chooser() ? "selected" : ""}`} aria-label="Open marketplace" aria-pressed={chooser()} onClick={() => (chooser() ? hideChooser() : showChooser())}><Icon name="gridPlus" /></button>
       <div class="tabs" role="tablist" aria-label="Open apps">
-        <button class={`tab autark-tab ${active() === AUTARK_TAB && !settingsOpen() ? "active" : ""}`} role="tab" aria-selected={active() === AUTARK_TAB && !settingsOpen()} onClick={() => selectTab(AUTARK_TAB)}>
+        <Show when={autarkVisible()}><button class={`tab autark-tab ${active() === AUTARK_TAB && !settingsOpen() ? "active" : ""}`} role="tab" aria-selected={active() === AUTARK_TAB && !settingsOpen()} onClick={() => selectTab(AUTARK_TAB)}>
           <span class="autark-tab-mark" aria-hidden="true">a</span><span class="tab-name">Autark</span>
-        </button>
+        </button></Show>
         <For each={openIds()}>{id => {
           const app = () => state().apps.find(a => a.id === id);
           return <button class={`tab ${active() === id && !settingsOpen() ? "active" : ""}`} role="tab" aria-selected={active() === id && !settingsOpen()} onClick={() => selectTab(id)}>
