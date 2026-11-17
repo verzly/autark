@@ -69,7 +69,7 @@ export default function App() {
       const notice = lineTone(line) === "tone-error" || lineTone(line) === "tone-warning" || /\btip\b/i.test(line);
       const previous = lines[index - 1] ?? "";
       const previousNotice = lineTone(previous) === "tone-error" || lineTone(previous) === "tone-warning" || /\btip\b/i.test(previous);
-      const spacer = index > 0 && (/^\$ /.test(line) || notice || previousNotice);
+      const spacer = index > 0 && (/^\$ /.test(line) || (notice && !previousNotice));
       return [...(spacer ? [{ id: `${index}-spacer`, line: "", spacer: true }] : []), { id: `${index}-line`, line, spacer: false }];
     });
   };
@@ -296,7 +296,7 @@ export default function App() {
           <Show when={a().last_error}><div class="error-banner">{a().last_error?.message}</div></Show>
           <Show when={requestError()}><div class="error-banner">{requestError()}</div></Show>
           <div class="actions">
-            <button class="button primary" disabled={busyApp() || (a().installed && !a().update_available)} onClick={() => setPanel("install")}>{a().installed ? "update" : "install"}</button>
+            <button class="button primary" disabled={busyApp() || (a().installed && !a().update_available)} onClick={() => setPanel("install")}>{a().installed ? "Update" : "Install"}</button>
             <button class="button" disabled={!canStart()} onClick={() => action("start", a())}>Start</button>
             <button class="button" disabled={!canStop()} onClick={() => action("stop", a())}>Stop</button>
             <button class="button" disabled={busyApp() || !a().url} onClick={() => action("open", a())}>Open</button>

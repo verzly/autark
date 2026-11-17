@@ -658,6 +658,15 @@ pub fn setup(app: &AppHandle, shared: &Shared, id: &str, kind: SetupKind) -> Res
     index += 1;
     step_begin(app, shared, id, index, total, "Finishing");
     let app_version = read_app_version(app, id, &root, &app_dir, &manifest, &values, force_local_mise);
+    if let Some(check) = &manifest.setup.installed_check {
+        let path = PathBuf::from(manifest::expand(check, &root, &app_dir, &values)?);
+        if !path.exists() {
+            bail!(
+                "the app did not land in its folder: {} is missing. A system environment variable may have redirected the installer.",
+                path.display()
+            );
+        }
+    }
     manifest::write_installed(&app_dir, &manifest.version, app_version.as_deref())?;
     let version = manifest.version.clone();
     mutate(app, shared, id, |record| {
@@ -929,22 +938,21 @@ fn apply_environment(
         .env("MISE_CACHE_DIR", runtime.join("mise-cache"))
         .env("MISE_STATE_DIR", runtime.join("mise-state"))
         .env("MISE_TMP_DIR", runtime.join("tmp"));
-    // Vars listed in `env_keep_parent` win over the manifest when the parent
-    // already exports any of them, so a machine-wide HF_HOME is never shadowed.
-    let keep_parent = !manifest.env_keep_parent.is_empty()
-        && manifest
-            .env_keep_parent
-            .iter()
-            .any(|name| std::env::var_os(name).is_some());
-    if keep_parent {
-        for name in &manifest.env_keep_parent {
-            if let Some(value) = std::env::var_os(name) {
-                command.env(name, value);
-            }
+    // A var listed in `env_keep_parent` keeps the parent value when the machine
+    // defines that exact name, so a machine-wide HF_HOME is never shadowed while
+    // the other listed names still come from the manifest.
+    let kept: Vec<&String> = manifest
+        .env_keep_parent
+        .iter()
+        .filter(|name| std::env::var_os(name).is_some())
+        .collect();
+    for name in &kept {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
         }
     }
     for (key, value) in &manifest.env {
-        if keep_parent && manifest.env_keep_parent.contains(key) {
+        if kept.iter().any(|name| *name == key) {
             continue;
         }
         command.env(key, manifest::expand(value, root, app_dir, values)?);
