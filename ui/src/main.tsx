@@ -40,6 +40,7 @@ export default function App() {
   const openIds = () => state().settings.open_tabs;
   const [autarkTab, setAutarkTab] = createSignal(true);
   const [shortcutDone, setShortcutDone] = createSignal<string[]>([]);
+  const [shortcutBusy, setShortcutBusy] = createSignal<string[]>([]);
   const available = createMemo(() => state().apps.filter(a => `${a.name} ${a.description} ${a.id}`.toLowerCase().includes(search().toLowerCase())));
   const showChooser = () => { setSettingsOpen(false); setActive(null); setChooser(true); setSearch(""); setSelected(0); };
   const hideChooser = () => { setChooser(false); setAutarkTab(true); setActive(AUTARK_TAB); setSearch(""); setSelected(0); };
@@ -336,8 +337,8 @@ export default function App() {
               <div class="fields"><For each={a().settings_schema}>{field => <SettingField app={a()} field={field} value={draftValue(a(), field.key)} lock={a().settings_locked.find(lock => lock.key === field.key)} setValue={value => setDraftValue(a(), field.key, value)} choose={() => void chooseFolder(a(), field)} />}</For></div>
             </Show>
             <section class="preference-section"><h2>Shortcut</h2><p>A desktop shortcut that opens this app in Autark.</p>
-              <button class="button" disabled={busyApp() || !a().installed || shortcutDone().includes(a().id)} onClick={() => { if (mockMode()) { setShortcutDone(ids => [...ids, a().id]); return; } void run(async () => { const next = await api.createShortcut(a().id); setShortcutDone(ids => [...ids, a().id]); return next; }); }}>Create shortcut</button>
-              <Show when={shortcutDone().includes(a().id)}><small class="preference-note">Shortcut created on the desktop.</small></Show>
+              <button class="button" disabled={busyApp() || !a().installed || shortcutBusy().includes(a().id)} onClick={() => { if (shortcutBusy().includes(a().id)) return; if (mockMode()) { setShortcutDone(ids => [...ids, a().id]); return; } setShortcutBusy(ids => [...ids, a().id]); void run(async () => { try { const next = await api.createShortcut(a().id); setShortcutDone(ids => ids.includes(a().id) ? ids : [...ids, a().id]); return next; } finally { setShortcutBusy(ids => ids.filter(x => x !== a().id)); } }); }}>Create shortcut</button>
+              <Show when={shortcutDone().includes(a().id)}><small class="preference-note">Shortcut created on the desktop. Change the options and create it again to overwrite it.</small></Show>
               <label class="preference-toggle"><input type="checkbox" role="switch" checked={a().prefs.shortcut_autostart} onChange={e => setAppPref(a(), "shortcut_autostart", e.currentTarget.checked)} /><span><b>Also start the app</b></span></label>
               <label class="preference-toggle"><input type="checkbox" role="switch" checked={a().prefs.shortcut_background} onChange={e => setAppPref(a(), "shortcut_background", e.currentTarget.checked)} /><span><b>Run hidden in the background</b></span></label>
             </section>

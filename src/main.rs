@@ -385,7 +385,14 @@ fn save_app_prefs(app: AppHandle, shared: TauriState<'_, Arc<Shared>>, app_id: S
 #[tauri::command(rename_all = "snake_case")]
 fn create_shortcut(app: AppHandle, shared: TauriState<'_, Arc<Shared>>, app_id: String) -> CmdResult<State> {
     let record = apps::app_record(&shared, &app_id)?;
-    let exe = std::env::current_exe().map_err(|e| CmdError::new("internal", e.to_string()))?;
+    let mut exe = std::env::current_exe().map_err(|e| CmdError::new("internal", e.to_string()))?;
+    if exe.to_string_lossy().to_lowercase().contains(r"\target\debug\") {
+        let release = exe.parent().and_then(|dir| dir.parent()).map(|target| target.join("release").join("autark.exe"));
+        match release.filter(|path| path.exists()) {
+            Some(path) => exe = path,
+            None => return Err(CmdError::new("invalid_argument", "this is a development build; run cargo build --release and create the shortcut from the release exe")),
+        }
+    }
     let root = shared.root();
     let app_dir = manifest::app_dir(&root, &app_id);
     let shortcut_icon = app_dir.join("shortcut.ico");
