@@ -43,6 +43,10 @@ pub struct AppSetting {
     pub default: Value,
     #[serde(default)]
     pub help: Option<String>,
+    /// Environment variables that take the setting out of Autark's hands when the
+    /// machine already defines any of them.
+    #[serde(default)]
+    pub locked_by: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -62,6 +66,9 @@ pub struct Step {
     pub run: Vec<String>,
     #[serde(default)]
     pub optional: bool,
+    /// Step runs only when this boolean setting is enabled.
+    #[serde(default)]
+    pub when_setting: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -97,6 +104,9 @@ pub struct Manifest {
     pub setup: Setup,
     pub launch: Launch,
     pub env: BTreeMap<String, String>,
+    /// Env names that win over the manifest when the parent already sets them.
+    #[serde(default)]
+    pub env_keep_parent: Vec<String>,
 }
 
 impl Default for Manifest {
@@ -115,6 +125,7 @@ impl Default for Manifest {
             setup: Setup::default(),
             launch: Launch::default(),
             env: BTreeMap::new(),
+            env_keep_parent: Vec::new(),
         }
     }
 }
@@ -172,6 +183,18 @@ impl Manifest {
             if step.run.is_empty() || step.run[0].trim().is_empty() {
                 bail!("invalid_argument: setup step `{}` has no program", step.name);
             }
+            if let Some(key) = &step.when_setting {
+                let known = self
+                    .settings
+                    .iter()
+                    .any(|s| &s.key == key && s.kind == SettingKind::Boolean);
+                if !known {
+                    bail!(
+                        "invalid_argument: setup step `{}` gates on `{key}`, which is not a boolean setting",
+                        step.name
+                    );
+                }
+            }
             for arg in &step.run {
                 self.check_template(arg, &step.name)?;
             }
@@ -196,6 +219,11 @@ impl Manifest {
             }
             self.check_template(value, "env")?;
         }
+        for name in &self.env_keep_parent {
+            if name.trim().is_empty() {
+                bail!("invalid_argument: manifest env_keep_parent entry is empty");
+            }
+        }
         if let Some(source) = &self.setup.source {
             if !source.url.starts_with("https://") {
                 bail!("invalid_argument: source url must be https");
@@ -213,6 +241,14 @@ impl Manifest {
                 bail!("invalid_argument: duplicate setting `{}`", setting.key);
             }
             validate_value(setting.kind, &setting.key, &setting.default)?;
+            for name in &setting.locked_by {
+                if name.trim().is_empty() {
+                    bail!(
+                        "invalid_argument: setting `{}` has an empty locked_by entry",
+                        setting.key
+                    );
+                }
+            }
         }
         Ok(())
     }
@@ -280,6 +316,17 @@ fn is_placeholder_name(name: &str) -> bool {
 
 /// Expands `{root}`, `{app}`, `{source}`, `{data}` and `{settings.<key>}` in a manifest template.
 pub fn expand(template: &str, root: &Path, app: &Path, values: &Map<String, Value>) -> Result<String> {
+    expand_depth(template, root, app, values, 0)
+}
+
+/// Setting values may hold their own placeholders, such as a default of `{app}/huggingface`.
+fn expand_depth(
+    template: &str,
+    root: &Path,
+    app: &Path,
+    values: &Map<String, Value>,
+    depth: u8,
+) -> Result<String> {
     let mut out = String::with_capacity(template.len());
     let mut rest = template;
     while let Some(start) = rest.find('{') {
@@ -310,6 +357,9 @@ pub fn expand(template: &str, root: &Path, app: &Path, values: &Map<String, Valu
                     format!("invalid_argument: unknown setting `{key}` in placeholder")
                 })?;
                 match value {
+                    Value::String(text) if depth < 4 => {
+                        expand_depth(text, root, app, values, depth + 1)?
+                    }
                     Value::String(text) => text.clone(),
                     other => other.to_string(),
                 }
@@ -431,4 +481,59 @@ pub fn snapshot_manifest(app: &Path, manifest: &Manifest) -> Result<()> {
         serde_json::to_string_pretty(manifest)?,
     )
     .context("cannot write app.json snapshot")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn demo(gate: &str, settings: &str) -> String {
+        format!(
+            r#"{{"schema":1,"id":"demo","name":"Demo","description":"d","version":"1",
+            "settings":{settings},
+            "setup":{{"steps":[{{"name":"copy","when_setting":"{gate}","run":["powershell","-Command","echo hi"]}}]}},
+            "launch":{{"run":["demo.exe"]}}}}"#
+        )
+    }
+
+    #[test]
+    fn step_gate_must_be_a_boolean_setting() {
+        let settings = r#"[{"key":"import_config","label":"Copy config","kind":"boolean","default":false}]"#;
+        let ok: Manifest = serde_json::from_str(&demo("import_config", settings)).unwrap();
+        ok.validate("demo").unwrap();
+
+        let unknown: Manifest = serde_json::from_str(&demo("missing", settings)).unwrap();
+        assert!(unknown.validate("demo").is_err());
+
+        let text_kind = r#"[{"key":"import_config","label":"Copy config","kind":"text","default":""}]"#;
+        let wrong: Manifest = serde_json::from_str(&demo("import_config", text_kind)).unwrap();
+        assert!(wrong.validate("demo").is_err());
+    }
+
+    #[test]
+    fn env_keep_parent_rejects_empty_names() {
+        let json = r#"{"schema":1,"id":"demo","name":"Demo","description":"d","version":"1",
+            "launch":{"run":["demo.exe"]},"env_keep_parent":[" "]}"#;
+        let manifest: Manifest = serde_json::from_str(json).unwrap();
+        assert!(manifest.validate("demo").is_err());
+    }
+
+    #[test]
+    fn setting_defaults_may_hold_placeholders() {
+        let settings = r#"[{"key":"import_config","label":"Copy","kind":"boolean","default":false},
+            {"key":"hf_home","label":"Models","kind":"path","default":"{app}/huggingface","locked_by":["HF_HOME"]}]"#;
+        let manifest: Manifest = serde_json::from_str(&demo("import_config", settings)).unwrap();
+        assert!(manifest.validate("demo").is_ok());
+        let values = manifest.defaults();
+        let app = Path::new("C:/autark/apps/demo");
+        let expanded = expand("{settings.hf_home}/hub", Path::new("C:/autark"), app, &values).unwrap();
+        assert_eq!(expanded, "C:/autark/apps/demo/huggingface/hub");
+    }
+
+    #[test]
+    fn locked_by_rejects_empty_names() {
+        let settings = r#"[{"key":"hf_home","label":"Models","kind":"path","default":"x","locked_by":[" "]}]"#;
+        let manifest: Manifest = serde_json::from_str(&demo("import_config", settings)).unwrap();
+        assert!(manifest.validate("demo").is_err());
+    }
 }

@@ -60,7 +60,8 @@ README.md
     "run": ["{app}/app/unsloth_studio/Scripts/python.exe", "-I", "-m", "unsloth_cli", "studio", "-H", "127.0.0.1", "-p", "{settings.port}"],
     "url": "http://127.0.0.1:{settings.port}"
   },
-  "env": { "UNSLOTH_SKIP_AUTOSTART": "1", "UNSLOTH_STUDIO_HOME": "{app}/app" }
+  "env": { "UNSLOTH_SKIP_AUTOSTART": "1", "HF_HOME": "{app}/huggingface" },
+  "env_keep_parent": ["HF_HOME", "HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE"]
 }
 ```
 
@@ -86,6 +87,7 @@ README.md
 | `setup.steps` | yes | Ordered commands run after tool install and source fetch |
 | `launch` | yes | Command used by Start, plus the optional local URL for Open |
 | `env` | no | Extra environment variables for setup steps and launch |
+| `env_keep_parent` | no | Env names that keep the parent process value when the machine already sets any of them |
 
 ### Settings
 
@@ -95,7 +97,13 @@ README.md
 
 `kind` is one of `text`, `number`, `port`, `boolean`, `path`. Keys must be unique per app. Autark stores the
 values in `<app>/settings.json` next to the installed manifest and exposes them to commands through
-`{settings.<key>}`. Values are validated before an operation starts: a `port` must be 1-65535.
+`{settings.<key>}`. Values are validated before an operation starts: a `port` must be 1-65535. A default value
+may itself contain placeholders, for example `"default": "{app}/huggingface"`.
+
+An optional `"locked_by": ["HF_HOME"]` hands the setting to the machine: when any listed variable exists in the
+environment, the app settings page shows that variable's value read-only with a note that global system settings
+overrode Autark's scope, the stored value is refused on save, and `env_keep_parent` keeps the variable unchanged
+for setup steps and launch.
 
 ### Templates
 
@@ -117,8 +125,13 @@ An unknown placeholder is a manifest error and fails the operation before anythi
 shell, so no quoting rules apply. When `setup.tools` is non-empty every command runs through
 `mise exec --` from `<app>`, which puts the pinned tools on `PATH`.
 
-Setup steps run in order. A step with `"optional": true` may fail without failing the install. Every step
-streams its output to the app log.
+Setup steps run in order. A step with `"optional": true` may fail without failing the install. A step with
+`"when_setting": "key"` runs only when that boolean app setting is on, so an app can offer opt-in work such as
+copying an existing user config into the install. Every step streams its output to the app log.
+
+`env_keep_parent` names variables that win over the manifest. When the machine already exports any listed name
+(for example `HF_HOME`), Autark passes it through unchanged and skips every manifest value from that group.
+Otherwise the folder-local values from `env` apply, which keeps models in `{app}` by default.
 
 ## Update semantics
 

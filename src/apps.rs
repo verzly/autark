@@ -108,6 +108,8 @@ pub struct AppState {
     pub phase: Phase,
     pub settings: Map<String, Value>,
     pub settings_schema: Vec<AppSetting>,
+    /// Settings the machine environment owns, with the value that wins.
+    pub settings_locked: Vec<SettingsLock>,
     pub url: Option<String>,
     pub homepage: Option<String>,
     pub license: Option<String>,
@@ -118,6 +120,31 @@ pub struct AppState {
     pub step: Option<StepInfo>,
     pub started_at: Option<u64>,
     pub elapsed_secs: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct SettingsLock {
+    pub key: String,
+    pub var: String,
+    pub value: String,
+}
+
+/// Settings the machine environment owns: any listed variable already set wins.
+fn settings_locks(manifest: &Manifest) -> Vec<SettingsLock> {
+    let mut locks = Vec::new();
+    for setting in &manifest.settings {
+        for name in &setting.locked_by {
+            if let Ok(value) = std::env::var(name) {
+                locks.push(SettingsLock {
+                    key: setting.key.clone(),
+                    var: name.clone(),
+                    value,
+                });
+                break;
+            }
+        }
+    }
+    locks
 }
 
 #[derive(Clone, Debug)]
@@ -201,6 +228,7 @@ impl AppRecord {
             phase: self.phase,
             settings: self.settings.clone(),
             settings_schema: self.manifest.settings.clone(),
+            settings_locked: settings_locks(&self.manifest),
             url: self.url.clone(),
             homepage: self.manifest.homepage.clone(),
             license: self.manifest.license.clone(),
@@ -601,6 +629,12 @@ pub fn setup(app: &AppHandle, shared: &Shared, id: &str, kind: SetupKind) -> Res
     }
 
     for step in manifest.setup.steps.clone() {
+        if let Some(key) = &step.when_setting {
+            if values.get(key) != Some(&Value::Bool(true)) {
+                log(app, id, format!("skipping setup step `{}`: {key} is off", step.name));
+                continue;
+            }
+        }
         index += 1;
         step_begin(app, shared, id, index, total, &step.name);
         match run_step(
@@ -895,7 +929,24 @@ fn apply_environment(
         .env("MISE_CACHE_DIR", runtime.join("mise-cache"))
         .env("MISE_STATE_DIR", runtime.join("mise-state"))
         .env("MISE_TMP_DIR", runtime.join("tmp"));
+    // Vars listed in `env_keep_parent` win over the manifest when the parent
+    // already exports any of them, so a machine-wide HF_HOME is never shadowed.
+    let keep_parent = !manifest.env_keep_parent.is_empty()
+        && manifest
+            .env_keep_parent
+            .iter()
+            .any(|name| std::env::var_os(name).is_some());
+    if keep_parent {
+        for name in &manifest.env_keep_parent {
+            if let Some(value) = std::env::var_os(name) {
+                command.env(name, value);
+            }
+        }
+    }
     for (key, value) in &manifest.env {
+        if keep_parent && manifest.env_keep_parent.contains(key) {
+            continue;
+        }
         command.env(key, manifest::expand(value, root, app_dir, values)?);
     }
     Ok(())
@@ -1229,6 +1280,15 @@ pub fn save_app_settings(
         bail!("operation_in_progress: stop the app before changing its settings");
     }
     let clean = manifest::validate_settings(&record.manifest, &values)?;
+    for lock in settings_locks(&record.manifest) {
+        if clean.get(&lock.key) != record.settings.get(&lock.key) {
+            bail!(
+                "invalid_argument: setting `{}` is owned by the system environment ({}), Autark cannot change it",
+                lock.key,
+                lock.var
+            );
+        }
+    }
     let root = shared.root();
     let app_dir = manifest::app_dir(&root, id);
     manifest::save_settings(&app_dir, &clean)?;

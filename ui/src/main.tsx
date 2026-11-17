@@ -134,14 +134,17 @@ export default function App() {
     } catch (e) { setRequestError(errText(e)); }
   };
   const saveDraft = (app: AppState) => {
-    const settings = drafts()[app.id] ?? app.settings;
+    const settings = Object.fromEntries(Object.entries(drafts()[app.id] ?? app.settings).filter(([key]) => !app.settings_locked.some(lock => lock.key === key)));
     if (mockMode()) setState(s => ({ ...s, apps: s.apps.map(a => a.id === app.id ? { ...a, settings } : a) }));
     else void run(() => api.saveAppSettings(app.id, settings));
     setDrafts(d => { const next = { ...d }; delete next[app.id]; return next; });
   };
   const draftValue = (app: AppState, key: string) => (drafts()[app.id] ?? app.settings)[key];
   const setDraftValue = (app: AppState, key: string, value: unknown) => setDrafts(d => ({ ...d, [app.id]: { ...(d[app.id] ?? app.settings), [key]: value } }));
-  const dirty = (app: AppState) => JSON.stringify(drafts()[app.id] ?? app.settings) !== JSON.stringify(app.settings);
+  const dirty = (app: AppState) => {
+    const editable = (settings: Record<string, unknown>) => Object.fromEntries(Object.entries(settings).filter(([key]) => !app.settings_locked.some(lock => lock.key === key)));
+    return JSON.stringify(editable(drafts()[app.id] ?? app.settings)) !== JSON.stringify(editable(app.settings));
+  };
   const chooseFolder = async (app: AppState, field: AppSetting) => {
     if (field.key !== "root") return;
     try { const dir = mockMode() ? "D:\\Portable\\Data" : await api.pickDirectory("root_parent"); if (dir) setDraftValue(app, field.key, dir); }
@@ -300,7 +303,7 @@ export default function App() {
             <div class="view-heading"><div><span class="eyebrow">{a().name.toUpperCase()}</span><h1>Settings</h1></div><Show when={dirty(a())}><button class="button primary" disabled={busyApp()} onClick={() => saveDraft(a())}>Save</button></Show></div>
             <Show when={requestError()}><div class="error-banner">{requestError()}</div></Show>
             <Show when={a().settings_schema.length} fallback={<p class="quiet">No app settings.</p>}>
-              <div class="fields"><For each={a().settings_schema}>{field => <SettingField app={a()} field={field} value={draftValue(a(), field.key)} setValue={value => setDraftValue(a(), field.key, value)} choose={() => void chooseFolder(a(), field)} />}</For></div>
+              <div class="fields"><For each={a().settings_schema}>{field => <SettingField app={a()} field={field} value={draftValue(a(), field.key)} lock={a().settings_locked.find(lock => lock.key === field.key)} setValue={value => setDraftValue(a(), field.key, value)} choose={() => void chooseFolder(a(), field)} />}</For></div>
             </Show>
             <section class="uninstall-section"><h2>Uninstall app</h2><p>Remove this app from the launcher. User data and settings are preserved.</p>
               <Show when={panel() !== "remove"}><button class="button danger-quiet" disabled={busyApp() || !a().installed} onClick={() => { setRemoveText(""); setPanel("remove"); }}>Uninstall</button></Show>
@@ -313,10 +316,11 @@ export default function App() {
   </div>;
 }
 
-function SettingField(props: { app: AppState; field: AppSetting; value: unknown; setValue: (v: unknown) => void; choose: () => void }) {
+function SettingField(props: { app: AppState; field: AppSetting; value: unknown; lock?: AppState["settings_locked"][number]; setValue: (v: unknown) => void; choose: () => void }) {
+  const value = () => props.lock ? props.lock.value : String(props.value ?? props.field.default ?? "");
   return <label class="field"><span>{props.field.label}</span><Show when={props.field.kind === "boolean"} fallback={
-    <div class="field-control"><input type={props.field.kind === "number" || props.field.kind === "port" ? "number" : "text"} value={String(props.value ?? props.field.default ?? "")} onInput={e => props.setValue(props.field.kind === "number" || props.field.kind === "port" ? Number(e.currentTarget.value) : e.currentTarget.value)} /><Show when={props.field.kind === "path"}><button class="button" disabled={props.field.key !== "root"} onClick={props.choose}>Choose</button></Show></div>
-  }><input type="checkbox" role="switch" checked={Boolean(props.value ?? props.field.default)} onChange={e => props.setValue(e.currentTarget.checked)} /></Show><Show when={props.field.help}><small>{props.field.help}</small></Show></label>;
+    <div class="field-control"><input classList={{ locked: Boolean(props.lock) }} disabled={Boolean(props.lock)} type={props.field.kind === "number" || props.field.kind === "port" ? "number" : "text"} value={value()} onInput={e => props.setValue(props.field.kind === "number" || props.field.kind === "port" ? Number(e.currentTarget.value) : e.currentTarget.value)} /><Show when={props.field.kind === "path"}><button class="button" disabled={Boolean(props.lock) || props.field.key !== "root"} onClick={props.choose}>Choose</button></Show></div>
+  }><input type="checkbox" role="switch" disabled={Boolean(props.lock)} checked={props.lock ? props.lock.value.toLowerCase() === "true" : Boolean(props.value ?? props.field.default)} onChange={e => props.setValue(e.currentTarget.checked)} /></Show><Show when={props.lock}><small class="setting-lock-note">Set by the system environment ({props.lock?.var}). Autark cannot change it.</small></Show><Show when={props.field.help}><small>{props.field.help}</small></Show></label>;
 }
 function lineTone(line: string) {
   return /error|failed|fatal|stopped/i.test(line) ? "tone-error" : /warning|warn/i.test(line) ? "tone-warning" : /installed|complete|ready/i.test(line) ? "tone-success" : /downloading|extracting|^\s*\d+%/i.test(line) ? "tone-dim" : "";
