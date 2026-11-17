@@ -850,8 +850,16 @@ fn mise_command(root: &Path, force_local: bool) -> Command {
 }
 
 fn mise_available(root: &Path, force_local: bool) -> bool {
-    mise_command(root, force_local)
-        .arg("--version")
+    let mut command = mise_command(root, force_local);
+    command.arg("--version");
+    let runtime = root.join("runtime");
+    command
+        .env("MISE_DATA_DIR", runtime.join("mise-data"))
+        .env("MISE_CONFIG_DIR", runtime.join("mise-config"))
+        .env("MISE_CACHE_DIR", runtime.join("mise-cache"))
+        .env("MISE_STATE_DIR", runtime.join("mise-state"))
+        .env("MISE_TMP_DIR", runtime.join("tmp"));
+    command
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)
