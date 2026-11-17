@@ -51,6 +51,10 @@ pnpm --dir ui build
 cargo build --release
 ```
 
+For development use `scripts/dev.ps1`. It stops a leftover `autark.exe` first:
+a running instance locks `target\debug\autark.exe` and cargo then fails with
+`failed to remove file ... (os error 5)`.
+
 The binary lands in `target\release\autark.exe`. Releases are built by
 `.github/workflows/release.yml`; run `scripts/calver.ps1` locally if you need to
 prepare a version bump by hand.
