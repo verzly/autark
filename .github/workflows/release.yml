@@ -1,0 +1,137 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: CalVer bump
+        type: choice
+        options:
+          - auto
+          - patch
+          - minor
+          - major
+        default: auto
+
+permissions:
+  contents: write
+
+concurrency:
+  group: calver-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: ${{ github.event_name == 'push' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Prepare release version
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        shell: pwsh
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          BUMP: ${{ inputs.bump || 'auto' }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          $version = & ./scripts/calver.ps1 -Mode Prepare -Bump $env:BUMP
+          if (-not $version -or $version.Count -ne 1) {
+            throw 'CalVer preparation did not return exactly one version.'
+          }
+
+          git add -- Cargo.toml Cargo.lock
+          if ($LASTEXITCODE -ne 0) { throw "git add failed: $LASTEXITCODE" }
+
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Cargo files already contain CalVer $version."
+            exit 0
+          }
+          if ($LASTEXITCODE -ne 1) { throw "git diff failed: $LASTEXITCODE" }
+
+          git commit -m "chore(release): prepare $version"
+          if ($LASTEXITCODE -ne 0) { throw "git commit failed: $LASTEXITCODE" }
+
+          git push origin "HEAD:$env:DEFAULT_BRANCH"
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Could not push the version commit. The default branch may have advanced; rerun this workflow after reviewing the branch.'
+          }
+
+      - name: Validate release version
+        id: validate-version
+        shell: pwsh
+        env:
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_REF: ${{ github.ref_name }}
+          BUMP: ${{ inputs.bump || 'auto' }}
+        run: |
+          if ($env:RELEASE_EVENT -eq 'push') {
+            $version = & ./scripts/calver.ps1 -Mode ValidateTag -Tag $env:RELEASE_REF
+          } else {
+            $version = & ./scripts/calver.ps1 -Mode ValidateNext -Bump $env:BUMP
+          }
+
+          if (-not $version -or $version.Count -ne 1) {
+            throw 'CalVer validation did not return exactly one version.'
+          }
+
+          "release_tag=v$version" | Add-Content -Path $env:GITHUB_OUTPUT -Encoding utf8
+          "release_commit=$(git rev-parse HEAD)" | Add-Content -Path $env:GITHUB_OUTPUT -Encoding utf8
+
+      - name: Verify native build prerequisites
+        shell: pwsh
+        run: |
+          # windows-2022 includes VS 2022 C++, full-framework MSBuild and this SDK.
+          $sdk = "${env:ProgramFiles(x86)}/Windows Kits/10/Include/10.0.26100.0"
+          if (-not (Test-Path "$sdk/um/Windows.h")) { throw 'Windows SDK 10.0.26100.0 is required.' }
+
+      - name: Install Tauri CLI
+        shell: pwsh
+        run: |
+          cargo install tauri-cli --version "^2" --locked
+          if ($LASTEXITCODE -ne 0) { throw "Tauri CLI install failed with exit code $LASTEXITCODE" }
+
+      - name: Build portable release binary
+        shell: pwsh
+        run: ./scripts/build-release.ps1
+
+      - name: Prepare release checksum
+        shell: pwsh
+        run: |
+          $name = 'autark-windows-x64.exe'
+          $hash = (Get-FileHash -Algorithm SHA256 "dist/$name").Hash.ToLowerInvariant()
+          "$hash  $name" | Set-Content -Encoding ascii "dist/$name.sha256"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.validate-version.outputs.release_tag }}
+          target_commitish: ${{ steps.validate-version.outputs.release_commit }}
+          files: |
+            dist/autark-windows-x64.exe
+            dist/autark-windows-x64.exe.sha256
+          generate_release_notes: true
+          skip_if_release_exists: true
