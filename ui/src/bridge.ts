@@ -13,7 +13,7 @@ export interface AppState {
 export interface State {
   settings: Settings; settings_path: string; settings_exists: boolean;
   marketplace: { path: string; url: string; exists: boolean; refreshing: boolean; last_refresh: number | null; error: { code: string; message: string } | null };
-  apps: AppState[]; operation: { app_id: string; kind: string } | null; busy: boolean;
+  apps: AppState[]; operations: { app_id: string; kind: string }[]; busy: boolean;
 }
 export const mockMode = () => import.meta.env.DEV && !("__TAURI_INTERNALS__" in window);
 const isTauri = () => "__TAURI_INTERNALS__" in window;

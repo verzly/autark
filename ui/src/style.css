@@ -41,3 +41,4 @@
 .marketplace-heading>div:nth-child(2){grid-row:2}
 .marketplace-heading .marketplace-tools{grid-column:2;grid-row:2}
 *{scrollbar-width:thin;scrollbar-color:#2a2a2a transparent}*::-webkit-scrollbar{width:9px;height:9px}*::-webkit-scrollbar-track{background:transparent}*::-webkit-scrollbar-thumb{border:2px solid transparent;border-radius:999px;background:#2a2a2a;background-clip:padding-box}*::-webkit-scrollbar-thumb:hover{background:#3a3a3a;background-clip:padding-box}*::-webkit-scrollbar-button{display:none}
+.field input:not([type=checkbox]),.search,.remove-panel input{border-bottom:1px solid #3a3a3a}

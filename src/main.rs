@@ -40,9 +40,9 @@ type CmdResult<T> = Result<T, CmdError>;
 
 fn operation_running(shared: &Shared) -> bool {
     shared
-        .operation
+        .operations
         .lock()
-        .map(|operation| operation.is_some())
+        .map(|operations| !operations.is_empty())
         .unwrap_or(false)
 }
 
@@ -171,12 +171,6 @@ async fn install_app(
         ));
     }
     let inner = shared.inner().clone();
-    if operation_running(&inner) {
-        return Err(CmdError::new(
-            "operation_in_progress",
-            "another operation is running",
-        ));
-    }
     let kind = if is_installed(&inner, &app_id) {
         SetupKind::Update
     } else {
@@ -191,7 +185,7 @@ async fn install_app(
     })
     .await
     .map_err(|error| CmdError::new("internal", error.to_string()));
-    apps::release(&inner);
+    apps::release(&inner, &app_id);
     joined??;
     Ok(apps::wire(&inner))
 }
@@ -222,7 +216,7 @@ async fn update_app(
     })
     .await
     .map_err(|error| CmdError::new("internal", error.to_string()));
-    apps::release(&inner);
+    apps::release(&inner, &app_id);
     joined??;
     Ok(apps::wire(&inner))
 }
@@ -296,13 +290,18 @@ fn open_app(shared: TauriState<'_, Arc<Shared>>, app_id: String) -> CmdResult<St
 }
 
 #[tauri::command(rename_all = "snake_case")]
-fn remove_app(
+async fn remove_app(
     app: AppHandle,
     shared: TauriState<'_, Arc<Shared>>,
     app_id: String,
     confirm: String,
 ) -> CmdResult<State> {
-    apps::remove(&app, &shared, &app_id, &confirm)?;
+    let inner = shared.inner().clone();
+    let handle = app.clone();
+    let id = app_id.clone();
+    tauri::async_runtime::spawn_blocking(move || apps::remove(&handle, &inner, &id, &confirm))
+        .await
+        .map_err(|error| CmdError::new("internal", error.to_string()))??;
     Ok(apps::wire(&shared))
 }
 
@@ -318,9 +317,13 @@ fn save_app_settings(
 }
 
 #[tauri::command(rename_all = "snake_case")]
-fn cancel_operation(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> CmdResult<State> {
-    apps::cancel();
-    apps::log(&app, "marketplace", "cancelling the running operation");
+fn cancel_operation(
+    app: AppHandle,
+    shared: TauriState<'_, Arc<Shared>>,
+    app_id: String,
+) -> CmdResult<State> {
+    apps::cancel(&app_id);
+    apps::log(&app, &app_id, "cancelling the running operation");
     Ok(apps::wire(&shared))
 }
 

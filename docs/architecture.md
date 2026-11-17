@@ -9,7 +9,7 @@ apps that are described by the marketplace (see `docs/marketplace-v1.md`). Autar
 <exe folder>/launcher-root.json      pointer: { "root": "<absolute path>" }
 <root>/launcher-settings.json        Autark settings (root, folder name, open tabs)
 <root>/marketplace/                  git clone of verzly/autark-marketplace
-<root>/runtime/mise-data|mise-config|mise-cache|mise-state|tmp|uv-cache|bin
+<root>/runtime/mise-data|mise-config|mise-cache|mise-state|tmp|bin
 <root>/apps/<id>/app.json            manifest snapshot copied at install time
 <root>/apps/<id>/installed.json      { "version": "recipe", "app_version": "real", "installed_at": 0 }
 <root>/apps/<id>/settings.json       per-app user settings
@@ -34,7 +34,7 @@ When an app runs, its environment is scoped like this:
 | `MISE_CONFIG_DIR` | `{root}/runtime/mise-config` |
 | `MISE_CACHE_DIR` | `{root}/runtime/mise-cache` |
 | `MISE_STATE_DIR` | `{root}/runtime/mise-state` |
-| `UV_CACHE_DIR` | `{root}/runtime/uv-cache` |
+| `UV_CACHE_DIR` | `{app}/runtime/uv-cache` |
 
 The parent environment is cleared first and only a whitelist is passed through (PATH, SystemRoot, WINDIR,
 COMSPEC, PATHEXT, SystemDrive, ProgramData, ProgramFiles(x86), NUMBER_OF_PROCESSORS, USERNAME, TEMP/TMP

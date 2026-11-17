@@ -12,16 +12,13 @@ use std::{
     io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
+    sync::{Arc, Mutex},
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter};
 
-static CANCEL: AtomicBool = AtomicBool::new(false);
+static CANCEL: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -288,7 +285,7 @@ pub struct State {
     pub settings_exists: bool,
     pub marketplace: MarketplaceInfo,
     pub apps: Vec<AppState>,
-    pub operation: Option<Operation>,
+    pub operations: Vec<Operation>,
     pub busy: bool,
 }
 
@@ -306,7 +303,7 @@ pub struct Core {
 
 pub struct Shared {
     pub core: Mutex<Core>,
-    pub operation: Mutex<Option<Operation>>,
+    pub operations: Mutex<HashMap<String, Operation>>,
     pub children: Mutex<HashMap<String, Child>>,
 }
 
@@ -329,7 +326,7 @@ impl Shared {
         load_catalogue(&mut core);
         Self {
             core: Mutex::new(core),
-            operation: Mutex::new(None),
+            operations: Mutex::new(HashMap::new()),
             children: Mutex::new(HashMap::new()),
         }
     }
@@ -427,20 +424,22 @@ pub fn load_catalogue(core: &mut Core) -> Vec<String> {
 }
 
 pub fn wire(shared: &Shared) -> State {
-    let operation = shared
-        .operation
+    let operations: Vec<Operation> = shared
+        .operations
         .lock()
         .unwrap_or_else(|error| error.into_inner())
-        .clone();
+        .values()
+        .cloned()
+        .collect();
     let core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
-    let busy = operation.is_some() || core.marketplace.refreshing;
+    let busy = !operations.is_empty() || core.marketplace.refreshing;
     State {
         settings: core.settings.clone(),
         settings_path: settings::settings_path().to_string_lossy().to_string(),
         settings_exists: settings::settings_path().exists(),
         marketplace: core.marketplace.clone(),
         apps: core.records.iter().map(AppRecord::wire).collect(),
-        operation,
+        operations,
         busy,
     }
 }
@@ -483,34 +482,61 @@ fn find_record(shared: &Shared, id: &str) -> Result<AppRecord> {
 }
 
 pub fn reserve(shared: &Shared, app_id: &str, kind: &str) -> Result<()> {
-    let mut operation = shared
-        .operation
+    let mut operations = shared
+        .operations
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    if operation.is_some() {
-        bail!("operation_in_progress: another operation is running");
+    let setup = matches!(kind, "install" | "update");
+    if operations.contains_key(app_id) {
+        bail!("operation_in_progress: this app is already busy");
     }
-    *operation = Some(Operation {
-        app_id: app_id.to_string(),
-        kind: kind.to_string(),
-    });
-    CANCEL.store(false, Ordering::SeqCst);
+    if kind == "update_all" || setup {
+        if operations.values().any(|op| {
+            op.kind == "update_all" || matches!(op.kind.as_str(), "install" | "update")
+        }) {
+            bail!("operation_in_progress: another setup is running");
+        }
+    }
+    operations.insert(
+        app_id.to_string(),
+        Operation {
+            app_id: app_id.to_string(),
+            kind: kind.to_string(),
+        },
+    );
+    clear_cancel(app_id);
     Ok(())
 }
 
-pub fn release(shared: &Shared) {
-    if let Ok(mut operation) = shared.operation.lock() {
-        *operation = None;
+pub fn release(shared: &Shared, app_id: &str) {
+    if let Ok(mut operations) = shared.operations.lock() {
+        operations.remove(app_id);
     }
-    CANCEL.store(false, Ordering::SeqCst);
+    clear_cancel(app_id);
 }
 
-pub fn cancel() {
-    CANCEL.store(true, Ordering::SeqCst);
+pub fn cancel(app_id: &str) {
+    let mut cancelled = CANCEL.lock().unwrap_or_else(|error| error.into_inner());
+    if !cancelled.iter().any(|id| id == app_id) {
+        cancelled.push(app_id.to_string());
+    }
 }
 
-fn check_cancel() -> Result<()> {
-    if CANCEL.load(Ordering::SeqCst) {
+fn clear_cancel(app_id: &str) {
+    let mut cancelled = CANCEL.lock().unwrap_or_else(|error| error.into_inner());
+    cancelled.retain(|id| id != app_id);
+}
+
+fn is_cancelled(app_id: &str) -> bool {
+    CANCEL
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .iter()
+        .any(|id| id == app_id)
+}
+
+fn check_cancel(app_id: &str) -> Result<()> {
+    if is_cancelled(app_id) {
         bail!("cancelled: operation cancelled");
     }
     Ok(())
@@ -590,7 +616,6 @@ pub fn setup(app: &AppHandle, shared: &Shared, id: &str, kind: SetupKind) -> Res
     let runtime = root.join("runtime");
     for sub in [
         "tmp",
-        "uv-cache",
         "mise-data",
         "mise-config",
         "mise-cache",
@@ -599,18 +624,24 @@ pub fn setup(app: &AppHandle, shared: &Shared, id: &str, kind: SetupKind) -> Res
     ] {
         fs::create_dir_all(runtime.join(sub))?;
     }
-    for sub in ["app", "user-data/roaming", "user-data/local", "runtime/tmp"] {
+    for sub in [
+        "app",
+        "user-data/roaming",
+        "user-data/local",
+        "runtime/tmp",
+        "runtime/uv-cache",
+    ] {
         fs::create_dir_all(app_dir.join(sub))?;
     }
     manifest::save_settings(&app_dir, &values)?;
     manifest::snapshot_manifest(&app_dir, &manifest)?;
-    check_cancel()?;
+    check_cancel(id)?;
 
     if !manifest.setup.tools.is_empty() {
         index += 1;
         step_begin(app, shared, id, index, total, "Writing mise.toml");
         write_mise_toml(&app_dir, &manifest)?;
-        check_cancel()?;
+        check_cancel(id)?;
 
         index += 1;
         step_begin(app, shared, id, index, total, "Installing tools");
@@ -940,7 +971,7 @@ fn apply_environment(
         .env("LOCALAPPDATA", user_data.join("local"))
         .env("TEMP", &temp)
         .env("TMP", &temp)
-        .env("UV_CACHE_DIR", runtime.join("uv-cache"))
+        .env("UV_CACHE_DIR", app_dir.join("runtime").join("uv-cache"))
         .env("MISE_DATA_DIR", runtime.join("mise-data"))
         .env("MISE_CONFIG_DIR", runtime.join("mise-config"))
         .env("MISE_CACHE_DIR", runtime.join("mise-cache"))
@@ -1000,7 +1031,7 @@ fn run_streaming(
         }));
     }
     let status = loop {
-        if CANCEL.load(Ordering::SeqCst) {
+        if is_cancelled(id) {
             let pid = child.id().to_string();
             let _ = Command::new("taskkill")
                 .args(["/PID", &pid, "/T", "/F"])
@@ -1093,7 +1124,7 @@ fn kill_child(shared: &Shared, id: &str) {
 pub fn start(app: &AppHandle, shared: &Arc<Shared>, id: &str) -> Result<()> {
     reserve(shared, id, "start")?;
     let result = start_inner(app, shared, id);
-    release(shared);
+    release(shared, id);
     result
 }
 
@@ -1221,7 +1252,7 @@ fn spawn_watcher(app: AppHandle, shared: Arc<Shared>, id: String) {
 pub fn stop(app: &AppHandle, shared: &Arc<Shared>, id: &str) -> Result<()> {
     reserve(shared, id, "stop")?;
     let result = stop_inner(app, shared, id);
-    release(shared);
+    release(shared, id);
     result
 }
 
@@ -1248,7 +1279,7 @@ pub fn remove(app: &AppHandle, shared: &Arc<Shared>, id: &str, confirm: &str) ->
     }
     reserve(shared, id, "remove")?;
     let result = remove_inner(app, shared, id);
-    release(shared);
+    release(shared, id);
     result
 }
 
@@ -1356,7 +1387,7 @@ pub fn set_active_tab(app: &AppHandle, shared: &Shared, id: Option<String>) -> R
 pub fn refresh_marketplace(app: &AppHandle, shared: &Arc<Shared>) -> Result<()> {
     reserve(shared, "", "marketplace")?;
     let result = refresh_inner(app, shared);
-    release(shared);
+    release(shared, "");
     emit_state(app, shared);
     result
 }
@@ -1432,7 +1463,7 @@ pub fn update_all(app: &AppHandle, shared: &Arc<Shared>) -> Result<()> {
             log(app, &id, format!("update failed: {error:#}"));
         }
     }
-    release(shared);
+    release(shared, "");
     emit_state(app, shared);
     Ok(())
 }

@@ -4,7 +4,7 @@ export const previewState: State = {
   settings: { root: "D:\\Portable\\Autark", folder_name: "Autark", force_local_mise: true, open_tabs: ["unsloth-studio", "cognee"], active_tab: "unsloth-studio" },
   settings_path: "D:\\Portable\\Autark\\launcher-settings.json", settings_exists: true,
   marketplace: { path: "D:\\Portable\\Autark\\marketplace", url: "https://github.com/verzly/autark-marketplace", exists: true, refreshing: false, last_refresh: 1794931200, error: null },
-  busy: false, operation: null,
+  busy: false, operations: [],
   apps: [
     { ...common, id: "unsloth-studio", name: "Unsloth Studio", description: "Local interface for fine-tuning and running language models.", version_installed: "1.2.3", version_latest: "1.2.4", update_available: true, installed: true, phase: "running", url: "http://127.0.0.1:8888", settings: { port: 8888, data_dir: "D:\\Portable\\Autark\\apps\\unsloth-studio\\data", hf_home: "D:\\models\\huggingface" }, settings_locked: [{ key: "hf_home", var: "HF_HOME", value: "D:\\models\\huggingface" }], settings_schema: [{ key: "port", label: "Port", kind: "port", default: 8888, help: "Local web interface port." }, { key: "data_dir", label: "Data folder", kind: "path", default: "" }, { key: "hf_home", label: "Hugging Face folder", kind: "path", default: "" }] },
     { ...common, id: "cognee", name: "Cognee", description: "Build and query a memory graph from your data.", version_installed: "0.4.1", version_latest: "0.4.1", update_available: false, installed: true, phase: "installed", url: null, license: "Apache-2.0" },

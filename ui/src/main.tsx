@@ -132,7 +132,7 @@ export default function App() {
     const id = app.id;
     void run(() => kind === "install" ? api.installApp(id, true) : kind === "update" ? api.updateApp(id, true) : kind === "start" ? api.startApp(id) : kind === "stop" ? api.stopApp(id) : kind === "open" ? api.openApp(id) : kind === "remove" ? api.removeApp(id, "REMOVE") : api.cancelOperation(id));
   };
-  const appBusy = (a: AppState) => busy() || working(a.phase);
+  const appBusy = (a: AppState) => working(a.phase) || state().operations.some(op => op.app_id === a.id);
   const changeRoot = async () => {
     try {
       const parent = mockMode() ? "D:\\Portable" : await api.pickDirectory("root_parent");
@@ -251,7 +251,7 @@ export default function App() {
         <footer class="about"><span>Autark <b>v{version()}</b></span><span>AGPL-3.0</span><button onClick={() => openUrl("https://github.com/verzly/autark")}>Source</button><button onClick={() => openUrl("https://github.com/verzly/autark-marketplace")}>Marketplace</button></footer>
       </section></Show>
       <Show when={chooser()}><section class="marketplace-view" onKeyDown={chooserKeys}>
-        <div class="marketplace-heading"><button class="back-button" onClick={hideChooser}>← back to homepage</button><div><span class="eyebrow">MARKETPLACE</span><h1>Add an app</h1></div><div class="marketplace-tools"><input ref={dialogInput} class="search" aria-label="Search marketplace apps" placeholder="Search apps..." value={search()} onInput={e => { setSearch(e.currentTarget.value); setSelected(0); }} /><button class="button" disabled={busy() || state().marketplace.refreshing} onClick={refresh}>{state().marketplace.refreshing ? "Refreshing..." : "Reload marketplace"}</button><Show when={state().marketplace.last_refresh}><small>Last refreshed {new Date(state().marketplace.last_refresh! * 1000).toLocaleString()}</small></Show></div></div>
+        <div class="marketplace-heading"><button class="back-button" onClick={hideChooser}>← back to homepage</button><div><span class="eyebrow">MARKETPLACE</span><h1>Add an app</h1></div><div class="marketplace-tools"><input ref={dialogInput} class="search" aria-label="Search marketplace apps" placeholder="Search apps..." value={search()} onInput={e => { setSearch(e.currentTarget.value); setSelected(0); }} /><button class="button" disabled={state().busy || state().marketplace.refreshing} onClick={refresh}>{state().marketplace.refreshing ? "Refreshing..." : "Reload marketplace"}</button><Show when={state().marketplace.last_refresh}><small>Last refreshed {new Date(state().marketplace.last_refresh! * 1000).toLocaleString()}</small></Show></div></div>
         <Show when={state().marketplace.error}><div class="error-banner">{state().marketplace.error?.message}</div></Show>
         <Show when={!state().marketplace.exists} fallback={<Show when={!state().marketplace.refreshing} fallback={<div class="marketplace-load">Refreshing marketplace...</div>}><Show when={available().length} fallback={<div class="marketplace-load">No apps match your search.</div>}><div class="marketplace-grid" role="list" aria-label="Marketplace apps"><For each={available()}>{(a, i) => {
           const opened = () => openIds().includes(a.id);
@@ -261,14 +261,14 @@ export default function App() {
             <div class="market-requirements"><Show when={a.requirements.disk_gb != null}><span>{a.requirements.disk_gb} GB disk</span></Show><Show when={a.requirements.webview2}><span>WebView2</span></Show></div>
             <div class="market-links"><Show when={a.license}><span>{a.license}</span></Show><Show when={a.homepage}><button onClick={() => openUrl(a.homepage!)}>Homepage ↗</button></Show></div>
             <Show when={a.installed} fallback={<div class="market-actions">
-              <button class="button market-view-action" disabled={busy() || working(a.phase)} onClick={() => openApp(a.id)}>View</button>
-              <button class="button primary market-action" disabled={busy() || working(a.phase)} onClick={() => installMarketplaceApp(a)}>Install</button>
+              <button class="button market-view-action" disabled={working(a.phase)} onClick={() => openApp(a.id)}>View</button>
+              <button class="button primary market-action" disabled={working(a.phase)} onClick={() => installMarketplaceApp(a)}>Install</button>
             </div>}>
-              <button class={`button market-action ${opened() ? "opened-action" : "primary"}`} disabled={busy() || (!opened() && working(a.phase))} onClick={() => opened() ? openApp(a.id) : activateMarketplaceApp(a)}>{opened() ? "Opened" : "Open"}</button>
+              <button class={`button market-action ${opened() ? "opened-action" : "primary"}`} disabled={!opened() && working(a.phase)} onClick={() => opened() ? openApp(a.id) : activateMarketplaceApp(a)}>{opened() ? "Opened" : "Open"}</button>
             </Show>
           </article>;
         }}</For></div></Show></Show>}>
-          <div class="marketplace-load"><p>{state().marketplace.refreshing ? "Refreshing marketplace..." : "Marketplace has not been loaded."}</p><button class="button primary" disabled={busy() || state().marketplace.refreshing} onClick={refresh}>Load marketplace</button></div>
+          <div class="marketplace-load"><p>{state().marketplace.refreshing ? "Refreshing marketplace..." : "Marketplace has not been loaded."}</p><button class="button primary" disabled={state().marketplace.refreshing} onClick={refresh}>Load marketplace</button></div>
         </Show>
       </section></Show>
       <Show when={!chooser() && !settingsOpen() && active() === AUTARK_TAB}><section class="empty-state"><div class="empty-mark">autark</div>
