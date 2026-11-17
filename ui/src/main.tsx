@@ -34,10 +34,10 @@ export default function App() {
   let output: HTMLDivElement | undefined;
   const currentApp = createMemo(() => state().apps.find(a => a.id === active()) ?? null);
   const openIds = () => state().settings.open_tabs;
-  const autarkVisible = () => active() === AUTARK_TAB || openIds().length === 0;
+  const [autarkTab, setAutarkTab] = createSignal(true);
   const available = createMemo(() => state().apps.filter(a => `${a.name} ${a.description} ${a.id}`.toLowerCase().includes(search().toLowerCase())));
   const showChooser = () => { setSettingsOpen(false); setActive(null); setChooser(true); setSearch(""); setSelected(0); };
-  const hideChooser = () => { setChooser(false); setActive(AUTARK_TAB); setSearch(""); setSelected(0); };
+  const hideChooser = () => { setChooser(false); setAutarkTab(true); setActive(AUTARK_TAB); setSearch(""); setSelected(0); };
 
   onMount(() => {
     let offState: (() => void) | undefined, offLog: (() => void) | undefined;
@@ -45,7 +45,7 @@ export default function App() {
     api.onState(s => { setState(s); setRequestError(""); }).then(f => offState = f);
     api.onLog(({ app_id, line }) => setBuffers(prev => ({ ...prev, [app_id]: [...(prev[app_id] ?? []), line].slice(-500) }))).then(f => offLog = f);
     const keys = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "t" && !e.altKey && !e.shiftKey && !(e.target instanceof HTMLElement && ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName))) { e.preventDefault(); setActive(AUTARK_TAB); setChooser(false); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "t" && !e.altKey && !e.shiftKey && !(e.target instanceof HTMLElement && ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName))) { e.preventDefault(); setAutarkTab(true); setActive(AUTARK_TAB); setChooser(false); return; }
       if (chooser()) chooserKeys(e);
     };
     window.addEventListener("keydown", keys);
@@ -84,6 +84,7 @@ export default function App() {
     }
     if (mockMode()) { setState(s => ({ ...s, settings: { ...s.settings, open_tabs: [...s.settings.open_tabs, id], active_tab: id } })); setActive(id); }
     else void run(() => api.openAppTab(id));
+    setAutarkTab(false);
     setChooser(false);
   };
   const closeTab = (id: string, event: MouseEvent) => {
@@ -92,11 +93,23 @@ export default function App() {
       const tabs = openIds().filter(x => x !== id), nextActive = active() === id ? tabs[tabs.length - 1] ?? AUTARK_TAB : active();
       setState(s => ({ ...s, settings: { ...s.settings, open_tabs: tabs, active_tab: nextActive === AUTARK_TAB ? null : nextActive } }));
       if (active() === id) { setActive(nextActive); setChooser(false); }
+      if (tabs.length === 0) { setAutarkTab(true); setActive(AUTARK_TAB); }
     } else void run(async () => {
       const next = await api.closeTab(id);
       if (active() === id) { const nextActive = next.settings.active_tab ?? AUTARK_TAB; setActive(nextActive); setChooser(false); }
+      if (next.settings.open_tabs.length === 0) { setAutarkTab(true); setActive(AUTARK_TAB); }
       return next;
     });
+  };
+  const closeAutarkTab = (event: MouseEvent) => {
+    event.stopPropagation();
+    setAutarkTab(false);
+    if (openIds().length === 0) { setAutarkTab(true); setActive(AUTARK_TAB); return; }
+    if (active() === AUTARK_TAB) {
+      const last = openIds()[openIds().length - 1];
+      setActive(last);
+      if (!mockMode()) void run(() => api.setActiveTab(last));
+    }
   };
   const action = (kind: "install" | "update" | "start" | "stop" | "open" | "remove" | "cancel", app: AppState) => {
     if (mockMode()) {
@@ -161,7 +174,9 @@ export default function App() {
     setChooser(false); setSettingsOpen(false);
     if (mockMode()) { openApp(a.id); action("install", a); return; }
     void run(async () => {
-      const opened = openIds().includes(a.id) ? await api.setActiveTab(a.id) : await api.openAppTab(a.id);
+      const wasOpen = openIds().includes(a.id);
+      const opened = wasOpen ? await api.setActiveTab(a.id) : await api.openAppTab(a.id);
+      if (!wasOpen) setAutarkTab(false);
       setState(opened); setActive(a.id);
       return api.installApp(a.id, true);
     });
@@ -182,9 +197,6 @@ export default function App() {
       }}><Icon name="menu" /></button>
       <button class={`add-tab marketplace-tab ${chooser() ? "selected" : ""}`} aria-label="Open marketplace" aria-pressed={chooser()} onClick={() => (chooser() ? hideChooser() : showChooser())}><Icon name="gridPlus" /></button>
       <div class="tabs" role="tablist" aria-label="Open apps">
-        <Show when={autarkVisible()}><button class={`tab autark-tab ${active() === AUTARK_TAB && !settingsOpen() ? "active" : ""}`} role="tab" aria-selected={active() === AUTARK_TAB && !settingsOpen()} onClick={() => selectTab(AUTARK_TAB)}>
-          <span class="autark-tab-mark" aria-hidden="true">a</span><span class="tab-name">Autark</span>
-        </button></Show>
         <For each={openIds()}>{id => {
           const app = () => state().apps.find(a => a.id === id);
           return <button class={`tab ${active() === id && !settingsOpen() ? "active" : ""}`} role="tab" aria-selected={active() === id && !settingsOpen()} onClick={() => selectTab(id)}>
@@ -193,8 +205,12 @@ export default function App() {
             <span class="tab-close" role="button" aria-label={`Close ${app()?.name ?? id}`} onClick={e => closeTab(id, e)}><Icon name="close" /></span>
           </button>;
         }}</For>
+        <Show when={autarkTab()}><button class={`tab autark-tab ${active() === AUTARK_TAB && !settingsOpen() ? "active" : ""}`} role="tab" aria-selected={active() === AUTARK_TAB && !settingsOpen()} onClick={() => selectTab(AUTARK_TAB)}>
+          <span class="autark-tab-mark" aria-hidden="true">a</span><span class="tab-name">Autark</span>
+          <span class="tab-close" role="button" aria-label="Close Autark" onClick={e => closeAutarkTab(e)}><Icon name="close" /></span>
+        </button></Show>
       </div>
-      <button class="add-tab" aria-label="New tab" onClick={() => { setActive(AUTARK_TAB); setChooser(false); setSettingsOpen(false); }}>+</button>
+      <Show when={!autarkTab()}><button class="add-tab" aria-label="New tab" onClick={() => { setAutarkTab(true); setActive(AUTARK_TAB); setChooser(false); setSettingsOpen(false); }}>+</button></Show>
       <div class="chrome-space" data-tauri-drag-region />
       <div class="window-controls">
         <button aria-label="Minimize" onClick={() => void windowAction("minimize")}><Icon name="min" /></button>
