@@ -1,0 +1,5 @@
+# esbuild ships prebuilt binaries, its postinstall script is optional.
+# pnpm 12 fails the install otherwise (ERR_PNPM_IGNORED_BUILDS) in CI.
+strictDepBuilds: false
+onlyBuiltDependencies:
+  - esbuild
