@@ -201,7 +201,7 @@ export default function App() {
               <Show when={logs().length} fallback={<span class="quiet">Operation output will appear here.</span>}><For each={logs()}>{line => <div class={`log ${lineTone(line)}`}>{line || "\u00a0"}</div>}</For></Show>
             </div><Show when={!follow() && logs().length}><button class="jump" onClick={() => { if (output) output.scrollTop = output.scrollHeight; setFollow(true); }}>Jump to latest</button></Show></div>
           </section>
-          <footer class="metadata"><button title={state().settings.root + "\\apps\\" + a().id} onClick={() => reveal("app", a().id)}>{state().settings.root}\\apps\\{a().id}</button><span>installed {a().version_installed ?? "—"}</span><code>{a().id}</code></footer>
+          <footer class="metadata"><button title={state().settings.root + "\\apps\\" + a().id} onClick={() => reveal("app", a().id)}>{`${state().settings.root}\\apps\\${a().id}`}</button><span>installed {a().version_installed ?? "—"}</span><code>{a().id}</code></footer>
         </section>;
       }}</Show>
     </main>
