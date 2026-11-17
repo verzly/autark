@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "ui/dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "pnpm --dir ui dev --port 5173 --strictPort",
-    "beforeBuildCommand": "pnpm --dir ui build"
+    "beforeDevCommand": { "cwd": "ui", "script": "pnpm dev --port 5173 --strictPort" },
+    "beforeBuildCommand": { "cwd": "ui", "script": "pnpm build" }
   },
   "app": {
     "windows": [
