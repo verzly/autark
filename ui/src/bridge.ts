@@ -47,6 +47,11 @@ export const api = {
   revealPath: (target: "root" | "marketplace" | "app" | "settings", app_id?: string) => invoke<void>("reveal_path", { target, ...(app_id ? { app_id } : {}) }),
   openUrl: (url: string) => invoke<void>("open_url", { url }),
   exitApp: () => invoke<void>("exit_app"),
+  onFocus: async (fn: (app_id: string | null) => void) => {
+    if (!isTauri()) return () => {};
+    const { listen } = await import("@tauri-apps/api/event");
+    return listen<string | null>("focus_app", event => fn(event.payload ?? null));
+  },
   onState: async (fn: (state: State) => void) => {
     if (!isTauri()) return () => {};
     const { listen } = await import("@tauri-apps/api/event");

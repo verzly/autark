@@ -11,7 +11,7 @@ use prefs::Prefs;
 use serde::Serialize;
 use settings::Settings;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, State as TauriState};
+use tauri::{AppHandle, Emitter, Manager, State as TauriState};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -532,6 +532,7 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             let args = parse_args(argv.into_iter());
             show_window(app);
+            let _ = app.emit("focus_app", args.app.clone());
             if let Some(id) = args.app {
                 if let Some(shared) = app.try_state::<Arc<Shared>>() {
                     let _ = apps::open_tab(app, &shared, &id);
