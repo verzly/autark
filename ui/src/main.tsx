@@ -5,7 +5,11 @@ import { previewLogs, previewState, previewVariants } from "./mock";
 
 type InlineAction = "install" | "reinstall" | "remove" | null;
 const working = (p: Phase) => ["installing", "starting", "stopping", "updating", "removing"].includes(p);
-const errText = (e: unknown) => e instanceof Error ? e.message : String(e);
+const errText = (e: unknown) => {
+  if (e instanceof Error) return e.message;
+  if (e && typeof e === "object" && "message" in e) return String((e as { message: unknown }).message);
+  return String(e);
+};
 const hue = (id: string) => { let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h) % 360; };
 const duration = (s: number) => `${Math.floor(s / 60)}m ${String(Math.floor(s % 60)).padStart(2, "0")}s`;
 const AUTARK_TAB = "__autark__";
@@ -268,7 +272,7 @@ export default function App() {
       </section></Show>
       <Show when={chooser()}><section class="marketplace-view" onKeyDown={chooserKeys}>
         <div class="marketplace-heading"><button class="back-button" onClick={hideChooser}>← back to homepage</button><div><span class="eyebrow">MARKETPLACE</span><h1>Add an app</h1></div><div class="marketplace-tools"><input ref={dialogInput} class="search" aria-label="Search marketplace apps" placeholder="Search apps..." value={search()} onInput={e => { setSearch(e.currentTarget.value); setSelected(0); }} /><button class="button" disabled={state().busy || state().marketplace.refreshing} onClick={refresh}>{state().marketplace.refreshing ? "Refreshing..." : "Reload marketplace"}</button><Show when={state().marketplace.last_refresh}><small>Last refreshed {new Date(state().marketplace.last_refresh! * 1000).toLocaleString()}</small></Show></div></div>
-        <Show when={state().marketplace.error}><div class="error-banner">{state().marketplace.error?.message}</div></Show>
+
         <Show when={!state().marketplace.exists} fallback={<Show when={!state().marketplace.refreshing} fallback={<div class="marketplace-load">Refreshing marketplace...</div>}><Show when={available().length} fallback={<div class="marketplace-load">No apps match your search.</div>}><div class="marketplace-grid" role="list" aria-label="Marketplace apps"><For each={available()}>{(a, i) => {
           const opened = () => openIds().includes(a.id);
           return <article role="listitem" class={`market-card ${opened() ? "market-opened" : ""} ${selected() === i() ? "market-selected" : ""}`} onMouseEnter={() => setSelected(i())}>
@@ -309,8 +313,6 @@ export default function App() {
           <div class="app-header"><div class="app-title"><span class="badge large" style={{ "--hue": hue(a().id) }}><Show when={a().icon_data} fallback={a().id[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><div><h1>{a().name}</h1><div class="version-line">{a().version_app ? `app ${a().version_app}` : "app version unknown"} · recipe {a().version_installed ?? "not installed"}<Show when={a().update_available}> · latest recipe {a().version_latest ?? "unknown"} <span class="update-pill">update</span></Show></div></div></div>
             <div class="links"><Show when={a().homepage}><button onClick={() => openUrl(a().homepage!)}>Homepage ↗</button></Show><Show when={a().license}><span>{a().license}</span></Show></div></div>
           <div class="status-line"><span class={`dot ${p()}`} /><Show when={working(p())}><span class="progress"><i /></span></Show><span class="phase-label">{a().step ? `(${a().step?.index}/${a().step?.total}) ${a().step?.name}` : p().replace("_", " ")}</span><Show when={working(p()) && elapsed() != null}><span class="elapsed">run {duration(elapsed()!)}</span></Show></div>
-          <Show when={a().last_error}><div class="error-banner">{a().last_error?.message}</div></Show>
-          <Show when={requestError()}><div class="error-banner">{requestError()}</div></Show>
           <div class="actions">
             <button class="button primary" disabled={busyApp() || (a().installed && !a().update_available)} onClick={() => setPanel("install")}>{a().installed ? "Update" : "Install"}</button>
             <button class="button" disabled={!canStart()} onClick={() => action("start", a())}>Start</button>
@@ -330,7 +332,6 @@ export default function App() {
           <section class="app-settings-page">
             <button class="back-button" onClick={() => setAppSettingsOpen(null)}>← back to app</button>
             <div class="view-heading"><div><span class="eyebrow">{a().name.toUpperCase()}</span><h1>Settings</h1></div><Show when={dirty(a())}><button class="button primary" disabled={busyApp()} onClick={() => saveDraft(a())}>Save</button></Show></div>
-            <Show when={requestError()}><div class="error-banner">{requestError()}</div></Show>
             <Show when={a().settings_schema.length} fallback={<p class="quiet">No app settings.</p>}>
               <div class="fields"><For each={a().settings_schema}>{field => <SettingField app={a()} field={field} value={draftValue(a(), field.key)} lock={a().settings_locked.find(lock => lock.key === field.key)} setValue={value => setDraftValue(a(), field.key, value)} choose={() => void chooseFolder(a(), field)} />}</For></div>
             </Show>
@@ -353,6 +354,13 @@ export default function App() {
         </Show>;
       }}</Show>
     </main>
+    <Show when={requestError() || currentApp()?.last_error || state().marketplace.error}>
+      <div class="toasts">
+        <Show when={requestError()}><div class="toast error-banner" role="alert">{requestError()}</div></Show>
+        <Show when={currentApp()?.last_error}>{err => <div class="toast error-banner" role="alert">{err().message}</div>}</Show>
+        <Show when={state().marketplace.error}>{err => <div class="toast error-banner" role="alert">{err().message}</div>}</Show>
+      </div>
+    </Show>
   </div>;
 }
 
