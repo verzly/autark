@@ -222,6 +222,37 @@ async fn update_app(
 }
 
 #[tauri::command(rename_all = "snake_case")]
+async fn reinstall_app(
+    app: AppHandle,
+    shared: TauriState<'_, Arc<Shared>>,
+    app_id: String,
+    approve_effects: bool,
+) -> CmdResult<State> {
+    if !approve_effects {
+        return Err(CmdError::new(
+            "approval_required",
+            "confirm the reinstall before it changes anything",
+        ));
+    }
+    let inner = shared.inner().clone();
+    if !is_installed(&inner, &app_id) {
+        return Err(CmdError::new("invalid_argument", "the app is not installed"));
+    }
+    apps::reserve(&inner, &app_id, "reinstall")?;
+    let task = inner.clone();
+    let handle = app.clone();
+    let id = app_id.clone();
+    let joined = tauri::async_runtime::spawn_blocking(move || {
+        apps::install(&handle, &task, &id, SetupKind::Update)
+    })
+    .await
+    .map_err(|error| CmdError::new("internal", error.to_string()));
+    apps::release(&inner, &app_id);
+    joined??;
+    Ok(apps::wire(&inner))
+}
+
+#[tauri::command(rename_all = "snake_case")]
 async fn update_all(
     app: AppHandle,
     shared: TauriState<'_, Arc<Shared>>,
@@ -397,6 +428,7 @@ fn main() {
             check_updates,
             install_app,
             update_app,
+            reinstall_app,
             update_all,
             start_app,
             stop_app,

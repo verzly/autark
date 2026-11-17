@@ -33,6 +33,7 @@ export const api = {
   checkUpdates: () => invoke<State>("check_updates"),
   installApp: (app_id: string, approve_effects: boolean) => invoke<State>("install_app", { app_id, approve_effects }),
   updateApp: (app_id: string, approve_effects: boolean) => invoke<State>("update_app", { app_id, approve_effects }),
+  reinstallApp: (app_id: string, approve_effects: boolean) => invoke<State>("reinstall_app", { app_id, approve_effects }),
   updateAll: (approve_effects: boolean) => invoke<State>("update_all", { approve_effects }),
   startApp: (app_id: string) => invoke<State>("start_app", { app_id }),
   stopApp: (app_id: string) => invoke<State>("stop_app", { app_id }),

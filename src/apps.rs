@@ -1245,7 +1245,7 @@ fn spawn_watcher(app: AppHandle, shared: Arc<Shared>, id: String) {
                     record.last_error = Some(ErrorInfo::new(
                         "start_failed",
                         format!(
-                            "the app exited on its own ({status}). Run Update to repair the installation."
+                            "the app exited on its own ({status}). Reinstall it from the app settings."
                         ),
                     ));
                 }
