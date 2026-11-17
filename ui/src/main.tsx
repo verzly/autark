@@ -18,7 +18,6 @@ export default function App() {
   const [appSettingsOpen, setAppSettingsOpen] = createSignal<string | null>(null);
   const [chooser, setChooser] = createSignal(false);
   const [chooserReturn, setChooserReturn] = createSignal<string | null>(null);
-  const [installConfirm, setInstallConfirm] = createSignal<string | null>(null);
   const [search, setSearch] = createSignal("");
   const [selected, setSelected] = createSignal(0);
   const [panel, setPanel] = createSignal<InlineAction>(null);
@@ -36,8 +35,8 @@ export default function App() {
   const currentApp = createMemo(() => state().apps.find(a => a.id === active()) ?? null);
   const openIds = () => state().settings.open_tabs;
   const available = createMemo(() => state().apps.filter(a => `${a.name} ${a.description} ${a.id}`.toLowerCase().includes(search().toLowerCase())));
-  const showChooser = () => { setSettingsOpen(false); setChooser(true); setSearch(""); setSelected(0); setInstallConfirm(null); };
-  const hideChooser = () => { setChooser(false); setSearch(""); setSelected(0); };
+  const showChooser = () => { setSettingsOpen(false); setActive(null); setChooser(true); setSearch(""); setSelected(0); };
+  const hideChooser = () => { setChooser(false); setActive(AUTARK_TAB); setSearch(""); setSelected(0); };
 
   onMount(() => {
     let offState: (() => void) | undefined, offLog: (() => void) | undefined;
@@ -154,10 +153,17 @@ export default function App() {
     if (e.key === "Enter" && available()[selected()]) activateMarketplaceApp(available()[selected()]);
   };
   const activateMarketplaceApp = (a: AppState) => {
-    if (openIds().includes(a.id)) openApp(a.id);
-    else if (a.installed) openApp(a.id);
-    else if (installConfirm() === a.id) { setInstallConfirm(null); if (mockMode()) setState(s => ({ ...s, apps: s.apps.map(x => x.id === a.id ? { ...x, installed: true, phase: "installed" } : x) })); else void run(() => api.installApp(a.id, true)); }
-    else setInstallConfirm(a.id);
+    if (a.installed) openApp(a.id);
+    else installMarketplaceApp(a);
+  };
+  const installMarketplaceApp = (a: AppState) => {
+    setChooser(false); setSettingsOpen(false);
+    if (mockMode()) { openApp(a.id); action("install", a); return; }
+    void run(async () => {
+      const opened = openIds().includes(a.id) ? await api.setActiveTab(a.id) : await api.openAppTab(a.id);
+      setState(opened); setActive(a.id);
+      return api.installApp(a.id, true);
+    });
   };
 
   return <div class="app">
@@ -221,14 +227,27 @@ export default function App() {
             <p class="market-description">{a.description}</p><div class="market-versions"><span>Installed <b>{a.version_installed ?? "not installed"}</b></span><span>Marketplace <b>{a.version_latest ?? "unknown"}</b></span></div>
             <div class="market-requirements"><Show when={a.requirements.disk_gb != null}><span>{a.requirements.disk_gb} GB disk</span></Show><Show when={a.requirements.webview2}><span>WebView2</span></Show></div>
             <div class="market-links"><Show when={a.license}><span>{a.license}</span></Show><Show when={a.homepage}><button onClick={() => openUrl(a.homepage!)}>Homepage ↗</button></Show></div>
-            <Show when={installConfirm() === a.id}><div class="market-confirm"><p>Setup may install system components through mise and requires network access.</p><button class="button" onClick={() => setInstallConfirm(null)}>Cancel</button></div></Show>
-            <button class={`button market-action ${opened() ? "opened-action" : "primary"}`} disabled={busy() || (!opened() && working(a.phase))} onClick={() => opened() ? openApp(a.id) : activateMarketplaceApp(a)}>{opened() ? "Opened" : a.installed ? "Open" : installConfirm() === a.id ? "Confirm install" : "Install"}</button>
+            <Show when={a.installed} fallback={<div class="market-actions">
+              <button class="button market-view-action" disabled={busy() || working(a.phase)} onClick={() => openApp(a.id)}>View</button>
+              <button class="button primary market-action" disabled={busy() || working(a.phase)} onClick={() => installMarketplaceApp(a)}>Install</button>
+            </div>}>
+              <button class={`button market-action ${opened() ? "opened-action" : "primary"}`} disabled={busy() || (!opened() && working(a.phase))} onClick={() => opened() ? openApp(a.id) : activateMarketplaceApp(a)}>{opened() ? "Opened" : "Open"}</button>
+            </Show>
           </article>;
         }}</For></div></Show></Show>}>
           <div class="marketplace-load"><p>{state().marketplace.refreshing ? "Refreshing marketplace..." : "Marketplace has not been loaded."}</p><button class="button primary" disabled={busy() || state().marketplace.refreshing} onClick={refresh}>Load marketplace</button></div>
         </Show>
       </section></Show>
-      <Show when={!chooser() && !settingsOpen() && !currentApp()}><section class="empty-state"><div class="empty-mark">autark</div><p>Apps you install live in tabs here.</p><button class="button primary" onClick={showChooser}>Add an app</button></section></Show>
+      <Show when={!chooser() && !settingsOpen() && active() === AUTARK_TAB}><section class="empty-state"><div class="empty-mark">autark</div>
+        <div class="landing-app-list" role="list" aria-label="Installed apps">
+          <Show when={state().apps.some(a => a.installed)} fallback={<p class="landing-empty" role="listitem">No apps are installed yet.</p>}>
+            <For each={state().apps.filter(a => a.installed)}>{a => <button class="landing-app-row" role="listitem" onClick={() => openApp(a.id)}>
+              <span class="badge" style={{ "--hue": hue(a.id) }}><Show when={a.icon_data} fallback={a.id[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><span>{a.name}</span><Show when={a.installed}><small>Installed</small></Show>
+            </button>}</For>
+          </Show>
+          <button class="landing-app-row landing-marketplace-action" role="listitem" onClick={showChooser}>Go to marketplace</button>
+        </div>
+      </section></Show>
       <Show when={!chooser() && !settingsOpen() && currentApp()}>{app => {
         const a = () => app();
         const p = () => a().phase;
