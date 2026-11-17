@@ -54,7 +54,7 @@ export default function App() {
   });
   const [version, setVersion] = createSignal("dev");
   createEffect(() => { if (chooser()) queueMicrotask(() => dialogInput?.focus()); });
-  createEffect(() => { if (output && follow()) output.scrollTop = output.scrollHeight; });
+  createEffect(() => { logs(); if (output && follow()) output.scrollTop = output.scrollHeight; });
   createEffect(() => {
     const app = currentApp();
     if (!app || !working(app.phase)) return;
@@ -63,6 +63,16 @@ export default function App() {
     onCleanup(() => window.clearInterval(id));
   });
   const logs = () => buffers()[active() ?? ""] ?? [];
+  const logEntries = () => {
+    const lines = logs();
+    return lines.flatMap((line, index) => {
+      const notice = lineTone(line) === "tone-error" || lineTone(line) === "tone-warning" || /\btip\b/i.test(line);
+      const previous = lines[index - 1] ?? "";
+      const previousNotice = lineTone(previous) === "tone-error" || lineTone(previous) === "tone-warning" || /\btip\b/i.test(previous);
+      const spacer = index > 0 && (/^\$ /.test(line) || notice || previousNotice);
+      return [...(spacer ? [{ id: `${index}-spacer`, line: "", spacer: true }] : []), { id: `${index}-line`, line, spacer: false }];
+    });
+  };
   const run = async (fn: () => Promise<State | void>) => {
     if (mockMode()) return;
     setBusy(true); setRequestError("");
@@ -296,7 +306,7 @@ export default function App() {
           <Show when={panel() === "install"}><div class="inline-panel"><p>Setup may install system components through mise and requires network access.</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={confirmInstall}>Confirm</button></div></div></Show>
           <section class="output-section"><div class="output-head"><h2>Output</h2><button onClick={() => { setBuffers(b => ({ ...b, [a().id]: [] })); setFollow(true); }}>Clear</button></div>
             <div class="output-wrap"><div class="output" ref={output} onScroll={() => output && setFollow(output.scrollHeight - output.scrollTop - output.clientHeight < 24)}>
-              <Show when={logs().length} fallback={<span class="quiet">Operation output will appear here.</span>}><For each={logs()}>{line => <div class={`log ${lineTone(line)}`}>{line || "\u00a0"}</div>}</For></Show>
+              <Show when={logs().length} fallback={<span class="quiet">Operation output will appear here.</span>}><For each={logEntries()}>{entry => <div class={entry.spacer ? "log-spacer" : `log ${lineTone(entry.line)}`} aria-hidden={entry.spacer || undefined}>{entry.spacer ? "\u00a0" : entry.line || "\u00a0"}</div>}</For></Show>
             </div><Show when={!follow() && logs().length}><button class="jump" onClick={() => { if (output) output.scrollTop = output.scrollHeight; setFollow(true); }}>Jump to latest</button></Show></div>
           </section>
           <footer class="metadata"><button title={state().settings.root + "\\apps\\" + a().id} onClick={() => reveal("app", a().id)}>{`${state().settings.root}\\apps\\${a().id}`}</button><span>{a().version_app ? `app ${a().version_app}` : "app version unknown"}</span><span>recipe {a().version_installed ?? "not installed"}</span><code>{a().id}</code></footer>

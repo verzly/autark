@@ -35,5 +35,9 @@
 .dialog{border:1px solid #303030}.metadata,.view-heading,.setting-row,.updates,.update-table,.update-row,.uninstall-section{border-top:0;border-bottom:0}.setting-row{padding-block:13px}.updates{padding-block:16px}.update-table{display:grid;gap:2px;background:transparent}.update-head,.update-row{border:0;border-radius:4px}.update-row{background:#121212}.update-head{background:#191919}
 .badge img{display:block;width:100%;height:100%;border-radius:inherit;object-fit:contain}.settings-view{gap:24px}.settings-view .view-heading{padding:2px 0 0;border:0}.setting-row{gap:8px;padding:0;background:transparent}.setting-row>div{display:flex;flex-direction:column;align-items:flex-start;gap:5px}.setting-row p{line-height:1.5}.setting-row .button{margin-top:5px}.updates{gap:10px;padding:0;background:transparent}.update-table{gap:3px}.update-app{padding:9px 10px;border-radius:0;background:#121212}.update-app:nth-child(even){background:#171717}.update-head{padding:7px 10px;background:transparent}.settings-view .about{margin-top:8px;padding:0}.app-settings-page{width:min(100%,720px);gap:24px}.app-settings-page .view-heading{align-items:flex-start}.app-settings-page .fields{grid-template-columns:1fr;gap:18px;margin-top:0}.uninstall-section{margin-top:0;padding:0}.uninstall-section p{line-height:1.5}
 .field input.locked{background:#171717;color:#8d8d8d;cursor:not-allowed}.setting-lock-note{color:#777!important;font-size:10px!important}
-.settings-view{width:min(100%,720px);margin:0 auto}
-.marketplace-view .back-button{justify-self:end}
+.settings-view,.app-settings-page{flex:1 1 auto;width:100%;max-width:768px;margin:0}
+.marketplace-view .back-button{grid-column:1/-1;grid-row:1;justify-self:start}
+.marketplace-heading{grid-template-rows:auto auto}
+.marketplace-heading>div:nth-child(2){grid-row:2}
+.marketplace-heading .marketplace-tools{grid-column:2;grid-row:2}
+*{scrollbar-width:thin;scrollbar-color:#2a2a2a transparent}*::-webkit-scrollbar{width:9px;height:9px}*::-webkit-scrollbar-track{background:transparent}*::-webkit-scrollbar-thumb{border:2px solid transparent;border-radius:999px;background:#2a2a2a;background-clip:padding-box}*::-webkit-scrollbar-thumb:hover{background:#3a3a3a;background-clip:padding-box}*::-webkit-scrollbar-button{display:none}
