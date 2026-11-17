@@ -143,6 +143,16 @@ export default function App() {
       else await run(() => api.saveSettings(settings));
     } catch (e) { setRequestError(errText(e)); }
   };
+  const setGlobalPref = (key: "tray_enabled" | "start_with_windows" | "close_to_tray", next: boolean) => {
+    const settings = { ...state().settings, [key]: next };
+    if (mockMode()) setState(s => ({ ...s, settings }));
+    else void run(() => api.saveSettings(settings, false));
+  };
+  const setAppPref = (app: AppState, key: keyof AppState["prefs"], next: boolean) => {
+    const prefs = { ...app.prefs, [key]: next };
+    if (mockMode()) setState(s => ({ ...s, apps: s.apps.map(a => a.id === app.id ? { ...a, prefs } : a) }));
+    else void run(() => api.saveAppPrefs(app.id, prefs));
+  };
   const saveDraft = (app: AppState) => {
     const settings = Object.fromEntries(Object.entries(drafts()[app.id] ?? app.settings).filter(([key]) => !app.settings_locked.some(lock => lock.key === key)));
     if (mockMode()) setState(s => ({ ...s, apps: s.apps.map(a => a.id === app.id ? { ...a, settings } : a) }));
@@ -238,8 +248,13 @@ export default function App() {
         <button class="back-button" onClick={() => { const target = settingsReturn() ?? AUTARK_TAB; setSettingsOpen(false); setActive(target); setChooser(false); setAppSettingsOpen(null); }}>← back to homepage</button>
         <div class="view-heading"><div><span class="eyebrow">AUTARK</span><h1>Settings</h1></div></div>
         <section class="setting-row"><div><h2>Root folder</h2><p>Apps and managed tools live here.</p><button class="path" onClick={() => reveal("root")}>{state().settings.root}</button></div><button class="button" disabled={state().busy} onClick={() => void changeRoot()}>Change</button></section>
-        <section class="setting-row"><div><h2>Settings file</h2><p>Portable launcher preferences.</p><button class="path" onClick={() => reveal("settings")}>{state().settings_path}</button></div></section>
-        <section class="setting-row"><div><h2>Marketplace</h2><p>{state().marketplace.exists ? <button class="path" onClick={() => reveal("marketplace")}>{state().marketplace.path}</button> : "Marketplace has not been loaded."}</p><Show when={state().marketplace.last_refresh}><small>Last refreshed {new Date(state().marketplace.last_refresh! * 1000).toLocaleString()}</small></Show></div><button class="button" disabled={state().busy} onClick={refresh}>{state().marketplace.exists ? "Reload marketplace" : "Load marketplace"}</button></section>
+         <section class="setting-row"><div><h2>Settings file</h2><p>Portable launcher preferences.</p><button class="path" onClick={() => reveal("settings")}>{state().settings_path}</button></div></section>
+         <section class="preference-section window-preferences"><h2>Window</h2>
+           <section class="setting-row"><label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.tray_enabled} onChange={e => setGlobalPref("tray_enabled", e.currentTarget.checked)} /><span><b>Tray icon</b><small>Keep Autark in the notification area.</small></span></label></section>
+           <section class="setting-row"><label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.start_with_windows} disabled={!state().settings.tray_enabled} onChange={e => setGlobalPref("start_with_windows", e.currentTarget.checked)} /><span><b>Start with Windows</b><small>Starts hidden in the tray when you sign in.</small><Show when={!state().settings.tray_enabled}><small class="preference-note">Needs the tray icon.</small></Show></span></label></section>
+           <section class="setting-row"><label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.close_to_tray} disabled={!state().settings.tray_enabled} onChange={e => setGlobalPref("close_to_tray", e.currentTarget.checked)} /><span><b>Close to tray</b><small>The X button hides the window instead of quitting.</small><Show when={!state().settings.tray_enabled}><small class="preference-note">Needs the tray icon.</small></Show></span></label></section>
+         </section>
+         <section class="setting-row"><div><h2>Marketplace</h2><p>{state().marketplace.exists ? <button class="path" onClick={() => reveal("marketplace")}>{state().marketplace.path}</button> : "Marketplace has not been loaded."}</p><Show when={state().marketplace.last_refresh}><small>Last refreshed {new Date(state().marketplace.last_refresh! * 1000).toLocaleString()}</small></Show></div><button class="button" disabled={state().busy} onClick={refresh}>{state().marketplace.exists ? "Reload marketplace" : "Load marketplace"}</button></section>
         <section class="setting-row"><div><h2>Updates</h2><p>Check marketplace versions manually.</p></div><button class="button" disabled={state().busy} onClick={() => mockMode() ? undefined : void run(() => api.checkUpdates())}>Check for updates</button></section>
         <section class="updates"><h2>Update all</h2><p>Running apps stop during updates and cannot be used until each update finishes.</p>
           <div class="update-table">
@@ -318,6 +333,12 @@ export default function App() {
             <Show when={a().settings_schema.length} fallback={<p class="quiet">No app settings.</p>}>
               <div class="fields"><For each={a().settings_schema}>{field => <SettingField app={a()} field={field} value={draftValue(a(), field.key)} lock={a().settings_locked.find(lock => lock.key === field.key)} setValue={value => setDraftValue(a(), field.key, value)} choose={() => void chooseFolder(a(), field)} />}</For></div>
             </Show>
+            <section class="preference-section"><h2>Shortcut</h2><p>A desktop shortcut that opens this app in Autark.</p>
+              <button class="button" disabled={busyApp() || !a().installed} onClick={() => { if (!mockMode()) void run(() => api.createShortcut(a().id)); }}>Create shortcut</button>
+              <label class="preference-toggle"><input type="checkbox" role="switch" checked={a().prefs.shortcut_autostart} onChange={e => setAppPref(a(), "shortcut_autostart", e.currentTarget.checked)} /><span><b>Also start the app</b></span></label>
+              <label class="preference-toggle"><input type="checkbox" role="switch" checked={a().prefs.shortcut_background} onChange={e => setAppPref(a(), "shortcut_background", e.currentTarget.checked)} /><span><b>Run hidden in the background</b></span></label>
+            </section>
+            <section class="preference-section"><h2>Startup</h2><label class="preference-toggle"><input type="checkbox" role="switch" checked={a().prefs.auto_start} onChange={e => setAppPref(a(), "auto_start", e.currentTarget.checked)} /><span><b>Start when Autark starts</b></span></label></section>
             <section class="uninstall-section"><h2>Reinstall app</h2><p>Runs the full setup again with the current recipe. Settings and user data are preserved.</p>
               <Show when={panel() !== "reinstall"}><button class="button" disabled={busyApp() || !a().installed} onClick={() => setPanel("reinstall")}>Reinstall</button></Show>
               <Show when={panel() === "reinstall"}><div class="inline-panel"><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={() => { setPanel(null); action("reinstall", a()); }}>Reinstall</button></div></div></Show>

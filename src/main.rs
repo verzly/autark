@@ -3,13 +3,40 @@
 mod apps;
 mod manifest;
 mod marketplace;
+mod prefs;
 mod settings;
 
 use apps::{Phase, SetupKind, Shared, State};
+use prefs::Prefs;
 use serde::Serialize;
 use settings::Settings;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, State as TauriState};
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+};
+use std::sync::OnceLock;
+
+static ARGS: OnceLock<LaunchArgs> = OnceLock::new();
+static TRAY_ID: &str = "autark-tray";
+
+#[derive(Default, Clone)]
+struct LaunchArgs { app: Option<String>, start: bool, background: bool }
+
+fn parse_args(args: impl Iterator<Item = String>) -> LaunchArgs {
+    let mut parsed = LaunchArgs::default();
+    let mut args = args.skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--app" => parsed.app = args.next(),
+            "--start" => parsed.start = true,
+            "--background" => parsed.background = true,
+            _ => {}
+        }
+    }
+    parsed
+}
 
 #[derive(Debug, Serialize)]
 struct CmdError {
@@ -86,6 +113,8 @@ fn save_settings(
     settings.apply_folder_name(move_folder.unwrap_or(false))?;
     settings.save()?;
     apps::reload_settings(&shared, settings)?;
+    reconcile_tray(&app, &apps::wire(&shared).settings);
+    apply_startup(&app, &apps::wire(&shared).settings);
     apps::emit_state(&app, &shared);
     Ok(apps::wire(&shared))
 }
@@ -348,6 +377,82 @@ fn save_app_settings(
 }
 
 #[tauri::command(rename_all = "snake_case")]
+fn save_app_prefs(app: AppHandle, shared: TauriState<'_, Arc<Shared>>, app_id: String, prefs: Prefs) -> CmdResult<State> {
+    apps::save_app_prefs(&app, &shared, &app_id, prefs)?;
+    Ok(apps::wire(&shared))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+fn create_shortcut(app: AppHandle, shared: TauriState<'_, Arc<Shared>>, app_id: String) -> CmdResult<State> {
+    let record = apps::app_record(&shared, &app_id)?;
+    let exe = std::env::current_exe().map_err(|e| CmdError::new("internal", e.to_string()))?;
+    let root = shared.root();
+    let app_dir = manifest::app_dir(&root, &app_id);
+    let shortcut_icon = app_dir.join("shortcut.ico");
+    let icon = record.manifest.icon_path(&record.manifest_dir);
+    let icon_script = icon.map(|path| format!(
+        "$bitmap = [System.Drawing.Image]::FromFile('{}'); $handle = $bitmap.GetHicon(); $icon = [System.Drawing.Icon]::FromHandle($handle); $stream = [System.IO.File]::Create('{}'); $icon.Save($stream); $stream.Close(); $bitmap.Dispose();",
+        ps_quote(&path), ps_quote(&shortcut_icon.to_string_lossy())
+    )).unwrap_or_default();
+    let mut args = format!("--app {}", ps_quote(&app_id));
+    if record.prefs.shortcut_autostart { args.push_str(" --start"); }
+    if record.prefs.shortcut_background { args.push_str(" --background"); }
+    let script = format!(
+        "$ErrorActionPreference='Stop'; $desktop=[Environment]::GetFolderPath('Desktop'); {icon_script} $s=(New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $desktop '{}.lnk')); $s.TargetPath='{}'; $s.Arguments='{}'; $s.IconLocation='{}'; $s.Save(); Write-Output $s.FullName",
+        ps_quote(&record.manifest.name), ps_quote(&exe.to_string_lossy()), ps_quote(&args),
+        ps_quote(&if shortcut_icon.exists() { shortcut_icon.to_string_lossy().to_string() } else { exe.to_string_lossy().to_string() })
+    );
+    let output = std::process::Command::new("powershell").args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script]).output()
+        .map_err(|e| CmdError::new("invalid_argument", e.to_string()))?;
+    if !output.status.success() { return Err(CmdError::new("invalid_argument", String::from_utf8_lossy(&output.stderr).to_string())); }
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    apps::log(&app, &app_id, format!("shortcut created at {path}"));
+    Ok(apps::wire(&shared))
+}
+
+fn ps_quote(value: &str) -> String { value.replace('\'', "''") }
+
+fn show_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") { let _ = window.show(); let _ = window.set_focus(); }
+}
+
+fn reconcile_tray(app: &AppHandle, settings: &Settings) {
+    if !settings.tray_enabled {
+        let _ = app.remove_tray_by_id(TRAY_ID);
+        return;
+    }
+    if app.tray_by_id(TRAY_ID).is_some() { return; }
+    let show = MenuItem::with_id(app, "show", "Show Autark", true, None::<&str>).unwrap();
+    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>).unwrap();
+    let menu = Menu::with_items(app, &[&show, &quit]).unwrap();
+    let handle = app.clone();
+    let mut builder = TrayIconBuilder::with_id(TRAY_ID).tooltip("Autark").menu(&menu)
+        .on_menu_event(move |app, event| match event.id().as_ref() {
+            "show" => show_window(app),
+            "quit" => { if let Some(shared) = app.try_state::<Arc<Shared>>() { apps::stop_all(&shared); } app.exit(0); },
+            _ => {}
+        })
+        .on_tray_icon_event(move |tray, event| {
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event { show_window(tray.app_handle()); }
+        });
+    if let Some(icon) = app.default_window_icon() { builder = builder.icon(icon.clone()); }
+    let _ = builder.build(app);
+    let _ = handle;
+}
+
+fn apply_startup(_app: &AppHandle, settings: &Settings) {
+    let mut command = std::process::Command::new("reg");
+    if settings.start_with_windows && settings.tray_enabled {
+        if let Ok(exe) = std::env::current_exe() {
+            let value = format!("\"{}\" --background", exe.display());
+            let _ = command.args(["add", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "Autark", "/t", "REG_SZ", "/d", &value, "/f"]).status();
+        }
+    } else {
+        let _ = command.args(["delete", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "Autark", "/f"]).status();
+    }
+}
+
+#[tauri::command(rename_all = "snake_case")]
 fn cancel_operation(
     app: AppHandle,
     shared: TauriState<'_, Arc<Shared>>,
@@ -414,7 +519,25 @@ fn exit_app(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> CmdResult<()
 }
 
 fn main() {
+    let args = parse_args(std::env::args());
+    let _ = ARGS.set(args.clone());
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            let args = parse_args(argv.into_iter());
+            show_window(app);
+            if let Some(id) = args.app {
+                if let Some(shared) = app.try_state::<Arc<Shared>>() {
+                    let _ = apps::open_tab(app, &shared, &id);
+                    if args.start {
+                        let shared = shared.inner().clone();
+                        let handle = app.clone();
+                        tauri::async_runtime::spawn_blocking(move || {
+                            if let Err(error) = apps::start(&handle, &shared, &id) { apps::log(&handle, &id, format!("start failed: {error:#}")); }
+                        });
+                    }
+                }
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .manage(Arc::new(Shared::new()))
         .invoke_handler(tauri::generate_handler![
@@ -435,6 +558,8 @@ fn main() {
             open_app,
             remove_app,
             save_app_settings,
+            save_app_prefs,
+            create_shortcut,
             cancel_operation,
             reveal_path,
             open_url,
@@ -442,11 +567,43 @@ fn main() {
         ])
         .setup(|app| {
             let handle = app.handle().clone();
+            let settings = apps::wire(&app.state::<Arc<Shared>>()).settings;
+            reconcile_tray(&handle, &settings);
+            apply_startup(&handle, &settings);
+            let args = ARGS.get().cloned().unwrap_or_default();
+            if args.background && settings.tray_enabled {
+                if let Some(window) = app.get_webview_window("main") { let _ = window.hide(); }
+            }
+            if let Some(id) = args.app.clone() {
+                let _ = apps::open_tab(&handle, &app.state::<Arc<Shared>>(), &id);
+                if args.start {
+                    let shared = app.state::<Arc<Shared>>().inner().clone();
+                    let handle = handle.clone();
+                    tauri::async_runtime::spawn_blocking(move || {
+                        if let Err(error) = apps::start(&handle, &shared, &id) { apps::log(&handle, &id, format!("start failed: {error:#}")); }
+                    });
+                }
+            } else {
+                let state = apps::wire(&app.state::<Arc<Shared>>());
+                for record in state.apps.into_iter().filter(|item| item.prefs.auto_start && item.installed && item.phase != Phase::Running) {
+                    let shared = app.state::<Arc<Shared>>().inner().clone();
+                    let handle = handle.clone();
+                    tauri::async_runtime::spawn_blocking(move || {
+                        if let Err(error) = apps::start(&handle, &shared, &record.id) { apps::log(&handle, &record.id, format!("auto-start failed: {error:#}")); }
+                    });
+                }
+            }
             if let Some(window) = app.get_webview_window("main") {
                 let handle = handle.clone();
                 window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { .. } = event {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         if let Some(shared) = handle.try_state::<Arc<Shared>>() {
+                            let settings = apps::wire(&shared).settings;
+                            if settings.close_to_tray && settings.tray_enabled {
+                                api.prevent_close();
+                                if let Some(window) = handle.get_webview_window("main") { let _ = window.hide(); }
+                                return;
+                            }
                             apps::stop_all(&shared);
                         }
                         handle.exit(0);

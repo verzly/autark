@@ -1,4 +1,5 @@
 use crate::{
+    prefs::{self, Prefs},
     manifest::{self, AppSetting, Manifest, Requirements},
     marketplace,
     settings::{self, Settings},
@@ -104,6 +105,7 @@ pub struct AppState {
     pub installed: bool,
     pub phase: Phase,
     pub settings: Map<String, Value>,
+    pub prefs: Prefs,
     pub settings_schema: Vec<AppSetting>,
     /// Settings the machine environment owns, with the value that wins.
     pub settings_locked: Vec<SettingsLock>,
@@ -149,6 +151,7 @@ pub struct AppRecord {
     pub manifest: Manifest,
     pub manifest_dir: PathBuf,
     pub settings: Map<String, Value>,
+    pub prefs: Prefs,
     pub installed_version: Option<String>,
     pub app_version: Option<String>,
     pub version_latest: Option<String>,
@@ -166,6 +169,7 @@ impl AppRecord {
         let app_dir = manifest::app_dir(root, &manifest.id);
         let installed_record = manifest::read_installed(&app_dir);
         let values = manifest::load_settings(&app_dir, &manifest);
+        let prefs = prefs::load(&app_dir);
         let check = manifest
             .setup
             .installed_check
@@ -195,6 +199,7 @@ impl AppRecord {
             step: None,
             started_at: None,
             settings: values,
+            prefs,
             manifest_dir: manifest_dir.to_path_buf(),
             icon_data,
             manifest,
@@ -224,6 +229,7 @@ impl AppRecord {
             installed: self.installed,
             phase: self.phase,
             settings: self.settings.clone(),
+            prefs: self.prefs.clone(),
             settings_schema: self.manifest.settings.clone(),
             settings_locked: settings_locks(&self.manifest),
             url: self.url.clone(),
@@ -1348,6 +1354,18 @@ pub fn save_app_settings(
     manifest::save_settings(&app_dir, &clean)?;
     mutate(app, shared, id, |record| record.settings = clean);
     Ok(())
+}
+
+pub fn save_app_prefs(app: &AppHandle, shared: &Shared, id: &str, prefs: Prefs) -> Result<()> {
+    find_record(shared, id)?;
+    let app_dir = manifest::app_dir(&shared.root(), id);
+    prefs::save(&app_dir, &prefs)?;
+    mutate(app, shared, id, |record| record.prefs = prefs);
+    Ok(())
+}
+
+pub fn app_record(shared: &Shared, id: &str) -> Result<AppRecord> {
+    find_record(shared, id)
 }
 
 pub fn open_tab(app: &AppHandle, shared: &Shared, id: &str) -> Result<()> {

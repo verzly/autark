@@ -18,6 +18,9 @@ pub struct Settings {
     pub open_tabs: Vec<String>,
     pub active_tab: Option<String>,
     pub marketplace_last_refresh: Option<u64>,
+    pub tray_enabled: bool,
+    pub start_with_windows: bool,
+    pub close_to_tray: bool,
 }
 
 impl Default for Settings {
@@ -29,6 +32,9 @@ impl Default for Settings {
             open_tabs: Vec::new(),
             active_tab: None,
             marketplace_last_refresh: None,
+            tray_enabled: false,
+            start_with_windows: false,
+            close_to_tray: false,
         }
     }
 }

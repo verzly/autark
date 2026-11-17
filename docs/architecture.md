@@ -13,6 +13,7 @@ apps that are described by the marketplace (see `docs/marketplace-v1.md`). Autar
 <root>/apps/<id>/app.json            manifest snapshot copied at install time
 <root>/apps/<id>/installed.json      { "version": "recipe", "app_version": "real", "installed_at": 0 }
 <root>/apps/<id>/settings.json       per-app user settings
+<root>/apps/<id>/launcher.json       launcher preferences (auto-start and shortcut flags)
 <root>/apps/<id>/mise.toml           generated from setup.tools
 <root>/apps/<id>/source/             upstream git source (optional)
 <root>/apps/<id>/user-data/          app HOME/APPDATA sandbox, survives removal
@@ -74,6 +75,8 @@ Commands (`invoke`, snake_case args):
 | `open_app` | `app_id` | `State` |
 | `remove_app` | `app_id`, `confirm: string` | `State` |
 | `save_app_settings` | `app_id`, `settings: Record<string, unknown>` | `State` |
+| `save_app_prefs` | `app_id`, `prefs` | `State` |
+| `create_shortcut` | `app_id` | `State` |
 | `cancel_operation` | `app_id` | `State` |
 | `reveal_path` | `target: "root" \| "marketplace" \| "app" \| "settings"`, `app_id?` | — |
 | `open_url` | `url` | — |
@@ -97,6 +100,9 @@ interface Settings {
   force_local_mise: boolean;
   open_tabs: string[];          // app ids, tab strip order
   active_tab: string | null;
+  tray_enabled: boolean;
+  start_with_windows: boolean;
+  close_to_tray: boolean;
 }
 
 interface AppSetting { key: string; label: string; kind: "text" | "number" | "port" | "boolean" | "path"; default: unknown; help?: string | null }
@@ -110,6 +116,7 @@ interface AppState {
   installed: boolean;
   phase: Phase;
   settings: Record<string, unknown>;
+  prefs: { auto_start: boolean; shortcut_autostart: boolean; shortcut_background: boolean };
   settings_schema: AppSetting[];
   url: string | null;            // running app URL, else null
   homepage: string | null;
@@ -153,7 +160,9 @@ interface State {
   marketplace" instead of a crash.
 - The `+` chooser lists installed apps first, then marketplace apps; a marketplace app that is not installed
   gets a tab with the Install action.
-- Closing the window stops every child process and exits.
+- Closing hides to tray only when `close_to_tray` and `tray_enabled` are both true; otherwise it stops every child and exits.
+- Tray can show/focus Autark or stop all children and quit. `start_with_windows` adds an HKCU Run entry only when tray is enabled; this is Autark's only registry write.
+- CLI accepts `--app <id>`, `--start`, and `--background`. Shortcuts launch Autark with these flags from per-app preferences.
 
 ## UI contract
 

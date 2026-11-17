@@ -1,10 +1,11 @@
 export type Phase = "not_installed" | "installing" | "installed" | "starting" | "running" | "stopping" | "updating" | "removing" | "failed";
-export interface Settings { root: string; folder_name: string; force_local_mise: boolean; open_tabs: string[]; active_tab: string | null }
+export interface Settings { root: string; folder_name: string; force_local_mise: boolean; open_tabs: string[]; active_tab: string | null; tray_enabled: boolean; start_with_windows: boolean; close_to_tray: boolean }
 export interface AppSetting { key: string; label: string; kind: "text" | "number" | "port" | "boolean" | "path"; default: unknown; help?: string | null }
 export interface SettingsLock { key: string; var: string; value: string }
+export interface AppPrefs { auto_start: boolean; shortcut_autostart: boolean; shortcut_background: boolean }
 export interface AppState {
   id: string; name: string; description: string; version_installed: string | null; version_app: string | null; version_latest: string | null;
-   update_available: boolean; installed: boolean; phase: Phase; settings: Record<string, unknown>; settings_schema: AppSetting[]; settings_locked: SettingsLock[];
+    update_available: boolean; installed: boolean; phase: Phase; settings: Record<string, unknown>; settings_schema: AppSetting[]; settings_locked: SettingsLock[]; prefs: AppPrefs;
    url: string | null; homepage: string | null; license: string | null; icon_path: string | null; icon_data: string | null;
   requirements: { disk_gb: number | null; webview2: boolean };
   last_error: { code: string; message: string } | null; step: { index: number; total: number; name: string } | null;
@@ -40,6 +41,8 @@ export const api = {
   openApp: (app_id: string) => invoke<State>("open_app", { app_id }),
   removeApp: (app_id: string, confirm: string) => invoke<State>("remove_app", { app_id, confirm }),
   saveAppSettings: (app_id: string, settings: Record<string, unknown>) => invoke<State>("save_app_settings", { app_id, settings }),
+  saveAppPrefs: (app_id: string, prefs: AppState["prefs"]) => invoke<State>("save_app_prefs", { app_id, prefs }),
+  createShortcut: (app_id: string) => invoke<State>("create_shortcut", { app_id }),
   cancelOperation: (app_id: string) => invoke<State>("cancel_operation", { app_id }),
   revealPath: (target: "root" | "marketplace" | "app" | "settings", app_id?: string) => invoke<void>("reveal_path", { target, ...(app_id ? { app_id } : {}) }),
   openUrl: (url: string) => invoke<void>("open_url", { url }),
