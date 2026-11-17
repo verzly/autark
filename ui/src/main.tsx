@@ -339,7 +339,7 @@ export default function App() {
             </Show>
             <section class="preference-section"><h2>Shortcut</h2><p>A desktop shortcut that opens this app in Autark.</p>
               <button class="button" disabled={busyApp() || !a().installed || shortcutBusy().includes(a().id)} onClick={() => { if (shortcutBusy().includes(a().id)) return; if (mockMode()) { setShortcutDone(ids => [...ids, a().id]); return; } setShortcutBusy(ids => [...ids, a().id]); void run(async () => { try { const next = await api.createShortcut(a().id); setShortcutDone(ids => ids.includes(a().id) ? ids : [...ids, a().id]); return next; } finally { setShortcutBusy(ids => ids.filter(x => x !== a().id)); } }); }}>Create shortcut</button>
-              <Show when={shortcutDone().includes(a().id)}><small class="preference-note">Shortcut created on the desktop. Change the options and create it again to overwrite it.</small></Show>
+              <Show when={shortcutDone().includes(a().id)}><small class="preference-note">Shortcut created on the desktop. The start options apply every time you open it.</small></Show>
               <label class="preference-toggle"><input type="checkbox" role="switch" checked={a().prefs.shortcut_autostart} onChange={e => setAppPref(a(), "shortcut_autostart", e.currentTarget.checked)} /><span><b>Also start the app</b></span></label>
               <label class="preference-toggle"><input type="checkbox" role="switch" checked={a().prefs.shortcut_background} onChange={e => setAppPref(a(), "shortcut_background", e.currentTarget.checked)} /><span><b>Run hidden in the background</b></span></label>
             </section>

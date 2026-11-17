@@ -22,7 +22,7 @@ static ARGS: OnceLock<LaunchArgs> = OnceLock::new();
 static TRAY_ID: &str = "autark-tray";
 
 #[derive(Default, Clone)]
-struct LaunchArgs { app: Option<String>, start: bool, background: bool }
+struct LaunchArgs { app: Option<String>, start: bool, background: bool, shortcut: bool }
 
 fn parse_args(args: impl Iterator<Item = String>) -> LaunchArgs {
     let mut parsed = LaunchArgs::default();
@@ -32,10 +32,23 @@ fn parse_args(args: impl Iterator<Item = String>) -> LaunchArgs {
             "--app" => parsed.app = args.next(),
             "--start" => parsed.start = true,
             "--background" => parsed.background = true,
+            "--shortcut" => parsed.shortcut = true,
             _ => {}
         }
     }
     parsed
+}
+
+/// A shortcut only points at the app; the start/background options come from the live prefs.
+fn resolve_launch(mut args: LaunchArgs, root: &std::path::Path) -> LaunchArgs {
+    if args.shortcut {
+        if let Some(id) = args.app.clone() {
+            let prefs = prefs::load(&manifest::app_dir(root, &id));
+            args.start = prefs.shortcut_autostart;
+            args.background = prefs.shortcut_background;
+        }
+    }
+    args
 }
 
 #[derive(Debug, Serialize)]
@@ -401,9 +414,7 @@ fn create_shortcut(app: AppHandle, shared: TauriState<'_, Arc<Shared>>, app_id: 
         "Add-Type -AssemblyName System.Drawing; $bitmap = [System.Drawing.Image]::FromFile('{}'); $handle = $bitmap.GetHicon(); $icon = [System.Drawing.Icon]::FromHandle($handle); $stream = [System.IO.File]::Create('{}'); $icon.Save($stream); $stream.Close(); $bitmap.Dispose();",
         ps_quote(&path), ps_quote(&shortcut_icon.to_string_lossy())
     )).unwrap_or_default();
-    let mut args = format!("--app {}", ps_quote(&app_id));
-    if record.prefs.shortcut_autostart { args.push_str(" --start"); }
-    if record.prefs.shortcut_background { args.push_str(" --background"); }
+    let args = format!("--app {} --shortcut", ps_quote(&app_id));
     let script = format!(
         "$ErrorActionPreference='Stop'; $desktop=[Environment]::GetFolderPath('Desktop'); {icon_script} $s=(New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $desktop '{}.lnk')); $s.TargetPath='{}'; $s.Arguments='{}'; $s.IconLocation='{}'; $s.Save(); Write-Output $s.FullName",
         ps_quote(&record.manifest.name), ps_quote(&exe.to_string_lossy()), ps_quote(&args),
@@ -530,7 +541,10 @@ fn main() {
     let _ = ARGS.set(args.clone());
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            let args = parse_args(argv.into_iter());
+            let mut args = parse_args(argv.into_iter());
+            if let Some(shared) = app.try_state::<Arc<Shared>>() {
+                args = resolve_launch(args, &shared.root());
+            }
             show_window(app);
             let _ = app.emit("focus_app", args.app.clone());
             if let Some(id) = args.app {
@@ -578,7 +592,7 @@ fn main() {
             let settings = apps::wire(&app.state::<Arc<Shared>>()).settings;
             reconcile_tray(&handle, &settings);
             apply_startup(&handle, &settings);
-            let args = ARGS.get().cloned().unwrap_or_default();
+            let args = resolve_launch(ARGS.get().cloned().unwrap_or_default(), &app.state::<Arc<Shared>>().root());
             if args.background && settings.tray_enabled {
                 if let Some(window) = app.get_webview_window("main") { let _ = window.hide(); }
             }
