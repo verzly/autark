@@ -1168,6 +1168,13 @@ fn start_inner(app: &AppHandle, shared: &Arc<Shared>, id: &str) -> Result<()> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
+    let mut echo = program.clone();
+    if !args.is_empty() {
+        echo.push(' ');
+        echo.push_str(&args.join(" "));
+    }
+    log(app, id, format!("$ {echo}"));
+
     set_phase(app, shared, id, Phase::Starting);
     let mut child = command
         .spawn()
