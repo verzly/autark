@@ -13,6 +13,7 @@ export default function App() {
   const [state, setState] = createSignal<State>(previewState);
   const [active, setActive] = createSignal<string | null>(previewState.settings.active_tab);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
+  const [appSettingsOpen, setAppSettingsOpen] = createSignal<string | null>(null);
   const [chooser, setChooser] = createSignal(false);
   const [search, setSearch] = createSignal("");
   const [selected, setSelected] = createSignal(0);
@@ -30,7 +31,7 @@ export default function App() {
   let output: HTMLDivElement | undefined;
   const currentApp = createMemo(() => state().apps.find(a => a.id === active()) ?? null);
   const openIds = () => state().settings.open_tabs;
-  const available = createMemo(() => state().apps.filter(a => !openIds().includes(a.id)).filter(a => `${a.name} ${a.description} ${a.id}`.toLowerCase().includes(search().toLowerCase())));
+  const available = createMemo(() => state().apps.filter(a => `${a.name} ${a.description} ${a.id}`.toLowerCase().includes(search().toLowerCase())));
 
   onMount(() => {
     let offState: (() => void) | undefined, offLog: (() => void) | undefined;
@@ -63,6 +64,11 @@ export default function App() {
     if (!mockMode()) void run(() => api.setActiveTab(id));
   };
   const openApp = (id: string) => {
+    if (openIds().includes(id)) {
+      selectTab(id);
+      setChooser(false); setSearch(""); setSelected(0);
+      return;
+    }
     if (mockMode()) { setState(s => ({ ...s, settings: { ...s.settings, open_tabs: [...s.settings.open_tabs, id], active_tab: id } })); setActive(id); }
     else void run(() => api.openAppTab(id));
     setChooser(false); setSearch(""); setSelected(0);
@@ -130,7 +136,7 @@ export default function App() {
 
   return <div class="app">
     <header class="chrome" data-tauri-drag-region>
-      <button class={`gear ${settingsOpen() ? "selected" : ""}`} aria-label="Settings" aria-pressed={settingsOpen()} onClick={() => { setSettingsOpen(true); setActive(null); }}><Icon name="gear" /></button>
+      <button class={`gear ${settingsOpen() ? "selected" : ""}`} aria-label="Settings" aria-pressed={settingsOpen()} onClick={() => { setSettingsOpen(true); setAppSettingsOpen(null); setActive(null); }}><Icon name="menu" /></button>
       <div class="tabs" role="tablist" aria-label="Open apps">
         <For each={openIds()}>{id => {
           const app = () => state().apps.find(a => a.id === id);
@@ -141,7 +147,7 @@ export default function App() {
           </button>;
         }}</For>
       </div>
-      <button class="add-tab" aria-label="Add an app" onClick={() => { setChooser(true); setSearch(""); setSelected(0); }}>+</button>
+      <button class="add-tab" aria-label="Add an app" onClick={() => { setChooser(true); setSearch(""); setSelected(0); }}><Icon name="gridPlus" /></button>
       <div class="chrome-space" data-tauri-drag-region />
       <div class="window-controls">
         <button aria-label="Minimize" onClick={() => void windowAction("minimize")}><Icon name="min" /></button>
@@ -174,35 +180,41 @@ export default function App() {
         const canStart = () => !busyApp() && a().installed && p() === "installed";
         const canStop = () => !busyApp() && (p() === "running" || p() === "starting");
         const confirmInstall = () => { setPanel(null); action(a().installed ? "update" : "install", a()); };
-        return <section class="app-view">
-          <div class="app-header"><div class="app-title"><span class="badge large" style={{ "--hue": hue(a().id) }}>{a().id[0]?.toUpperCase()}</span><div><h1>{a().name}</h1><div class="version-line">{a().version_app ? `app ${a().version_app}` : "app version unknown"}{a().version_installed ? ` · recipe ${a().version_installed}` : ""}<Show when={a().update_available}> · latest recipe {a().version_latest} <span class="update-pill">update</span></Show></div></div></div>
+        return <Show when={appSettingsOpen() === a().id} fallback={<section class="app-view">
+          <div class="app-header"><div class="app-title"><span class="badge large" style={{ "--hue": hue(a().id) }}>{a().id[0]?.toUpperCase()}</span><div><h1>{a().name}</h1><div class="version-line">{a().version_app ? `app ${a().version_app}` : "app version unknown"} · recipe {a().version_installed ?? "not installed"}<Show when={a().update_available}> · latest recipe {a().version_latest ?? "unknown"} <span class="update-pill">update</span></Show></div></div></div>
             <div class="links"><Show when={a().homepage}><button onClick={() => openUrl(a().homepage!)}>Homepage ↗</button></Show><Show when={a().license}><span>{a().license}</span></Show></div></div>
           <div class="status-line"><span class={`dot ${p()}`} /><Show when={working(p())}><span class="progress"><i /></span></Show><span class="phase-label">{a().step ? `(${a().step?.index}/${a().step?.total}) ${a().step?.name}` : p().replace("_", " ")}</span><Show when={working(p()) && elapsed() != null}><span class="elapsed">run {duration(elapsed()!)}</span></Show></div>
           <Show when={a().last_error}><div class="error-banner">{a().last_error?.message}</div></Show>
           <Show when={requestError()}><div class="error-banner">{requestError()}</div></Show>
           <div class="actions">
-            <button class="button primary" disabled={busyApp() || a().installed} onClick={() => setPanel("install")}>Install</button>
-            <button class="button primary" disabled={busyApp() || !a().update_available} onClick={() => setPanel("install")}>Update</button>
+            <button class="button primary" disabled={busyApp() || (a().installed && !a().update_available)} onClick={() => setPanel("install")}>{a().installed ? "update" : "install"}</button>
             <button class="button" disabled={!canStart()} onClick={() => action("start", a())}>Start</button>
             <button class="button" disabled={!canStop()} onClick={() => action("stop", a())}>Stop</button>
             <button class="button" disabled={busyApp() || !a().url} onClick={() => action("open", a())}>Open</button>
-            <button class="button danger-quiet" disabled={busyApp() || !a().installed} onClick={() => { setRemoveText(""); setPanel("remove"); }}>Remove</button>
+            <button class="button" aria-label={`${a().name} settings`} onClick={() => { setPanel(null); setAppSettingsOpen(a().id); }}><Icon name="menu" /> Settings</button>
             <Show when={working(p())}><button class="button" onClick={() => action("cancel", a())}>Cancel operation</button></Show>
           </div>
           <Show when={panel() === "install"}><div class="inline-panel"><p>Setup may install system components through mise and requires network access.</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={confirmInstall}>Confirm</button></div></div></Show>
-          <Show when={panel() === "remove"}><div class="inline-panel remove-panel"><label>Type REMOVE<input value={removeText()} onInput={e => setRemoveText(e.currentTarget.value)} /></label><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button danger" disabled={busyApp() || removeText() !== "REMOVE"} onClick={() => { setPanel(null); action("remove", a()); }}>Remove</button></div></div></Show>
-          <section class="app-settings"><div class="section-head"><h2>Settings</h2><Show when={dirty(a())}><button class="button primary" disabled={busyApp()} onClick={() => saveDraft(a())}>Save</button></Show></div>
-            <Show when={a().settings_schema.length} fallback={<p class="quiet">No app settings.</p>}>
-              <div class="fields"><For each={a().settings_schema}>{field => <SettingField app={a()} field={field} value={draftValue(a(), field.key)} setValue={value => setDraftValue(a(), field.key, value)} choose={() => void chooseFolder(a(), field)} />}</For></div>
-            </Show>
-          </section>
           <section class="output-section"><div class="output-head"><h2>Output</h2><button onClick={() => { setBuffers(b => ({ ...b, [a().id]: [] })); setFollow(true); }}>Clear</button></div>
             <div class="output-wrap"><div class="output" ref={output} onScroll={() => output && setFollow(output.scrollHeight - output.scrollTop - output.clientHeight < 24)}>
               <Show when={logs().length} fallback={<span class="quiet">Operation output will appear here.</span>}><For each={logs()}>{line => <div class={`log ${lineTone(line)}`}>{line || "\u00a0"}</div>}</For></Show>
             </div><Show when={!follow() && logs().length}><button class="jump" onClick={() => { if (output) output.scrollTop = output.scrollHeight; setFollow(true); }}>Jump to latest</button></Show></div>
           </section>
           <footer class="metadata"><button title={state().settings.root + "\\apps\\" + a().id} onClick={() => reveal("app", a().id)}>{`${state().settings.root}\\apps\\${a().id}`}</button><span>{a().version_app ? `app ${a().version_app}` : "app version unknown"}</span><span>recipe {a().version_installed ?? "not installed"}</span><code>{a().id}</code></footer>
-        </section>;
+        </section>}>
+          <section class="app-settings-page">
+            <button class="back-button" onClick={() => setAppSettingsOpen(null)}>← back to app</button>
+            <div class="view-heading"><div><span class="eyebrow">{a().name.toUpperCase()}</span><h1>Settings</h1></div><Show when={dirty(a())}><button class="button primary" disabled={busyApp()} onClick={() => saveDraft(a())}>Save</button></Show></div>
+            <Show when={requestError()}><div class="error-banner">{requestError()}</div></Show>
+            <Show when={a().settings_schema.length} fallback={<p class="quiet">No app settings.</p>}>
+              <div class="fields"><For each={a().settings_schema}>{field => <SettingField app={a()} field={field} value={draftValue(a(), field.key)} setValue={value => setDraftValue(a(), field.key, value)} choose={() => void chooseFolder(a(), field)} />}</For></div>
+            </Show>
+            <section class="uninstall-section"><h2>Uninstall app</h2><p>Remove this app from the launcher. User data and settings are preserved.</p>
+              <Show when={panel() !== "remove"}><button class="button danger-quiet" disabled={busyApp() || !a().installed} onClick={() => { setRemoveText(""); setPanel("remove"); }}>Uninstall</button></Show>
+              <Show when={panel() === "remove"}><div class="inline-panel remove-panel"><label>Type REMOVE<input value={removeText()} onInput={e => setRemoveText(e.currentTarget.value)} /></label><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button danger" disabled={busyApp() || removeText() !== "REMOVE"} onClick={() => { setPanel(null); action("remove", a()); }}>Remove</button></div></div></Show>
+            </section>
+          </section>
+        </Show>;
       }}</Show>
     </main>
     <Show when={chooser()}><div class="backdrop" onClick={() => setChooser(false)}><section class="dialog" role="dialog" aria-modal="true" aria-labelledby="chooser-title" onClick={e => e.stopPropagation()} onKeyDown={chooserKeys}>
@@ -210,13 +222,13 @@ export default function App() {
       <input ref={dialogInput} class="search" placeholder="Search apps…" value={search()} onInput={e => { setSearch(e.currentTarget.value); setSelected(0); }} />
       <Show when={!state().marketplace.exists} fallback={
         <div class="chooser-list">
-          <h3>Installed</h3><For each={available().filter(a => a.installed)}>{(a, i) => <Choice app={a} index={i()} selected={selected() === i()} disabled={busy()} onClick={() => openApp(a.id)} />}</For>
+          <h3>Installed</h3><For each={available().filter(a => a.installed)}>{(a, i) => <Choice app={a} index={i()} selected={selected() === i()} opened={openIds().includes(a.id)} disabled={busy()} onClick={() => openApp(a.id)} />}</For>
           <div class="group-heading"><h3>Marketplace</h3><button onClick={refresh} disabled={busy() || state().marketplace.refreshing}>Reload marketplace</button></div>
           <Show when={state().marketplace.last_refresh}><small class="refresh-time">Last refreshed {new Date(state().marketplace.last_refresh! * 1000).toLocaleString()}</small></Show>
           <Show when={state().marketplace.error}><p class="market-error">{state().marketplace.error?.message}</p></Show>
           <For each={available().filter(a => !a.installed)}>{(a, i) => {
             const index = () => available().filter(x => x.installed).length + i();
-            return <Choice app={a} index={index()} selected={selected() === index()} disabled={busy()} onClick={() => openApp(a.id)} />;
+            return <Choice app={a} index={index()} selected={selected() === index()} opened={openIds().includes(a.id)} disabled={busy()} onClick={() => openApp(a.id)} />;
           }}</For>
           <Show when={!available().length}><p class="quiet no-results">No apps match your search.</p></Show>
         </div>
@@ -230,12 +242,12 @@ function SettingField(props: { app: AppState; field: AppSetting; value: unknown;
     <div class="field-control"><input type={props.field.kind === "number" || props.field.kind === "port" ? "number" : "text"} value={String(props.value ?? props.field.default ?? "")} onInput={e => props.setValue(props.field.kind === "number" || props.field.kind === "port" ? Number(e.currentTarget.value) : e.currentTarget.value)} /><Show when={props.field.kind === "path"}><button class="button" disabled={props.field.key !== "root"} onClick={props.choose}>Choose</button></Show></div>
   }><input type="checkbox" role="switch" checked={Boolean(props.value ?? props.field.default)} onChange={e => props.setValue(e.currentTarget.checked)} /></Show><Show when={props.field.help}><small>{props.field.help}</small></Show></label>;
 }
-function Choice(props: { app: AppState; index: number; selected: boolean; disabled: boolean; onClick: () => void }) {
-  return <button class={`choice ${props.selected ? "choice-selected" : ""}`} disabled={props.disabled || working(props.app.phase)} aria-selected={props.selected} onMouseEnter={() => {}} onClick={props.onClick}><span class="badge" style={{ "--hue": hue(props.app.id) }}>{props.app.id[0]?.toUpperCase()}</span><span class="choice-copy"><b>{props.app.name}</b><small>{props.app.description}</small><small class="choice-version">{props.app.version_latest ? `v${props.app.version_latest}` : "version unavailable"}</small></span><span class="chevron">›</span></button>;
+function Choice(props: { app: AppState; index: number; selected: boolean; opened: boolean; disabled: boolean; onClick: () => void }) {
+  return <button class={`choice ${props.selected ? "choice-selected" : ""} ${props.opened ? "choice-opened" : ""}`} disabled={props.disabled || (!props.opened && working(props.app.phase))} aria-selected={props.selected} onMouseEnter={() => {}} onClick={props.onClick}><span class="badge" style={{ "--hue": hue(props.app.id) }}>{props.app.id[0]?.toUpperCase()}</span><span class="choice-copy"><b>{props.app.name}</b><small>{props.app.description}</small><small class="choice-version">{props.app.version_latest ? `v${props.app.version_latest}` : "version unavailable"}</small></span><Show when={props.opened}><span class="opened-label">Opened</span></Show><span class="chevron">›</span></button>;
 }
 function lineTone(line: string) {
   return /error|failed|fatal|stopped/i.test(line) ? "tone-error" : /warning|warn/i.test(line) ? "tone-warning" : /installed|complete|ready/i.test(line) ? "tone-success" : /downloading|extracting|^\s*\d+%/i.test(line) ? "tone-dim" : "";
 }
-function Icon(props: { name: "gear" | "close" | "min" | "max" }) {
-  return <svg viewBox="0 0 16 16" aria-hidden="true">{props.name === "gear" ? <><circle cx="8" cy="8" r="2.5" /><path d="M8 1.5v1.2m0 10.6v1.2M1.5 8h1.2m10.6 0h1.2M3.4 3.4l.9.9m7.4 7.4.9.9m0-9.2-.9.9m-7.4 7.4-.9.9" /></> : props.name === "close" ? <path d="m4 4 8 8m0-8-8 8" /> : props.name === "min" ? <path d="M3 8h10" /> : <rect x="3.2" y="3.2" width="9.6" height="9.6" rx="1" />}</svg>;
+function Icon(props: { name: "menu" | "gridPlus" | "close" | "min" | "max" }) {
+  return <svg viewBox="0 0 16 16" aria-hidden="true">{props.name === "menu" ? <path d="M2 4h12M2 8h12M2 12h12" /> : props.name === "gridPlus" ? <><rect x="1.5" y="1.5" width="5" height="5" rx="1" /><rect x="9.5" y="1.5" width="5" height="5" rx="1" /><rect x="1.5" y="9.5" width="5" height="5" rx="1" /><path d="M12 9v5m-2.5-2.5h5" /></> : props.name === "close" ? <path d="m4 4 8 8m0-8-8 8" /> : props.name === "min" ? <path d="M3 8h10" /> : <rect x="3.2" y="3.2" width="9.6" height="9.6" rx="1" />}</svg>;
 }
