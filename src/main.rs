@@ -391,7 +391,7 @@ fn create_shortcut(app: AppHandle, shared: TauriState<'_, Arc<Shared>>, app_id: 
     let shortcut_icon = app_dir.join("shortcut.ico");
     let icon = record.manifest.icon_path(&record.manifest_dir);
     let icon_script = icon.map(|path| format!(
-        "$bitmap = [System.Drawing.Image]::FromFile('{}'); $handle = $bitmap.GetHicon(); $icon = [System.Drawing.Icon]::FromHandle($handle); $stream = [System.IO.File]::Create('{}'); $icon.Save($stream); $stream.Close(); $bitmap.Dispose();",
+        "Add-Type -AssemblyName System.Drawing; $bitmap = [System.Drawing.Image]::FromFile('{}'); $handle = $bitmap.GetHicon(); $icon = [System.Drawing.Icon]::FromHandle($handle); $stream = [System.IO.File]::Create('{}'); $icon.Save($stream); $stream.Close(); $bitmap.Dispose();",
         ps_quote(&path), ps_quote(&shortcut_icon.to_string_lossy())
     )).unwrap_or_default();
     let mut args = format!("--app {}", ps_quote(&app_id));
