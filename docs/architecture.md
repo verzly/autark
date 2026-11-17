@@ -11,7 +11,7 @@ apps that are described by the marketplace (see `docs/marketplace-v1.md`). Autar
 <root>/marketplace/                  git clone of verzly/autark-marketplace
 <root>/runtime/mise-data|mise-config|mise-cache|mise-state|tmp|uv-cache|bin
 <root>/apps/<id>/app.json            manifest snapshot copied at install time
-<root>/apps/<id>/installed.json      { "version": "...", "installed_at": 0 }
+<root>/apps/<id>/installed.json      { "version": "recipe", "app_version": "real", "installed_at": 0 }
 <root>/apps/<id>/settings.json       per-app user settings
 <root>/apps/<id>/mise.toml           generated from setup.tools
 <root>/apps/<id>/source/             upstream git source (optional)
@@ -103,8 +103,9 @@ interface AppSetting { key: string; label: string; kind: "text" | "number" | "po
 
 interface AppState {
   id: string; name: string; description: string;
-  version_installed: string | null;
-  version_latest: string | null;
+  version_installed: string | null;   // recipe version recorded at install
+  version_app: string | null;         // real app version read by setup.version_check
+  version_latest: string | null;      // latest recipe version from the marketplace
   update_available: boolean;
   installed: boolean;
   phase: Phase;

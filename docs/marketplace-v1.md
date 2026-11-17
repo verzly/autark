@@ -48,6 +48,7 @@ README.md
     "tools": { "python": "3.13", "uv": "0.13.1", "node": "24", "bun": "1", "cmake": "latest" },
     "source": { "url": "https://github.com/unslothai/unsloth.git", "branch": "main" },
     "installed_check": "{app}/app/unsloth_studio/Scripts/python.exe",
+    "version_check": ["{app}/app/unsloth_studio/Scripts/python.exe", "-I", "-c", "import importlib.metadata as m; print(m.version('unsloth'))"],
     "steps": [
       {
         "name": "Running app setup",
@@ -81,6 +82,7 @@ README.md
 | `setup.tools` | no | Map of mise tool → version. Written to `<app>/mise.toml` and installed with `mise install` |
 | `setup.source` | no | Git source cloned into `<app>/source`; refreshed with fetch+reset, never re-cloned |
 | `setup.installed_check` | no | Path template; when set, the app counts as installed only if the path exists |
+| `setup.version_check` | no | Argument vector; its last non-empty stdout line is stored as the app's real version |
 | `setup.steps` | yes | Ordered commands run after tool install and source fetch |
 | `launch` | yes | Command used by Start, plus the optional local URL for Open |
 | `env` | no | Extra environment variables for setup steps and launch |

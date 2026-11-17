@@ -70,6 +70,7 @@ pub struct Setup {
     pub tools: BTreeMap<String, String>,
     pub source: Option<Source>,
     pub installed_check: Option<String>,
+    pub version_check: Option<Vec<String>>,
     pub steps: Vec<Step>,
 }
 
@@ -180,6 +181,14 @@ impl Manifest {
         }
         if let Some(check) = &self.setup.installed_check {
             self.check_template(check, "setup.installed_check")?;
+        }
+        if let Some(check) = &self.setup.version_check {
+            if check.is_empty() || check[0].trim().is_empty() {
+                bail!("invalid_argument: `setup.version_check` has no program");
+            }
+            for arg in check {
+                self.check_template(arg, "setup.version_check")?;
+            }
         }
         for (key, value) in &self.env {
             if key.trim().is_empty() {
@@ -388,6 +397,8 @@ pub fn validate_settings(manifest: &Manifest, values: &Map<String, Value>) -> Re
 pub struct InstalledRecord {
     pub version: String,
     #[serde(default)]
+    pub app_version: Option<String>,
+    #[serde(default)]
     pub installed_at: u64,
 }
 
@@ -396,13 +407,14 @@ pub fn read_installed(app: &Path) -> Option<InstalledRecord> {
     serde_json::from_str(&text).ok()
 }
 
-pub fn write_installed(app: &Path, version: &str) -> Result<()> {
+pub fn write_installed(app: &Path, version: &str, app_version: Option<&str>) -> Result<()> {
     let installed_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())
         .unwrap_or(0);
     let record = InstalledRecord {
         version: version.to_string(),
+        app_version: app_version.map(str::to_string),
         installed_at,
     };
     fs::create_dir_all(app)?;

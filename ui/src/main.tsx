@@ -77,7 +77,7 @@ export default function App() {
       if (kind === "install" || kind === "update") setState(s => ({ ...s, apps: s.apps.map(a => a.id === app.id ? { ...a, ...previewVariants.installing } : a) }));
       else if (kind === "start") setState(s => ({ ...s, apps: s.apps.map(a => a.id === app.id ? { ...a, phase: "running", url: "http://127.0.0.1:8888" } : a) }));
       else if (kind === "stop") setState(s => ({ ...s, apps: s.apps.map(a => a.id === app.id ? { ...a, phase: "installed", url: null } : a) }));
-      else if (kind === "remove") setState(s => ({ ...s, apps: s.apps.map(a => a.id === app.id ? { ...a, installed: false, phase: "not_installed", version_installed: null } : a) }));
+      else if (kind === "remove") setState(s => ({ ...s, apps: s.apps.map(a => a.id === app.id ? { ...a, installed: false, phase: "not_installed", version_installed: null, version_app: null } : a) }));
       return;
     }
     const id = app.id;
@@ -157,8 +157,8 @@ export default function App() {
         <section class="setting-row"><div><h2>Marketplace</h2><p>{state().marketplace.exists ? <button class="path" onClick={() => reveal("marketplace")}>{state().marketplace.path}</button> : "Marketplace has not been loaded."}</p><Show when={state().marketplace.last_refresh}><small>Last refreshed {new Date(state().marketplace.last_refresh! * 1000).toLocaleString()}</small></Show></div><button class="button" disabled={state().busy} onClick={refresh}>{state().marketplace.exists ? "Reload marketplace" : "Load marketplace"}</button></section>
         <section class="setting-row"><div><h2>Updates</h2><p>Check marketplace versions manually.</p></div><button class="button" disabled={state().busy} onClick={() => mockMode() ? undefined : void run(() => api.checkUpdates())}>Check for updates</button></section>
         <section class="updates"><h2>Update all</h2><p>Running apps stop during updates and cannot be used until each update finishes.</p>
-          <div class="update-table"><div class="update-head"><span>App</span><span>Installed</span><span>Latest</span><span>State</span></div>
-            <For each={state().apps.filter(a => a.installed)}>{a => <div class="update-row"><span>{a.name}</span><span>{a.version_installed ?? "—"}</span><span>{a.version_latest ?? "—"}</span><span>{a.phase}</span></div>}</For>
+          <div class="update-table"><div class="update-head"><span>App</span><span>App version</span><span>Recipe</span><span>Latest recipe</span><span>State</span></div>
+            <For each={state().apps.filter(a => a.installed)}>{a => <div class="update-row"><span>{a.name}</span><span>{a.version_app ?? "unknown"}</span><span>{a.version_installed ?? "not installed"}</span><span>{a.version_latest ?? "unknown"}</span><span>{a.phase}</span></div>}</For>
           </div>
           <Show when={!allConfirm()}><button class="button primary" disabled={state().busy || !state().apps.some(a => a.installed && a.update_available)} onClick={() => setAllConfirm(true)}>Update all</button></Show>
           <Show when={allConfirm()}><div class="confirm-strip"><span>Update every installed app now?</span><button class="button" onClick={() => setAllConfirm(false)}>Cancel</button><button class="button primary" disabled={state().busy} onClick={doUpdateAll}>Confirm</button></div></Show>
@@ -175,7 +175,7 @@ export default function App() {
         const canStop = () => !busyApp() && (p() === "running" || p() === "starting");
         const confirmInstall = () => { setPanel(null); action(a().installed ? "update" : "install", a()); };
         return <section class="app-view">
-          <div class="app-header"><div class="app-title"><span class="badge large" style={{ "--hue": hue(a().id) }}>{a().id[0]?.toUpperCase()}</span><div><h1>{a().name}</h1><div class="version-line">installed {a().version_installed ?? "—"} <Show when={a().update_available}>· latest {a().version_latest} <span class="update-pill">update</span></Show></div></div></div>
+          <div class="app-header"><div class="app-title"><span class="badge large" style={{ "--hue": hue(a().id) }}>{a().id[0]?.toUpperCase()}</span><div><h1>{a().name}</h1><div class="version-line">{a().version_app ? `app ${a().version_app}` : "app version unknown"}{a().version_installed ? ` · recipe ${a().version_installed}` : ""}<Show when={a().update_available}> · latest recipe {a().version_latest} <span class="update-pill">update</span></Show></div></div></div>
             <div class="links"><Show when={a().homepage}><button onClick={() => openUrl(a().homepage!)}>Homepage ↗</button></Show><Show when={a().license}><span>{a().license}</span></Show></div></div>
           <div class="status-line"><span class={`dot ${p()}`} /><Show when={working(p())}><span class="progress"><i /></span></Show><span class="phase-label">{a().step ? `(${a().step?.index}/${a().step?.total}) ${a().step?.name}` : p().replace("_", " ")}</span><Show when={working(p()) && elapsed() != null}><span class="elapsed">run {duration(elapsed()!)}</span></Show></div>
           <Show when={a().last_error}><div class="error-banner">{a().last_error?.message}</div></Show>
@@ -201,7 +201,7 @@ export default function App() {
               <Show when={logs().length} fallback={<span class="quiet">Operation output will appear here.</span>}><For each={logs()}>{line => <div class={`log ${lineTone(line)}`}>{line || "\u00a0"}</div>}</For></Show>
             </div><Show when={!follow() && logs().length}><button class="jump" onClick={() => { if (output) output.scrollTop = output.scrollHeight; setFollow(true); }}>Jump to latest</button></Show></div>
           </section>
-          <footer class="metadata"><button title={state().settings.root + "\\apps\\" + a().id} onClick={() => reveal("app", a().id)}>{`${state().settings.root}\\apps\\${a().id}`}</button><span>installed {a().version_installed ?? "—"}</span><code>{a().id}</code></footer>
+          <footer class="metadata"><button title={state().settings.root + "\\apps\\" + a().id} onClick={() => reveal("app", a().id)}>{`${state().settings.root}\\apps\\${a().id}`}</button><span>{a().version_app ? `app ${a().version_app}` : "app version unknown"}</span><span>recipe {a().version_installed ?? "not installed"}</span><code>{a().id}</code></footer>
         </section>;
       }}</Show>
     </main>

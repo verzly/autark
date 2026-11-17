@@ -101,6 +101,7 @@ pub struct AppState {
     pub name: String,
     pub description: String,
     pub version_installed: Option<String>,
+    pub version_app: Option<String>,
     pub version_latest: Option<String>,
     pub update_available: bool,
     pub installed: bool,
@@ -124,6 +125,7 @@ pub struct AppRecord {
     pub manifest_dir: PathBuf,
     pub settings: Map<String, Value>,
     pub installed_version: Option<String>,
+    pub app_version: Option<String>,
     pub version_latest: Option<String>,
     pub installed: bool,
     pub phase: Phase,
@@ -149,6 +151,10 @@ impl AppRecord {
             installed_version: installed_record
                 .as_ref()
                 .map(|record| record.version.clone())
+                .filter(|_| installed),
+            app_version: installed_record
+                .as_ref()
+                .and_then(|record| record.app_version.clone())
                 .filter(|_| installed),
             version_latest: in_catalogue.then(|| manifest.version.clone()),
             installed,
@@ -184,6 +190,7 @@ impl AppRecord {
             name: self.manifest.name.clone(),
             description: self.manifest.description.clone(),
             version_installed: self.installed_version.clone(),
+            version_app: self.app_version.clone(),
             version_latest: self.version_latest.clone(),
             update_available: self.update_available(),
             installed: self.installed,
@@ -355,6 +362,7 @@ pub fn load_catalogue(core: &mut Core) -> Vec<String> {
                 record.started_at = old.started_at;
                 record.installed = old.installed;
                 record.installed_version = old.installed_version.clone();
+                record.app_version = old.app_version.clone();
             }
         }
         records.push(record);
@@ -588,11 +596,13 @@ pub fn setup(app: &AppHandle, shared: &Shared, id: &str, kind: SetupKind) -> Res
 
     index += 1;
     step_begin(app, shared, id, index, total, "Finishing");
-    manifest::write_installed(&app_dir, &manifest.version)?;
+    let app_version = read_app_version(app, id, &root, &app_dir, &manifest, &values, force_local_mise);
+    manifest::write_installed(&app_dir, &manifest.version, app_version.as_deref())?;
     let version = manifest.version.clone();
     mutate(app, shared, id, |record| {
         record.installed = true;
         record.installed_version = Some(version);
+        record.app_version = app_version;
         record.phase = Phase::Installed;
         record.step = None;
         record.last_error = None;
@@ -703,6 +713,52 @@ fn sync_source(
         run_streaming(app, id, "git clone".to_string(), command)?;
     }
     Ok(())
+}
+
+fn read_app_version(
+    app: &AppHandle,
+    id: &str,
+    root: &Path,
+    app_dir: &Path,
+    manifest: &Manifest,
+    values: &Map<String, Value>,
+    force_local_mise: bool,
+) -> Option<String> {
+    let check = manifest.setup.version_check.as_ref()?;
+    let program = manifest::expand(&check[0], root, app_dir, values).ok()?;
+    let args = check[1..]
+        .iter()
+        .map(|arg| manifest::expand(arg, root, app_dir, values).ok())
+        .collect::<Option<Vec<_>>>()?;
+    let mut command = if manifest.setup.tools.is_empty() {
+        Command::new(&program)
+    } else {
+        let mut command = mise_command(root, force_local_mise);
+        command
+            .arg("--cd")
+            .arg(app_dir)
+            .arg("exec")
+            .arg("--")
+            .arg(&program);
+        command
+    };
+    command.args(&args);
+    apply_environment(&mut command, root, app_dir, manifest, values).ok()?;
+    command.current_dir(app_dir).stdin(Stdio::null());
+    let output = command.output().ok()?;
+    if !output.status.success() {
+        log(app, id, "reading the app version failed");
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let version = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .next_back()?
+        .to_string();
+    log(app, id, format!("app version {version}"));
+    Some(version)
 }
 
 fn mise_command(root: &Path, force_local: bool) -> Command {
