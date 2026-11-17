@@ -4,7 +4,7 @@ export interface AppSetting { key: string; label: string; kind: "text" | "number
 export interface AppState {
   id: string; name: string; description: string; version_installed: string | null; version_app: string | null; version_latest: string | null;
   update_available: boolean; installed: boolean; phase: Phase; settings: Record<string, unknown>; settings_schema: AppSetting[];
-  url: string | null; homepage: string | null; license: string | null; icon_path: string | null;
+   url: string | null; homepage: string | null; license: string | null; icon_path: string | null; icon_data: string | null;
   requirements: { disk_gb: number | null; webview2: boolean };
   last_error: { code: string; message: string } | null; step: { index: number; total: number; name: string } | null;
   started_at: number | null; elapsed_secs: number | null;

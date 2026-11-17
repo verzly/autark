@@ -1,5 +1,5 @@
 import type { State } from "./bridge";
-const common = { settings: {}, settings_schema: [], homepage: "https://github.com/verzly/autark", license: "MIT", icon_path: null, version_app: null, requirements: { disk_gb: 2, webview2: true }, last_error: null, step: null, started_at: null, elapsed_secs: null };
+const common = { settings: {}, settings_schema: [], homepage: "https://github.com/verzly/autark", license: "MIT", icon_path: null, icon_data: null, version_app: null, requirements: { disk_gb: 2, webview2: true }, last_error: null, step: null, started_at: null, elapsed_secs: null };
 export const previewState: State = {
   settings: { root: "D:\\Portable\\Autark", folder_name: "Autark", force_local_mise: true, open_tabs: ["unsloth-studio", "cognee"], active_tab: "unsloth-studio" },
   settings_path: "D:\\Portable\\Autark\\launcher-settings.json", settings_exists: true,

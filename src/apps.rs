@@ -112,6 +112,7 @@ pub struct AppState {
     pub homepage: Option<String>,
     pub license: Option<String>,
     pub icon_path: Option<String>,
+    pub icon_data: Option<String>,
     pub requirements: Requirements,
     pub last_error: Option<ErrorInfo>,
     pub step: Option<StepInfo>,
@@ -133,6 +134,7 @@ pub struct AppRecord {
     pub last_error: Option<ErrorInfo>,
     pub step: Option<StepInfo>,
     pub started_at: Option<u64>,
+    pub icon_data: Option<String>,
 }
 
 impl AppRecord {
@@ -147,6 +149,7 @@ impl AppRecord {
             .and_then(|template| manifest::expand(template, root, &app_dir, &values).ok())
             .map(|path| PathBuf::from(path).exists());
         let installed = installed_record.is_some() && check.unwrap_or(true);
+        let icon_data = read_icon_data(&manifest, manifest_dir);
         Self {
             installed_version: installed_record
                 .as_ref()
@@ -169,6 +172,7 @@ impl AppRecord {
             started_at: None,
             settings: values,
             manifest_dir: manifest_dir.to_path_buf(),
+            icon_data,
             manifest,
         }
     }
@@ -201,6 +205,7 @@ impl AppRecord {
             homepage: self.manifest.homepage.clone(),
             license: self.manifest.license.clone(),
             icon_path: self.manifest.icon_path(&self.manifest_dir),
+            icon_data: self.icon_data.clone(),
             requirements: self.manifest.requirements.clone(),
             last_error: self.last_error.clone(),
             step: self.step.clone(),
@@ -210,9 +215,31 @@ impl AppRecord {
     }
 }
 
+fn read_icon_data(manifest: &Manifest, manifest_dir: &Path) -> Option<String> {
+    use base64::Engine;
+    let path = PathBuf::from(manifest.icon_path(manifest_dir)?);
+    let bytes = std::fs::read(&path).ok()?;
+    let mime = match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("svg") => "image/svg+xml",
+        Some("ico") => "image/x-icon",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
+        _ => "image/png",
+    };
+    Some(format!(
+        "data:{};base64,{}",
+        mime,
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    ))
+}
+
 #[derive(Clone, Debug, Serialize, Default)]
-pub struct MarketplaceInfo {
-    pub path: String,
+pub struct MarketplaceInfo {    pub path: String,
     pub url: String,
     pub exists: bool,
     pub refreshing: bool,

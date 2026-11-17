@@ -8,13 +8,17 @@ const working = (p: Phase) => ["installing", "starting", "stopping", "updating",
 const errText = (e: unknown) => e instanceof Error ? e.message : String(e);
 const hue = (id: string) => { let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h) % 360; };
 const duration = (s: number) => `${Math.floor(s / 60)}m ${String(Math.floor(s % 60)).padStart(2, "0")}s`;
+const AUTARK_TAB = "__autark__";
 
 export default function App() {
   const [state, setState] = createSignal<State>(previewState);
-  const [active, setActive] = createSignal<string | null>(previewState.settings.active_tab);
+  const [active, setActive] = createSignal<string | null>(previewState.settings.active_tab ?? AUTARK_TAB);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
+  const [settingsReturn, setSettingsReturn] = createSignal<string | null>(null);
   const [appSettingsOpen, setAppSettingsOpen] = createSignal<string | null>(null);
   const [chooser, setChooser] = createSignal(false);
+  const [chooserReturn, setChooserReturn] = createSignal<string | null>(null);
+  const [installConfirm, setInstallConfirm] = createSignal<string | null>(null);
   const [search, setSearch] = createSignal("");
   const [selected, setSelected] = createSignal(0);
   const [panel, setPanel] = createSignal<InlineAction>(null);
@@ -32,14 +36,21 @@ export default function App() {
   const currentApp = createMemo(() => state().apps.find(a => a.id === active()) ?? null);
   const openIds = () => state().settings.open_tabs;
   const available = createMemo(() => state().apps.filter(a => `${a.name} ${a.description} ${a.id}`.toLowerCase().includes(search().toLowerCase())));
+  const showChooser = () => { setSettingsOpen(false); setChooser(true); setSearch(""); setSelected(0); setInstallConfirm(null); };
+  const hideChooser = () => { setChooser(false); setSearch(""); setSelected(0); };
 
   onMount(() => {
     let offState: (() => void) | undefined, offLog: (() => void) | undefined;
-    if (!mockMode()) api.getState().then(s => { setState(s); setActive(s.settings.active_tab); }).catch(e => setRequestError(errText(e)));
+    if (!mockMode()) api.getState().then(s => { setState(s); setActive(s.settings.active_tab ?? AUTARK_TAB); }).catch(e => setRequestError(errText(e)));
     api.onState(s => { setState(s); setRequestError(""); }).then(f => offState = f);
     api.onLog(({ app_id, line }) => setBuffers(prev => ({ ...prev, [app_id]: [...(prev[app_id] ?? []), line].slice(-500) }))).then(f => offLog = f);
+    const keys = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "t" && !e.altKey && !e.shiftKey && !(e.target instanceof HTMLElement && ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName))) { e.preventDefault(); setActive(AUTARK_TAB); setChooser(false); return; }
+      if (chooser()) chooserKeys(e);
+    };
+    window.addEventListener("keydown", keys);
     if ("__TAURI_INTERNALS__" in window) import("@tauri-apps/api/app").then(({ getVersion }) => getVersion().then(setVersion)).catch(() => {});
-    onCleanup(() => { offState?.(); offLog?.(); });
+    onCleanup(() => { offState?.(); offLog?.(); window.removeEventListener("keydown", keys); });
   });
   const [version, setVersion] = createSignal("dev");
   createEffect(() => { if (chooser()) queueMicrotask(() => dialogInput?.focus()); });
@@ -55,28 +66,37 @@ export default function App() {
   const run = async (fn: () => Promise<State | void>) => {
     if (mockMode()) return;
     setBusy(true); setRequestError("");
-    try { const next = await fn(); if (next) { setState(next); setActive(next.settings.active_tab); } }
+    try { const next = await fn(); if (next) { setState(next); setActive(next.settings.active_tab ?? (active() === null ? null : AUTARK_TAB)); } }
     catch (e) { setRequestError(errText(e)); }
     finally { setBusy(false); }
   };
   const selectTab = (id: string | null) => {
-    setActive(id); setSettingsOpen(false);
-    if (!mockMode()) void run(() => api.setActiveTab(id));
+    if (id === AUTARK_TAB) { setActive(AUTARK_TAB); setChooser(false); }
+    else { setActive(id); setChooser(false); }
+    setSettingsOpen(false);
+    if (!mockMode()) void run(() => api.setActiveTab(id === AUTARK_TAB ? null : id));
   };
   const openApp = (id: string) => {
     if (openIds().includes(id)) {
       selectTab(id);
-      setChooser(false); setSearch(""); setSelected(0);
+      setChooser(false);
       return;
     }
     if (mockMode()) { setState(s => ({ ...s, settings: { ...s.settings, open_tabs: [...s.settings.open_tabs, id], active_tab: id } })); setActive(id); }
     else void run(() => api.openAppTab(id));
-    setChooser(false); setSearch(""); setSelected(0);
+    setChooser(false);
   };
   const closeTab = (id: string, event: MouseEvent) => {
     event.stopPropagation();
-    if (mockMode()) { const tabs = openIds().filter(x => x !== id); setState(s => ({ ...s, settings: { ...s.settings, open_tabs: tabs, active_tab: tabs[tabs.length - 1] ?? null } })); if (active() === id) setActive(openIds().find(x => x !== id) ?? null); }
-    else void run(() => api.closeTab(id));
+    if (mockMode()) {
+      const tabs = openIds().filter(x => x !== id), nextActive = active() === id ? tabs[tabs.length - 1] ?? AUTARK_TAB : active();
+      setState(s => ({ ...s, settings: { ...s.settings, open_tabs: tabs, active_tab: nextActive === AUTARK_TAB ? null : nextActive } }));
+      if (active() === id) { setActive(nextActive); setChooser(nextActive === AUTARK_TAB); }
+    } else void run(async () => {
+      const next = await api.closeTab(id);
+      if (active() === id) { const nextActive = next.settings.active_tab ?? AUTARK_TAB; setActive(nextActive); setChooser(nextActive === AUTARK_TAB); }
+      return next;
+    });
   };
   const action = (kind: "install" | "update" | "start" | "stop" | "open" | "remove" | "cancel", app: AppState) => {
     if (mockMode()) {
@@ -128,26 +148,46 @@ export default function App() {
     if (what === "minimize") await w.minimize(); else if (what === "maximize") await w.toggleMaximize(); else await w.close();
   };
   const chooserKeys = (e: KeyboardEvent) => {
-    if (e.key === "Escape") setChooser(false);
+    if (e.key === "Escape") hideChooser();
     if (e.key === "ArrowDown") { e.preventDefault(); setSelected(i => Math.min(i + 1, available().length - 1)); }
     if (e.key === "ArrowUp") { e.preventDefault(); setSelected(i => Math.max(i - 1, 0)); }
-    if (e.key === "Enter" && available()[selected()]) openApp(available()[selected()].id);
+    if (e.key === "Enter" && available()[selected()]) activateMarketplaceApp(available()[selected()]);
+  };
+  const activateMarketplaceApp = (a: AppState) => {
+    if (openIds().includes(a.id)) openApp(a.id);
+    else if (a.installed) openApp(a.id);
+    else if (installConfirm() === a.id) { setInstallConfirm(null); if (mockMode()) setState(s => ({ ...s, apps: s.apps.map(x => x.id === a.id ? { ...x, installed: true, phase: "installed" } : x) })); else void run(() => api.installApp(a.id, true)); }
+    else setInstallConfirm(a.id);
   };
 
   return <div class="app">
     <header class="chrome" data-tauri-drag-region>
-      <button class={`gear ${settingsOpen() ? "selected" : ""}`} aria-label="Settings" aria-pressed={settingsOpen()} onClick={() => { setSettingsOpen(true); setAppSettingsOpen(null); setActive(null); }}><Icon name="menu" /></button>
+      <button class={`gear ${settingsOpen() ? "selected" : ""}`} aria-label="Settings" aria-pressed={settingsOpen()} onClick={() => {
+        if (!settingsOpen()) {
+          setSettingsReturn(active());
+          setSettingsOpen(true); setAppSettingsOpen(null); setActive(null); setChooser(false);
+        }
+      }} onDblClick={() => {
+        if (settingsOpen()) {
+          const target = settingsReturn() ?? AUTARK_TAB;
+          setSettingsOpen(false); setActive(target); setChooser(false); setAppSettingsOpen(null);
+        }
+      }}><Icon name="menu" /></button>
+      <button class={`add-tab marketplace-tab ${chooser() ? "selected" : ""}`} aria-label="Open marketplace" aria-pressed={chooser()} onClick={() => (chooser() ? hideChooser() : showChooser())}><Icon name="gridPlus" /></button>
       <div class="tabs" role="tablist" aria-label="Open apps">
+        <button class={`tab autark-tab ${active() === AUTARK_TAB && !settingsOpen() ? "active" : ""}`} role="tab" aria-selected={active() === AUTARK_TAB && !settingsOpen()} onClick={() => selectTab(AUTARK_TAB)}>
+          <span class="autark-tab-mark" aria-hidden="true">a</span><span class="tab-name">Autark</span>
+        </button>
         <For each={openIds()}>{id => {
           const app = () => state().apps.find(a => a.id === id);
           return <button class={`tab ${active() === id && !settingsOpen() ? "active" : ""}`} role="tab" aria-selected={active() === id && !settingsOpen()} onClick={() => selectTab(id)}>
-            <span class="badge" style={{ "--hue": hue(id) }}>{id[0]?.toUpperCase()}</span><span class="tab-name">{app()?.name ?? id}</span>
+            <span class="badge" style={{ "--hue": hue(id) }}><Show when={app()?.icon_data} fallback={id[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><span class="tab-name">{app()?.name ?? id}</span>
             <span class={`dot ${app()?.phase ?? "not_installed"}`} />
             <span class="tab-close" role="button" aria-label={`Close ${app()?.name ?? id}`} onClick={e => closeTab(id, e)}><Icon name="close" /></span>
           </button>;
         }}</For>
       </div>
-      <button class="add-tab" aria-label="Add an app" onClick={() => { setChooser(true); setSearch(""); setSelected(0); }}><Icon name="gridPlus" /></button>
+      <button class="add-tab" aria-label="New tab" onClick={() => { setActive(AUTARK_TAB); setChooser(false); setSettingsOpen(false); }}>+</button>
       <div class="chrome-space" data-tauri-drag-region />
       <div class="window-controls">
         <button aria-label="Minimize" onClick={() => void windowAction("minimize")}><Icon name="min" /></button>
@@ -163,16 +203,33 @@ export default function App() {
         <section class="setting-row"><div><h2>Marketplace</h2><p>{state().marketplace.exists ? <button class="path" onClick={() => reveal("marketplace")}>{state().marketplace.path}</button> : "Marketplace has not been loaded."}</p><Show when={state().marketplace.last_refresh}><small>Last refreshed {new Date(state().marketplace.last_refresh! * 1000).toLocaleString()}</small></Show></div><button class="button" disabled={state().busy} onClick={refresh}>{state().marketplace.exists ? "Reload marketplace" : "Load marketplace"}</button></section>
         <section class="setting-row"><div><h2>Updates</h2><p>Check marketplace versions manually.</p></div><button class="button" disabled={state().busy} onClick={() => mockMode() ? undefined : void run(() => api.checkUpdates())}>Check for updates</button></section>
         <section class="updates"><h2>Update all</h2><p>Running apps stop during updates and cannot be used until each update finishes.</p>
-          <div class="update-table"><div class="update-head"><span>App</span><span>App version</span><span>Recipe</span><span>Latest recipe</span><span>State</span></div>
-            <For each={state().apps.filter(a => a.installed)}>{a => <div class="update-row"><span>{a.name}</span><span>{a.version_app ?? "unknown"}</span><span>{a.version_installed ?? "not installed"}</span><span>{a.version_latest ?? "unknown"}</span><span>{a.phase}</span></div>}</For>
+          <div class="update-table">
+            <For each={state().apps.filter(a => a.installed)}>{a => <article class="update-app"><h3>{a.name}</h3><div class="update-details"><span>App version <b>{a.version_app ?? "unknown"}</b></span><span>Installed <b>{a.version_installed ?? "not installed"}</b></span><span>Marketplace <b>{a.version_latest ?? "unknown"}</b></span><span>State <b>{a.phase}</b></span></div></article>}</For>
           </div>
           <Show when={!allConfirm()}><button class="button primary" disabled={state().busy || !state().apps.some(a => a.installed && a.update_available)} onClick={() => setAllConfirm(true)}>Update all</button></Show>
           <Show when={allConfirm()}><div class="confirm-strip"><span>Update every installed app now?</span><button class="button" onClick={() => setAllConfirm(false)}>Cancel</button><button class="button primary" disabled={state().busy} onClick={doUpdateAll}>Confirm</button></div></Show>
         </section>
         <footer class="about"><span>Autark <b>v{version()}</b></span><span>AGPL-3.0</span><button onClick={() => openUrl("https://github.com/verzly/autark")}>Source</button><button onClick={() => openUrl("https://github.com/verzly/autark-marketplace")}>Marketplace</button></footer>
       </section></Show>
-      <Show when={!settingsOpen() && !currentApp()}><section class="empty-state"><div class="empty-mark">autark</div><p>Apps you install live in tabs here.</p><button class="button primary" onClick={() => setChooser(true)}>Add an app</button></section></Show>
-      <Show when={!settingsOpen() && currentApp()}>{app => {
+      <Show when={chooser()}><section class="marketplace-view" onKeyDown={chooserKeys}>
+        <div class="marketplace-heading"><button class="back-button" onClick={hideChooser}>← Back</button><div><span class="eyebrow">MARKETPLACE</span><h1>Add an app</h1></div><div class="marketplace-tools"><input ref={dialogInput} class="search" aria-label="Search marketplace apps" placeholder="Search apps..." value={search()} onInput={e => { setSearch(e.currentTarget.value); setSelected(0); }} /><button class="button" disabled={busy() || state().marketplace.refreshing} onClick={refresh}>{state().marketplace.refreshing ? "Refreshing..." : "Reload marketplace"}</button><Show when={state().marketplace.last_refresh}><small>Last refreshed {new Date(state().marketplace.last_refresh! * 1000).toLocaleString()}</small></Show></div></div>
+        <Show when={state().marketplace.error}><div class="error-banner">{state().marketplace.error?.message}</div></Show>
+        <Show when={!state().marketplace.exists} fallback={<Show when={!state().marketplace.refreshing} fallback={<div class="marketplace-load">Refreshing marketplace...</div>}><Show when={available().length} fallback={<div class="marketplace-load">No apps match your search.</div>}><div class="marketplace-grid" role="list" aria-label="Marketplace apps"><For each={available()}>{(a, i) => {
+          const opened = () => openIds().includes(a.id);
+          return <article role="listitem" class={`market-card ${opened() ? "market-opened" : ""} ${selected() === i() ? "market-selected" : ""}`} onMouseEnter={() => setSelected(i())}>
+            <div class="market-card-head"><span class="badge large" style={{ "--hue": hue(a.id) }}><Show when={a.icon_data} fallback={a.id[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><div><h2>{a.name}</h2><code>{a.id}</code></div><Show when={a.update_available}><span class="update-pill">Update</span></Show></div>
+            <p class="market-description">{a.description}</p><div class="market-versions"><span>Installed <b>{a.version_installed ?? "not installed"}</b></span><span>Marketplace <b>{a.version_latest ?? "unknown"}</b></span></div>
+            <div class="market-requirements"><Show when={a.requirements.disk_gb != null}><span>{a.requirements.disk_gb} GB disk</span></Show><Show when={a.requirements.webview2}><span>WebView2</span></Show></div>
+            <div class="market-links"><Show when={a.license}><span>{a.license}</span></Show><Show when={a.homepage}><button onClick={() => openUrl(a.homepage!)}>Homepage ↗</button></Show></div>
+            <Show when={installConfirm() === a.id}><div class="market-confirm"><p>Setup may install system components through mise and requires network access.</p><button class="button" onClick={() => setInstallConfirm(null)}>Cancel</button></div></Show>
+            <button class={`button market-action ${opened() ? "opened-action" : "primary"}`} disabled={busy() || (!opened() && working(a.phase))} onClick={() => opened() ? openApp(a.id) : activateMarketplaceApp(a)}>{opened() ? "Opened" : a.installed ? "Open" : installConfirm() === a.id ? "Confirm install" : "Install"}</button>
+          </article>;
+        }}</For></div></Show></Show>}>
+          <div class="marketplace-load"><p>{state().marketplace.refreshing ? "Refreshing marketplace..." : "Marketplace has not been loaded."}</p><button class="button primary" disabled={busy() || state().marketplace.refreshing} onClick={refresh}>Load marketplace</button></div>
+        </Show>
+      </section></Show>
+      <Show when={!chooser() && !settingsOpen() && !currentApp()}><section class="empty-state"><div class="empty-mark">autark</div><p>Apps you install live in tabs here.</p><button class="button primary" onClick={showChooser}>Add an app</button></section></Show>
+      <Show when={!chooser() && !settingsOpen() && currentApp()}>{app => {
         const a = () => app();
         const p = () => a().phase;
         const busyApp = () => appBusy(a());
@@ -181,7 +238,7 @@ export default function App() {
         const canStop = () => !busyApp() && (p() === "running" || p() === "starting");
         const confirmInstall = () => { setPanel(null); action(a().installed ? "update" : "install", a()); };
         return <Show when={appSettingsOpen() === a().id} fallback={<section class="app-view">
-          <div class="app-header"><div class="app-title"><span class="badge large" style={{ "--hue": hue(a().id) }}>{a().id[0]?.toUpperCase()}</span><div><h1>{a().name}</h1><div class="version-line">{a().version_app ? `app ${a().version_app}` : "app version unknown"} · recipe {a().version_installed ?? "not installed"}<Show when={a().update_available}> · latest recipe {a().version_latest ?? "unknown"} <span class="update-pill">update</span></Show></div></div></div>
+          <div class="app-header"><div class="app-title"><span class="badge large" style={{ "--hue": hue(a().id) }}><Show when={a().icon_data} fallback={a().id[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><div><h1>{a().name}</h1><div class="version-line">{a().version_app ? `app ${a().version_app}` : "app version unknown"} · recipe {a().version_installed ?? "not installed"}<Show when={a().update_available}> · latest recipe {a().version_latest ?? "unknown"} <span class="update-pill">update</span></Show></div></div></div>
             <div class="links"><Show when={a().homepage}><button onClick={() => openUrl(a().homepage!)}>Homepage ↗</button></Show><Show when={a().license}><span>{a().license}</span></Show></div></div>
           <div class="status-line"><span class={`dot ${p()}`} /><Show when={working(p())}><span class="progress"><i /></span></Show><span class="phase-label">{a().step ? `(${a().step?.index}/${a().step?.total}) ${a().step?.name}` : p().replace("_", " ")}</span><Show when={working(p()) && elapsed() != null}><span class="elapsed">run {duration(elapsed()!)}</span></Show></div>
           <Show when={a().last_error}><div class="error-banner">{a().last_error?.message}</div></Show>
@@ -217,23 +274,6 @@ export default function App() {
         </Show>;
       }}</Show>
     </main>
-    <Show when={chooser()}><div class="backdrop" onClick={() => setChooser(false)}><section class="dialog" role="dialog" aria-modal="true" aria-labelledby="chooser-title" onClick={e => e.stopPropagation()} onKeyDown={chooserKeys}>
-      <div class="dialog-title"><div><span class="eyebrow">LIBRARY</span><h2 id="chooser-title">Add an app</h2></div><button class="icon-button" aria-label="Close chooser" onClick={() => setChooser(false)}><Icon name="close" /></button></div>
-      <input ref={dialogInput} class="search" placeholder="Search apps…" value={search()} onInput={e => { setSearch(e.currentTarget.value); setSelected(0); }} />
-      <Show when={!state().marketplace.exists} fallback={
-        <div class="chooser-list">
-          <h3>Installed</h3><For each={available().filter(a => a.installed)}>{(a, i) => <Choice app={a} index={i()} selected={selected() === i()} opened={openIds().includes(a.id)} disabled={busy()} onClick={() => openApp(a.id)} />}</For>
-          <div class="group-heading"><h3>Marketplace</h3><button onClick={refresh} disabled={busy() || state().marketplace.refreshing}>Reload marketplace</button></div>
-          <Show when={state().marketplace.last_refresh}><small class="refresh-time">Last refreshed {new Date(state().marketplace.last_refresh! * 1000).toLocaleString()}</small></Show>
-          <Show when={state().marketplace.error}><p class="market-error">{state().marketplace.error?.message}</p></Show>
-          <For each={available().filter(a => !a.installed)}>{(a, i) => {
-            const index = () => available().filter(x => x.installed).length + i();
-            return <Choice app={a} index={index()} selected={selected() === index()} opened={openIds().includes(a.id)} disabled={busy()} onClick={() => openApp(a.id)} />;
-          }}</For>
-          <Show when={!available().length}><p class="quiet no-results">No apps match your search.</p></Show>
-        </div>
-      }><div class="load-market"><p>Load marketplace to browse available apps.</p><button class="button primary" disabled={busy()} onClick={refresh}>Load marketplace</button></div></Show>
-    </section></div></Show>
   </div>;
 }
 
@@ -241,9 +281,6 @@ function SettingField(props: { app: AppState; field: AppSetting; value: unknown;
   return <label class="field"><span>{props.field.label}</span><Show when={props.field.kind === "boolean"} fallback={
     <div class="field-control"><input type={props.field.kind === "number" || props.field.kind === "port" ? "number" : "text"} value={String(props.value ?? props.field.default ?? "")} onInput={e => props.setValue(props.field.kind === "number" || props.field.kind === "port" ? Number(e.currentTarget.value) : e.currentTarget.value)} /><Show when={props.field.kind === "path"}><button class="button" disabled={props.field.key !== "root"} onClick={props.choose}>Choose</button></Show></div>
   }><input type="checkbox" role="switch" checked={Boolean(props.value ?? props.field.default)} onChange={e => props.setValue(e.currentTarget.checked)} /></Show><Show when={props.field.help}><small>{props.field.help}</small></Show></label>;
-}
-function Choice(props: { app: AppState; index: number; selected: boolean; opened: boolean; disabled: boolean; onClick: () => void }) {
-  return <button class={`choice ${props.selected ? "choice-selected" : ""} ${props.opened ? "choice-opened" : ""}`} disabled={props.disabled || (!props.opened && working(props.app.phase))} aria-selected={props.selected} onMouseEnter={() => {}} onClick={props.onClick}><span class="badge" style={{ "--hue": hue(props.app.id) }}>{props.app.id[0]?.toUpperCase()}</span><span class="choice-copy"><b>{props.app.name}</b><small>{props.app.description}</small><small class="choice-version">{props.app.version_latest ? `v${props.app.version_latest}` : "version unavailable"}</small></span><Show when={props.opened}><span class="opened-label">Opened</span></Show><span class="chevron">›</span></button>;
 }
 function lineTone(line: string) {
   return /error|failed|fatal|stopped/i.test(line) ? "tone-error" : /warning|warn/i.test(line) ? "tone-warning" : /installed|complete|ready/i.test(line) ? "tone-success" : /downloading|extracting|^\s*\d+%/i.test(line) ? "tone-dim" : "";
