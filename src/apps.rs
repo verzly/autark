@@ -1279,7 +1279,7 @@ pub fn save_app_settings(
     if record.phase.is_busy() || record.phase == Phase::Running {
         bail!("operation_in_progress: stop the app before changing its settings");
     }
-    let clean = manifest::validate_settings(&record.manifest, &values)?;
+    let clean = manifest::validate_settings(&record.manifest, &values, &manifest::app_dir(&shared.root(), id))?;
     for lock in settings_locks(&record.manifest) {
         if clean.get(&lock.key) != record.settings.get(&lock.key) {
             bail!(

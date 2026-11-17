@@ -146,8 +146,10 @@ export default function App() {
     return JSON.stringify(editable(drafts()[app.id] ?? app.settings)) !== JSON.stringify(editable(app.settings));
   };
   const chooseFolder = async (app: AppState, field: AppSetting) => {
-    if (field.key !== "root") return;
-    try { const dir = mockMode() ? "D:\\Portable\\Data" : await api.pickDirectory("root_parent"); if (dir) setDraftValue(app, field.key, dir); }
+    try {
+      const dir = mockMode() ? `D:\\Portable\\Autark\\apps\\${app.id}\\huggingface` : await api.pickDirectory("root_parent");
+      if (dir) setDraftValue(app, field.key, asPortable(dir, `${state().settings.root}\\apps\\${app.id}`));
+    }
     catch (e) { setRequestError(errText(e)); }
   };
   const openUrl = (url: string) => { if (!mockMode()) void api.openUrl(url).catch(e => setRequestError(errText(e))); };
@@ -319,8 +321,18 @@ export default function App() {
 function SettingField(props: { app: AppState; field: AppSetting; value: unknown; lock?: AppState["settings_locked"][number]; setValue: (v: unknown) => void; choose: () => void }) {
   const value = () => props.lock ? props.lock.value : String(props.value ?? props.field.default ?? "");
   return <label class="field"><span>{props.field.label}</span><Show when={props.field.kind === "boolean"} fallback={
-    <div class="field-control"><input classList={{ locked: Boolean(props.lock) }} disabled={Boolean(props.lock)} type={props.field.kind === "number" || props.field.kind === "port" ? "number" : "text"} value={value()} onInput={e => props.setValue(props.field.kind === "number" || props.field.kind === "port" ? Number(e.currentTarget.value) : e.currentTarget.value)} /><Show when={props.field.kind === "path"}><button class="button" disabled={Boolean(props.lock) || props.field.key !== "root"} onClick={props.choose}>Choose</button></Show></div>
-  }><input type="checkbox" role="switch" disabled={Boolean(props.lock)} checked={props.lock ? props.lock.value.toLowerCase() === "true" : Boolean(props.value ?? props.field.default)} onChange={e => props.setValue(e.currentTarget.checked)} /></Show><Show when={props.lock}><small class="setting-lock-note">Set by the system environment ({props.lock?.var}). Autark cannot change it.</small></Show><Show when={props.field.help}><small>{props.field.help}</small></Show></label>;
+    <div class="field-control"><input classList={{ locked: Boolean(props.lock) }} disabled={Boolean(props.lock)} type={props.field.kind === "number" || props.field.kind === "port" ? "number" : "text"} value={value()} onInput={e => props.setValue(props.field.kind === "number" || props.field.kind === "port" ? Number(e.currentTarget.value) : e.currentTarget.value)} /><Show when={props.field.kind === "path"}><button class="button" disabled={Boolean(props.lock)} onClick={props.choose}>Choose</button></Show></div>
+  }><input type="checkbox" role="switch" disabled={Boolean(props.lock)} checked={props.lock ? props.lock.value.toLowerCase() === "true" : Boolean(props.value ?? props.field.default)} onChange={e => props.setValue(e.currentTarget.checked)} /></Show><Show when={props.field.kind === "path"}><small>{"{app}"} is this app's folder, for example {"{app}/huggingface"}. Paths inside it are stored that way.</small></Show><Show when={props.lock}><small class="setting-lock-note">Set by the system environment ({props.lock?.var}). Autark cannot change it.</small></Show><Show when={props.field.help}><small>{props.field.help}</small></Show></label>;
+}
+/// Keeps a picked folder portable: anything inside the app folder becomes `{app}/...`.
+function asPortable(picked: string, appDir: string) {
+  const toSlash = (value: string) => value.replace(/[\\/]+/g, "/").replace(/\/+$/, "");
+  const dir = toSlash(appDir).toLowerCase();
+  const full = toSlash(picked);
+  const lower = full.toLowerCase();
+  if (lower === dir) return "{app}";
+  if (lower.startsWith(`${dir}/`)) return `{app}${full.slice(dir.length)}`;
+  return full;
 }
 function lineTone(line: string) {
   return /error|failed|fatal|stopped/i.test(line) ? "tone-error" : /warning|warn/i.test(line) ? "tone-warning" : /installed|complete|ready/i.test(line) ? "tone-success" : /downloading|extracting|^\s*\d+%/i.test(line) ? "tone-dim" : "";

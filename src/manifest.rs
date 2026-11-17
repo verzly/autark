@@ -429,7 +429,7 @@ pub fn save_settings(app: &Path, values: &Map<String, Value>) -> Result<()> {
     .context("cannot write app settings.json")
 }
 
-pub fn validate_settings(manifest: &Manifest, values: &Map<String, Value>) -> Result<Map<String, Value>> {
+pub fn validate_settings(manifest: &Manifest, values: &Map<String, Value>, app: &Path) -> Result<Map<String, Value>> {
     let mut clean = manifest.defaults();
     for (key, value) in values {
         let setting = manifest
@@ -438,9 +438,29 @@ pub fn validate_settings(manifest: &Manifest, values: &Map<String, Value>) -> Re
             .find(|setting| &setting.key == key)
             .with_context(|| format!("invalid_argument: unknown setting `{key}`"))?;
         validate_value(setting.kind, &setting.key, value)?;
-        clean.insert(key.clone(), value.clone());
+        let value = match (setting.kind, value) {
+            (SettingKind::Path, Value::String(path)) => Value::String(portable_path(path, app)),
+            _ => value.clone(),
+        };
+        clean.insert(key.clone(), value);
     }
     Ok(clean)
+}
+
+/// Rewrites a path that points inside the app folder to the portable `{app}` form.
+pub fn portable_path(value: &str, app: &Path) -> String {
+    let to_slash = |text: &str| text.replace('\\', "/");
+    let trim = |text: String| text.trim_end_matches('/').to_string();
+    let dir = trim(to_slash(&app.to_string_lossy())).to_lowercase();
+    let full = trim(to_slash(value));
+    let lower = full.to_lowercase();
+    if lower == dir {
+        return "{app}".to_string();
+    }
+    if lower.starts_with(&format!("{dir}/")) {
+        return format!("{{app}}{}", &full[dir.len()..]);
+    }
+    full
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -535,5 +555,13 @@ mod tests {
         let settings = r#"[{"key":"hf_home","label":"Models","kind":"path","default":"x","locked_by":[" "]}]"#;
         let manifest: Manifest = serde_json::from_str(&demo("import_config", settings)).unwrap();
         assert!(manifest.validate("demo").is_err());
+    }
+
+    #[test]
+    fn picked_paths_inside_the_app_folder_become_portable() {
+        let app = Path::new("C:/autark/apps/demo");
+        assert_eq!(portable_path("C:\\autark\\apps\\demo\\huggingface", app), "{app}/huggingface");
+        assert_eq!(portable_path("c:/AUTARK/apps/demo", app), "{app}");
+        assert_eq!(portable_path("D:\\Models", app), "D:/Models");
     }
 }

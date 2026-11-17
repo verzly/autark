@@ -100,6 +100,9 @@ values in `<app>/settings.json` next to the installed manifest and exposes them 
 `{settings.<key>}`. Values are validated before an operation starts: a `port` must be 1-65535. A default value
 may itself contain placeholders, for example `"default": "{app}/huggingface"`.
 
+A `path` setting is stored portably: a folder picked (or typed) inside the app folder is rewritten to the
+`{app}/...` form before it is saved, so the value keeps working when the Autark root moves.
+
 An optional `"locked_by": ["HF_HOME"]` hands the setting to the machine: when any listed variable exists in the
 environment, the app settings page shows that variable's value read-only with a note that global system settings
 overrode Autark's scope, the stored value is refused on save, and `env_keep_parent` keeps the variable unchanged
