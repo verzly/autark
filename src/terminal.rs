@@ -1,4 +1,5 @@
 use std::ffi::OsString;
+use std::fs;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -20,44 +21,107 @@ fn autark_path(root: &Path) -> OsString {
 }
 
 /// Windows Terminal, so the shell gets a real terminal instead of a bare console.
+/// `wt --version` pops a message box, so the exe is looked up on PATH instead.
 fn windows_terminal() -> Option<PathBuf> {
-    Command::new("wt.exe")
-        .arg("--version")
-        .output()
-        .ok()?
-        .status
-        .success()
-        .then(|| PathBuf::from("wt.exe"))
+    let mut dirs: Vec<PathBuf> =
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        dirs.push(PathBuf::from(local).join("Microsoft").join("WindowsApps"));
+    }
+    dirs.into_iter()
+        .map(|dir| dir.join("wt.exe"))
+        .find(|path| path.exists())
 }
 
-/// The program to run. `system` is Autark's own default: bash when git brought one, PowerShell otherwise.
-fn shell_program(requested: &str, shells: &tools::TerminalInfo) -> String {
+/// `system` is Autark's own default: bash when git brought one, PowerShell otherwise.
+fn selected(requested: &str, shells: &tools::TerminalInfo) -> &'static str {
     match requested {
-        "powershell" => "powershell.exe".to_string(),
-        "cmd" => "cmd.exe".to_string(),
-        "bash" if shells.bash.is_some() => shells.bash.clone().unwrap_or_default(),
-        "sh" if shells.sh.is_some() => shells.sh.clone().unwrap_or_default(),
-        _ => match &shells.bash {
-            Some(bash) if requested == "system" => bash.clone(),
-            _ => "powershell.exe".to_string(),
-        },
+        "powershell" => "powershell",
+        "cmd" => "cmd",
+        "bash" if shells.bash.is_some() => "bash",
+        "sh" if shells.sh.is_some() => "sh",
+        _ if shells.bash.is_some() && requested == "system" => "bash",
+        _ => "powershell",
     }
 }
 
-/// Opens the chosen shell in the Autark root with Autark's PATH. Nothing else is injected.
+fn banner(root: &Path) -> Vec<String> {
+    vec![
+        format!("Autark v{}", env!("CARGO_PKG_VERSION")),
+        format!("Autark terminal · {}", root.display()),
+        "AGPL-3.0 · github.com/verzly/autark".to_string(),
+        "© 2026 rozsazoltan · apps, tools and settings stay in this folder".to_string(),
+        "Autark bin and mise shims are on PATH".to_string(),
+    ]
+}
+
+/// A startup file is the only way to get a banner into a real interactive shell.
+fn profile(root: &Path) -> Result<PathBuf> {
+    let dir = root.join("runtime").join("terminal");
+    fs::create_dir_all(&dir).with_context(|| format!("cannot create {}", dir.display()))?;
+    let path = dir.join("profile.sh");
+    let quoted = banner(root)
+        .iter()
+        .map(|line| format!("'{line}'"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let text = format!(
+        "[ -f \"$HOME/.bashrc\" ] && . \"$HOME/.bashrc\"\nprintf '%s\\n' {quoted}\nprintf '\\n'\n"
+    );
+    fs::write(&path, text).with_context(|| format!("cannot write {}", path.display()))?;
+    Ok(path)
+}
+
+/// Opens the chosen shell in the Autark root, with its banner above the first prompt.
 pub fn open(root: &Path, requested: &str, shells: &tools::TerminalInfo) -> Result<()> {
-    let program = shell_program(requested, shells);
+    let shell = selected(requested, shells);
+    let mut args: Vec<String> = Vec::new();
+    let program = match shell {
+        "bash" | "sh" => {
+            let exe = if shell == "bash" {
+                shells.bash.clone()
+            } else {
+                shells.sh.clone()
+            }
+            .context("that shell is not available")?;
+            let file = profile(root)?;
+            if shell == "bash" {
+                args.push("--init-file".to_string());
+                args.push(file.display().to_string());
+            }
+            args.push("-i".to_string());
+            exe
+        }
+        "cmd" => {
+            let script = banner(root)
+                .iter()
+                .map(|line| format!("echo {line}"))
+                .collect::<Vec<_>>()
+                .join(" & ");
+            args.push("/K".to_string());
+            args.push(format!("chcp 65001>nul & {script} & echo."));
+            "cmd.exe".to_string()
+        }
+        _ => {
+            let script = banner(root)
+                .iter()
+                .map(|line| format!("Write-Host '{line}' -ForegroundColor DarkGray; "))
+                .collect::<String>()
+                + "Write-Host ''";
+            args.extend(["-NoLogo", "-NoExit", "-Command"].map(str::to_string));
+            args.push(script);
+            "powershell.exe".to_string()
+        }
+    };
     let mut command = match windows_terminal() {
         Some(wt) => {
             let mut command = Command::new(wt);
-            command.arg("-d").arg(root).arg(&program);
+            command.arg("-d").arg(root).arg(&program).args(&args);
             command
         }
         None => {
             let mut command = Command::new(&program);
-            if program.eq_ignore_ascii_case("powershell.exe") {
-                command.arg("-NoLogo");
-            }
+            command.args(&args);
             command
         }
     };
@@ -68,13 +132,22 @@ pub fn open(root: &Path, requested: &str, shells: &tools::TerminalInfo) -> Resul
         .current_dir(root)
         // Without Windows Terminal the shell still needs its own console window.
         .creation_flags(0x0000_0010);
+    if shell == "sh" {
+        // POSIX sh reads $ENV instead of an rc flag, so it gets the same banner file.
+        if let Ok(file) = profile(root) {
+            command.env("ENV", file);
+        }
+    }
+    if matches!(shell, "bash" | "sh") {
+        command.env("TERM", "xterm-256color");
+    }
     command.spawn().context("cannot open the terminal")?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{autark_path, shell_program};
+    use super::{autark_path, selected};
     use crate::tools::TerminalInfo;
     use std::path::Path;
 
@@ -90,14 +163,13 @@ mod tests {
     #[test]
     fn the_default_shell_follows_git() {
         let without = TerminalInfo::default();
-        assert_eq!(shell_program("system", &without), "powershell.exe");
+        assert_eq!(selected("system", &without), "powershell");
         let with = TerminalInfo {
             bash: Some("C:\\git\\bin\\bash.exe".to_string()),
             sh: Some("C:\\git\\usr\\bin\\sh.exe".to_string()),
         };
-        assert_eq!(shell_program("system", &with), "C:\\git\\bin\\bash.exe");
-        assert_eq!(shell_program("bash", &with), "C:\\git\\bin\\bash.exe");
-        assert_eq!(shell_program("sh", &with), "C:\\git\\usr\\bin\\sh.exe");
-        assert_eq!(shell_program("cmd", &with), "cmd.exe");
+        assert_eq!(selected("system", &with), "bash");
+        assert_eq!(selected("sh", &with), "sh");
+        assert_eq!(selected("cmd", &with), "cmd");
     }
 }
