@@ -27,8 +27,9 @@ pub fn open(root: &Path) -> Result<()> {
     // The console host is whatever Windows uses by default, so this lands in Windows Terminal where it is set.
     let mut command = Command::new("powershell.exe");
     let banner = format!(
-        "Write-Host 'Autark terminal · {root}' -ForegroundColor DarkGray; \
-         Write-Host 'Autark {version} · AGPL-3.0 · github.com/verzly/autark' -ForegroundColor DarkGray; \
+        "Write-Host 'Autark v{version}' -ForegroundColor DarkGray; \
+         Write-Host 'Autark terminal · {root}' -ForegroundColor DarkGray; \
+         Write-Host 'AGPL-3.0 · github.com/verzly/autark' -ForegroundColor DarkGray; \
          Write-Host '© 2026 rozsazoltan · apps, tools and settings stay in this folder' -ForegroundColor DarkGray; \
          Write-Host 'Autark bin and mise shims are on PATH' -ForegroundColor DarkGray; \
          Write-Host ''",
