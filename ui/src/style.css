@@ -132,7 +132,7 @@ a:hover,a:visited:hover{color:#fff;text-decoration-color:#8a8a8a}
 .mise-detected-row .icon-button svg{width:12px;height:12px}
 
 /* autark wordmark: slow sheen, like the opencode wordmark */
-.empty-mark{background:linear-gradient(90deg,#242424 0%,#242424 40%,#8a8a8a 47%,#e8e8e8 50%,#8a8a8a 53%,#242424 60%,#242424 100%);background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:empty-mark-sheen 7s steps(16,end) infinite}
+.empty-mark{background:linear-gradient(90deg,#242424 0%,#242424 40%,#8a8a8a 47%,#e8e8e8 50%,#8a8a8a 53%,#242424 60%,#242424 100%);background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:empty-mark-sheen 7s linear infinite}
 @keyframes empty-mark-sheen{0%{background-position:0% 0}28.6%{background-position:100% 0}100%{background-position:100% 0}}
 @media (prefers-reduced-motion:reduce){.empty-mark{animation:none;background:none;color:#242424;-webkit-text-fill-color:currentColor}}
 
