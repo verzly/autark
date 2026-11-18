@@ -36,7 +36,9 @@ export default function App() {
   const [panel, setPanel] = createSignal<InlineAction>(null);
   const [removeText, setRemoveText] = createSignal("");
   const [requestError, setRequestError] = createSignal("")
-  const [terminalNotice, setTerminalNotice] = createSignal("");
+  const [terminalNotice, setTerminalNotice] = createSignal("")
+  // The shell picker hangs off the terminal button, opened with a right click.
+  const [terminalMenu, setTerminalMenu] = createSignal<{ x: number; y: number } | null>(null);;
   const [busy, setBusy] = createSignal(false);
   const [buffers, setBuffers] = createSignal<Record<string, string[]>>(mockMode() ? { "unsloth-studio": previewLogs } : {});
   const [follow, setFollow] = createSignal(true);
@@ -255,6 +257,14 @@ export default function App() {
       else await run(() => api.saveSettings({ ...state().settings, root: picked }, false));
     } catch (e) { setRequestError(errText(e)); }
   };
+  createEffect(() => {
+    if (!terminalMenu()) return;
+    const close = () => setTerminalMenu(null);
+    const escape = (e: KeyboardEvent) => { if (e.key === "Escape") setTerminalMenu(null); };
+    const timer = setTimeout(() => window.addEventListener("mousedown", close), 0);
+    window.addEventListener("keydown", escape);
+    onCleanup(() => { clearTimeout(timer); window.removeEventListener("mousedown", close); window.removeEventListener("keydown", escape); });
+  });
   const setTerminal = (terminal: string) => {
     const settings = { ...state().settings, terminal };
     if (mockMode()) { setState(s => ({ ...s, settings })); return; }
@@ -424,7 +434,11 @@ export default function App() {
         }
       }}><Icon name="menu" /></button>
       <button class={`add-tab marketplace-tab ${chooser() ? "selected" : ""}`} aria-label="Open marketplace" aria-pressed={chooser()} onClick={() => (chooser() ? hideChooser() : showChooser())}><Icon name="gridPlus" /></button>
-      <button class="add-tab terminal-launch" aria-label="Open terminal" title="Open the Autark terminal" onClick={openTerminal}>&gt;_</button>
+      <button class="add-tab terminal-launch" aria-label="Open terminal" title="Open the Autark terminal (right click to pick the shell)" onClick={openTerminal} onContextMenu={e => {
+        e.preventDefault();
+        const rect = e.currentTarget.getBoundingClientRect();
+        setTerminalMenu(terminalMenu() ? null : { x: rect.left, y: rect.bottom + 6 });
+      }}>&gt;_</button>
       <div class="tabs" role="tablist" aria-label="Open apps">
         <For each={openIds()}>{id => {
           const app = () => state().apps.find(a => a.id === id);
@@ -449,6 +463,26 @@ export default function App() {
         <button class="close-window" aria-label="Close" onClick={() => void windowAction("close")}><Icon name="close" /></button>
       </div>
     </header>
+    <Show when={terminalMenu()}>{menu => {
+      const pick = (value: string, label: string) => {
+        const missing = () => (value === "sh" && !state().terminal.sh) || (value === "bash" && !state().terminal.bash);
+        return <button role="menuitemradio" aria-checked={state().settings.terminal === value} disabled={missing()} onMouseDown={e => e.stopPropagation()} onClick={() => { setTerminalMenu(null); setTerminal(value); }}>
+          <span class="terminal-menu-check">{state().settings.terminal === value ? "\u2713" : ""}</span>
+          <span>{label}</span>
+          <Show when={missing()}><small>not found</small></Show>
+        </button>;
+      };
+
+      return <div class="terminal-menu" role="menu" aria-label="Terminal shell" style={{ left: `${menu().x}px`, top: `${menu().y}px` }} onMouseDown={e => e.stopPropagation()}>
+        <span class="terminal-menu-head">Terminal</span>
+        {pick("system", "System default")}
+        {pick("powershell", "PowerShell")}
+        {pick("cmd", "cmd")}
+        {pick("sh", "sh")}
+        {pick("bash", "bash")}
+        <small class="terminal-menu-note">System default uses bash when git is installed.</small>
+      </div>;
+    }}</Show>
     <main class="card">
       <Show when={!state().settings.wizard_complete || !state().mise.available || miseScreen()} fallback={<>
       <Show when={settingsOpen()}><section class="settings-view">
