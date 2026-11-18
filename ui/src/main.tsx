@@ -58,6 +58,8 @@ export default function App() {
   const currentApp = createMemo(() => state().apps.find(a => a.id === active()) ?? null);
   const openIds = () => state().settings.open_tabs;
   const [autarkTab, setAutarkTab] = createSignal(true);
+  // Settings can reopen the mise screen instead of duplicating the picker.
+  const [miseScreen, setMiseScreen] = createSignal(false);
   const [builtinTabs, setBuiltinTabs] = createSignal<string[]>([]);
   const [shortcutDone, setShortcutDone] = createSignal<string[]>([]);
   const [shortcutBusy, setShortcutBusy] = createSignal<string[]>([]);
@@ -104,6 +106,7 @@ export default function App() {
   // The bar runs 0 to 100 only while Autark downloads its own mise.
   const [miseInstalling, setMiseInstalling] = createSignal(false);
   const downloading = () => miseInstalling() && busy();
+  const loadingPercent = () => (miseInstalling() ? (misePercent() ?? 0) : pickPercent());
   createEffect(() => { if (!busy()) setMiseInstalling(false); });
   const localInstalled = () => state().mise.bin.some(entry => entry.name.toLowerCase() === "mise.exe");
   const localSelected = () => {
@@ -111,10 +114,24 @@ export default function App() {
     return !!selected && selected.toLowerCase() === state().mise.local_path.toLowerCase();
   };
   // Picking a working mise moves on, so the step is not a dead end.
+  const [misePicking, setMisePicking] = createSignal(false);
+  const [pickPercent, setPickPercent] = createSignal(0);
+  createEffect(() => {
+    if (!misePicking()) return;
+    setPickPercent(0);
+    const timer = setInterval(() => setPickPercent(value => (value >= 90 ? 90 : value + 6)), 40);
+    onCleanup(() => clearInterval(timer));
+  });
   const pickMise = async (path: string) => {
-    const next = await api.setMisePath(path);
-    if (!next.mise.available || next.settings.wizard_complete) return next;
-    return api.saveSettings({ ...next.settings, wizard_complete: true }, false);
+    setMisePicking(true);
+    try {
+      const next = await api.setMisePath(path);
+      if (!next.mise.available || next.settings.wizard_complete) return next;
+      return await api.saveSettings({ ...next.settings, wizard_complete: true }, false);
+    } finally {
+      setMisePicking(false);
+      setMiseScreen(false);
+    }
   };
   const logEntries = () => {
     const lines = logs();
@@ -314,7 +331,7 @@ export default function App() {
 
   return <div class="app">
     <header class="chrome" data-tauri-drag-region>
-      <Show when={state().mise.available && state().settings.wizard_complete}>
+      <Show when={state().mise.available && state().settings.wizard_complete && !miseScreen()}>
       <button class={`gear ${settingsOpen() ? "selected" : ""}`} aria-label="Settings" aria-pressed={settingsOpen()} onClick={() => {
         if (!settingsOpen()) {
           setSettingsReturn(active());
@@ -352,7 +369,7 @@ export default function App() {
       </div>
     </header>
     <main class="card">
-      <Show when={!state().settings.wizard_complete || !state().mise.available} fallback={<>
+      <Show when={!state().settings.wizard_complete || !state().mise.available || miseScreen()} fallback={<>
       <Show when={settingsOpen()}><section class="settings-view">
         <button class="back-button" onClick={() => { const target = settingsReturn() ?? AUTARK_TAB; setSettingsOpen(false); setActive(target); setChooser(false); setAppSettingsOpen(null); }}>← back to homepage</button>
         <div class="view-heading"><div><span class="eyebrow">AUTARK</span><h1>Settings</h1></div></div>
@@ -362,6 +379,7 @@ export default function App() {
         <div class="settings-content">
         <Show when={settingsTab() === "General"}>
         <section class="setting-row"><div><h2>Root folder</h2><p>Apps and managed tools live here.</p><button class="path" onClick={() => reveal("root")}>{state().settings.root}</button></div><button class="button" disabled={state().busy} onClick={() => void changeRoot()}>Change</button></section>
+        <section class="setting-row"><div><h2>mise</h2><p>{state().mise.path ?? "not resolved"}{state().mise.version ? ` · ${state().mise.version}` : ""}</p></div><button class="button" disabled={state().busy} onClick={() => { setMiseScreen(true); setSettingsOpen(false); setActive(null); setChooser(false); }}>Change</button></section>
         <section class="preference-section"><h2>Reset Autark</h2><p>Deletes the marketplace clone, runtime tools and every installed app in the Autark folder, then starts the wizard again.</p>
           <Show when={!resetConfirm()}><button class="button" disabled={state().busy} onClick={() => { setResetText(""); setResetConfirm(true); }}>Reset Autark</button></Show>
           <Show when={resetConfirm()}><div class="inline-panel remove-panel"><label>Type RESET<input value={resetText()} onInput={e => setResetText(e.currentTarget.value)} /></label><div><button class="button" onClick={() => setResetConfirm(false)}>Cancel</button><button class="button primary" disabled={state().busy || resetText() !== "RESET"} onClick={() => { setResetConfirm(false); if (mockMode()) setState(s => ({ ...s, settings: { ...s.settings, wizard_complete: false } })); else void run(() => api.resetAutark("RESET")); }}>Confirm</button></div></div></Show>
@@ -379,13 +397,7 @@ export default function App() {
             <Show when={localAppsConfirm() && !state().settings.experimental_local_apps}><div class="inline-panel"><p>Local apps run setup commands from a file you supply. Only add manifests you trust.</p><div><button class="button" onClick={() => setLocalAppsConfirm(false)}>Cancel</button><button class="button primary" onClick={enableLocalApps}>Enable local apps</button></div></div></Show>
           </section>
           <section class="preference-section"><h2>Built-ins</h2>
-            <p class="settings-muted">mise: {state().mise.path ?? "not resolved"} · {state().mise.version ?? "version unknown"}{state().mise.source ? ` (${state().mise.source})` : ""}</p>
-            <div class="mise-detected" role="list" aria-label="mise executables">
-              <Show when={localInstalled()}><button class={`mise-detected-row ${localSelected() ? "selected" : ""}`} role="listitem" title={state().mise.local_path} disabled={state().busy} onClick={() => void run(() => pickMise(state().mise.local_path))}><span title={state().mise.local_path}>{state().mise.local_path}</span><small>{calver(state().mise.version)}</small></button></Show>
-              <For each={state().mise.detected}>{entry => <button class={`mise-detected-row ${state().mise.path === entry.path ? "selected" : ""}`} role="listitem" title={entry.path} disabled={state().busy} onClick={() => void run(() => pickMise(entry.path))}><span title={entry.path}>{entry.path}</span><small>{calver(entry.version)}</small></button>}</For>
-            </div>
-            <button class="button" disabled={state().busy} onClick={() => void run(async () => { const path = await api.pickFile("Choose mise.exe", "exe"); return path ? api.setMisePath(path) : undefined; })}>Choose another mise.exe</button>
-            <label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.force_local_mise} onChange={e => setGlobalPref("force_local_mise", e.currentTarget.checked)} /><span><b>Always use Autark's own mise</b><small>Ignore the mise on this machine and require Autark's own copy.</small></span></label>
+                        <label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.force_local_mise} onChange={e => setGlobalPref("force_local_mise", e.currentTarget.checked)} /><span><b>Always use Autark's own mise</b><small>Ignore the mise on this machine and require Autark's own copy.</small></span></label>
             <label class="preference-toggle"><input type="checkbox" role="switch" checked={state().mise.bin_in_path} onChange={e => void run(() => api.setBinPath(e.currentTarget.checked))} /><span><b>Add Autark's bin folder to PATH</b><small>{state().mise.bin_path}</small></span></label>
           </section>
           <p class="settings-muted">Experimental features may change or break.</p>
@@ -558,7 +570,7 @@ export default function App() {
         <Show when={wizardStep() === 1} fallback={<>
         <div><h1>Connect mise</h1><p>Autark runs every app through <button class="inline-link" onClick={() => openUrl("https://github.com/jdx/mise")}>mise</button> and the <code>mise</code> command is not available on this machine.</p></div>
         <section><h2>I already have mise</h2><p>Point Autark at the existing <code>mise.exe</code>.</p><Show when={state().mise.detected.length}><div class="mise-detected" role="list" aria-label="Detected mise"><For each={state().mise.detected}>{entry => <button class={`mise-detected-row ${state().mise.path === entry.path ? "selected" : ""}`} role="listitem" title={entry.path} disabled={busy()} onClick={() => void run(() => pickMise(entry.path))}><span title={entry.path}>{entry.path}</span><small>{calver(entry.version)}</small></button>}</For></div></Show><button class="button" disabled={busy()} onClick={() => void run(async () => { const path = await api.pickFile("Choose mise.exe", "exe"); return path ? api.setMisePath(path) : undefined; })}>Choose another mise.exe</button></section>
-        <section><h2>Install it for Autark</h2><p>Autark downloads mise into its own folder and keeps it there. Nothing is installed machine-wide.</p><footer><span>Local folder: {state().mise.local_path}{state().mise.force_local ? " · Always use Autark's own mise" : ""}</span><button class="icon-button" aria-label="Change Autark folder" title="Change Autark folder" onClick={() => void chooseRoot()}><Icon name="pencil" /></button></footer><Show when={localInstalled()}><div class={`mise-detected-row ${localSelected() ? "selected" : ""}`} role="listitem"><button class="mise-pick" title={state().mise.local_path} disabled={busy()} onClick={() => void run(() => pickMise(state().mise.local_path))}><span title={state().mise.local_path}>{state().mise.local_path}</span><small>{calver(state().mise.version)}</small></button><button class="icon-button" aria-label="Remove Autark's mise" title="Remove Autark's mise" disabled={busy()} onClick={() => void run(() => api.removeBinEntry("mise.exe"))}><Icon name="trash" /></button></div></Show><Show when={!localInstalled()}><Show when={downloading()}><div class="mise-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={misePercent() ?? 0}><span style={{ width: `${misePercent() ?? 0}%` }} /></div><small class="mise-progress">{misePercent() ?? 0}%</small></Show><button class="button primary" disabled={busy()} onClick={() => { setMiseInstalling(true); setBuffers(b => ({ ...b, "mise.exe": [] })); void run(() => api.installMise()); }}>Install</button></Show></section>
+        <section><h2>Install it for Autark</h2><p>Autark downloads mise into its own folder and keeps it there. Nothing is installed machine-wide.</p><footer><span>Local folder: {state().mise.local_path}{state().mise.force_local ? " · Always use Autark's own mise" : ""}</span><button class="icon-button" aria-label="Change Autark folder" title="Change Autark folder" onClick={() => void chooseRoot()}><Icon name="pencil" /></button></footer><Show when={miseScreen()}><div class="actions"><button class="button" onClick={() => setMiseScreen(false)}>Done</button></div></Show><Show when={localInstalled()}><div class={`mise-detected-row ${localSelected() ? "selected" : ""}`} role="listitem"><button class="mise-pick" title={state().mise.local_path} disabled={busy()} onClick={() => void run(() => pickMise(state().mise.local_path))}><span title={state().mise.local_path}>{state().mise.local_path}</span><small>{calver(state().mise.version)}</small></button><button class="icon-button" aria-label="Remove Autark's mise" title="Remove Autark's mise" disabled={busy()} onClick={() => void run(() => api.removeBinEntry("mise.exe"))}><Icon name="trash" /></button></div></Show><Show when={!localInstalled()}><Show when={downloading()}><div class="mise-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={misePercent() ?? 0}><span style={{ width: `${misePercent() ?? 0}%` }} /></div><small class="mise-progress">{misePercent() ?? 0}%</small></Show><button class="button primary" disabled={busy()} onClick={() => { setMiseInstalling(true); setBuffers(b => ({ ...b, "mise.exe": [] })); void run(() => api.installMise()); }}>Install</button></Show></section>
         <div class="actions"><button class="button" onClick={() => setWizardStep(1)}>Back</button><button class="button primary" disabled={state().busy} onClick={finishWizard}>Finish</button></div>
         </>}>
           <div class="empty-mark" aria-hidden="true">autark</div><h1>Where should Autark keep its files?</h1>
@@ -571,9 +583,16 @@ export default function App() {
           <div class="empty-mark" aria-hidden="true">autark</div>
           <div><h1>mise is required</h1><p>Autark runs every app through <button class="inline-link" onClick={() => openUrl("https://github.com/jdx/mise")}>mise</button> and the <code>mise</code> command is not available on this machine.</p></div>
           <section><h2>I already have mise</h2><p>Point Autark at the existing <code>mise.exe</code>.</p><Show when={state().mise.detected.length}><div class="mise-detected" role="list" aria-label="Detected mise"><For each={state().mise.detected}>{entry => <button class={`mise-detected-row ${state().mise.path === entry.path ? "selected" : ""}`} role="listitem" title={entry.path} disabled={busy()} onClick={() => void run(() => pickMise(entry.path))}><span title={entry.path}>{entry.path}</span><small>{calver(entry.version)}</small></button>}</For></div></Show><button class="button" disabled={busy()} onClick={() => void run(async () => { const path = await api.pickFile("Choose mise.exe", "exe"); return path ? api.setMisePath(path) : undefined; })}>Choose another mise.exe</button></section>
-          <section><h2>Install it for Autark</h2><p>Autark downloads mise into its own folder and keeps it there. Nothing is installed machine-wide.</p><footer><span>Local folder: {state().mise.local_path}{state().mise.force_local ? " · Always use Autark's own mise" : ""}</span><button class="icon-button" aria-label="Change Autark folder" title="Change Autark folder" onClick={() => void chooseRoot()}><Icon name="pencil" /></button></footer><Show when={localInstalled()}><div class={`mise-detected-row ${localSelected() ? "selected" : ""}`} role="listitem"><button class="mise-pick" title={state().mise.local_path} disabled={busy()} onClick={() => void run(() => pickMise(state().mise.local_path))}><span title={state().mise.local_path}>{state().mise.local_path}</span><small>{calver(state().mise.version)}</small></button><button class="icon-button" aria-label="Remove Autark's mise" title="Remove Autark's mise" disabled={busy()} onClick={() => void run(() => api.removeBinEntry("mise.exe"))}><Icon name="trash" /></button></div></Show><Show when={!localInstalled()}><Show when={downloading()}><div class="mise-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={misePercent() ?? 0}><span style={{ width: `${misePercent() ?? 0}%` }} /></div><small class="mise-progress">{misePercent() ?? 0}%</small></Show><button class="button primary" disabled={busy()} onClick={() => { setMiseInstalling(true); setBuffers(b => ({ ...b, "mise.exe": [] })); void run(() => api.installMise()); }}>Install</button></Show></section>
+          <section><h2>Install it for Autark</h2><p>Autark downloads mise into its own folder and keeps it there. Nothing is installed machine-wide.</p><footer><span>Local folder: {state().mise.local_path}{state().mise.force_local ? " · Always use Autark's own mise" : ""}</span><button class="icon-button" aria-label="Change Autark folder" title="Change Autark folder" onClick={() => void chooseRoot()}><Icon name="pencil" /></button></footer><Show when={miseScreen()}><div class="actions"><button class="button" onClick={() => setMiseScreen(false)}>Done</button></div></Show><Show when={localInstalled()}><div class={`mise-detected-row ${localSelected() ? "selected" : ""}`} role="listitem"><button class="mise-pick" title={state().mise.local_path} disabled={busy()} onClick={() => void run(() => pickMise(state().mise.local_path))}><span title={state().mise.local_path}>{state().mise.local_path}</span><small>{calver(state().mise.version)}</small></button><button class="icon-button" aria-label="Remove Autark's mise" title="Remove Autark's mise" disabled={busy()} onClick={() => void run(() => api.removeBinEntry("mise.exe"))}><Icon name="trash" /></button></div></Show><Show when={!localInstalled()}><Show when={downloading()}><div class="mise-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={misePercent() ?? 0}><span style={{ width: `${misePercent() ?? 0}%` }} /></div><small class="mise-progress">{misePercent() ?? 0}%</small></Show><button class="button primary" disabled={busy()} onClick={() => { setMiseInstalling(true); setBuffers(b => ({ ...b, "mise.exe": [] })); void run(() => api.installMise()); }}>Install</button></Show></section>
         </Show>
       </section>
+      </Show>
+      <Show when={miseInstalling() || misePicking()}>
+        <div class="mise-loading" role="status" aria-live="polite">
+          <div class="empty-mark" aria-hidden="true">autark</div>
+          <div class="mise-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={loadingPercent()}><span style={{ width: `${loadingPercent()}%` }} /></div>
+          <small class="settings-muted">{loadingPercent()}%</small>
+        </div>
       </Show>
     </main>
       <Show when={requestError() || currentApp()?.last_error || state().marketplace.error}>
