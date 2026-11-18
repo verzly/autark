@@ -146,3 +146,6 @@ a:hover,a:visited:hover{color:#fff;text-decoration-color:#8a8a8a}
 
 /* built-in card: a machine mise cannot be managed here */
 .market-unavailable{margin:0;color:#d4685f;font-size:10.5px;line-height:1.4}
+
+/* danger copy inside a confirmation panel */
+.danger-note{margin:0;color:#d4685f;font-size:11px;line-height:1.45}

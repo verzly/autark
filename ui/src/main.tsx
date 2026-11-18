@@ -107,7 +107,7 @@ export default function App() {
   const [miseInstalling, setMiseInstalling] = createSignal(false);
   const downloading = () => miseInstalling() && busy();
   const loadingPercent = () => (miseInstalling() ? (misePercent() ?? 0) : pickPercent());
-  createEffect(() => { if (!busy()) setMiseInstalling(false); });
+  createEffect(() => { if (!busy()) { setMiseInstalling(false); setResetting(false); } });
   const localInstalled = () => state().mise.bin.some(entry => entry.name.toLowerCase() === "mise.exe");
   const localSelected = () => {
     const selected = state().mise.path;
@@ -116,9 +116,10 @@ export default function App() {
   // Picking a working mise moves on, so the step is not a dead end.
   const [misePicking, setMisePicking] = createSignal(false);
   const [misePickTarget, setMisePickTarget] = createSignal<string | null>(null);
+  const [resetting, setResetting] = createSignal(false);
   const [pickPercent, setPickPercent] = createSignal(0);
   createEffect(() => {
-    if (!misePicking()) return;
+    if (!misePicking() && !resetting()) return;
     setPickPercent(0);
     const timer = setInterval(() => setPickPercent(value => (value >= 90 ? 90 : value + 6)), 40);
     onCleanup(() => clearInterval(timer));
@@ -380,7 +381,7 @@ export default function App() {
         <section class="setting-row"><div><h2>mise</h2><p>{state().mise.path ?? "not resolved"}{state().mise.version ? ` · ${state().mise.version}` : ""}</p></div><button class="button" disabled={state().busy} onClick={() => { setMiseScreen(true); setSettingsOpen(false); setActive(null); setChooser(false); }}>Change</button></section>
         <section class="preference-section"><h2>Reset Autark</h2><p>Deletes the marketplace clone, runtime tools and every installed app in the Autark folder, then starts the wizard again.</p>
           <Show when={!resetConfirm()}><button class="button" disabled={state().busy} onClick={() => { setResetText(""); setResetConfirm(true); }}>Reset Autark</button></Show>
-          <Show when={resetConfirm()}><div class="inline-panel remove-panel"><label>Type RESET<input value={resetText()} onInput={e => setResetText(e.currentTarget.value)} /></label><div><button class="button" onClick={() => setResetConfirm(false)}>Cancel</button><button class="button primary" disabled={state().busy || resetText() !== "RESET"} onClick={() => { setResetConfirm(false); if (mockMode()) setState(s => ({ ...s, settings: { ...s.settings, wizard_complete: false } })); else void run(() => api.resetAutark("RESET")); }}>Confirm</button></div></div></Show>
+          <Show when={resetConfirm()}><div class="inline-panel remove-panel"><p class="danger-note">This deletes every user setting, preference and file inside the Autark folder.</p><label>Type RESET<input value={resetText()} onInput={e => setResetText(e.currentTarget.value)} /></label><div><button class="button" onClick={() => setResetConfirm(false)}>Cancel</button><button class="button primary" disabled={state().busy || resetText() !== "RESET"} onClick={() => { setResetConfirm(false); if (mockMode()) setState(s => ({ ...s, settings: { ...s.settings, wizard_complete: false } })); else { setResetting(true); void run(() => api.resetAutark("RESET")); } }}>Confirm</button></div></div></Show>
         </section>
          <section class="setting-row"><div><h2>Settings file</h2><p>Portable launcher preferences.</p><button class="path" onClick={() => reveal("settings")}>{state().settings_path}</button></div></section>
           <section class="preference-section window-preferences"><h2>Window</h2>
@@ -592,10 +593,10 @@ export default function App() {
         </Show>
       </section>
       </Show>
-      <Show when={miseInstalling() || misePicking()}>
+      <Show when={miseInstalling() || misePicking() || resetting()}>
         <div class="mise-loading" role="status" aria-live="polite">
           <div class="empty-mark" aria-hidden="true">autark</div>
-          <small class="mise-progress">{miseInstalling() ? "Installing Autark's mise" : `Using ${misePickTarget() ?? "the selected mise.exe"}`}</small>
+          <small class="mise-progress">{resetting() ? "Resetting Autark" : miseInstalling() ? "Installing Autark's mise" : `Using ${misePickTarget() ?? "the selected mise.exe"}`}</small>
           <div class="mise-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={loadingPercent()}><span style={{ width: `${loadingPercent()}%` }} /></div>
           <small class="settings-muted">{loadingPercent()}%</small>
         </div>
