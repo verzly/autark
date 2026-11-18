@@ -179,7 +179,7 @@ async fn remove_bin_entry(shared: TauriState<'_, Arc<Shared>>, name: String) -> 
 }
 
 #[tauri::command(rename_all = "snake_case")]
-fn save_settings(
+async fn save_settings(
     app: AppHandle,
     shared: TauriState<'_, Arc<Shared>>,
     mut settings: Settings,
@@ -197,18 +197,32 @@ fn save_settings(
             "finish the running operation first",
         ));
     }
-    let current = apps::wire(&shared).settings;
-    settings.open_tabs = current.open_tabs;
-    settings.active_tab = current.active_tab;
+    let inner = shared.inner().clone();
+    let current = apps::wire(&inner).settings;
+    settings.open_tabs = current.open_tabs.clone();
+    settings.active_tab = current.active_tab.clone();
     settings.marketplace_last_refresh = current.marketplace_last_refresh;
     settings.wizard_complete |= current.wizard_complete;
-    settings.apply_folder_name(move_folder.unwrap_or(false))?;
-    settings.save()?;
-    apps::reload_settings(&shared, settings)?;
-    reconcile_tray(&app, &apps::wire(&shared).settings);
-    apply_startup(&app, &apps::wire(&shared).settings);
-    apps::emit_state(&app, &shared);
-    Ok(apps::wire(&shared))
+    let mise_changed = settings.mise_path != current.mise_path
+        || settings.force_local_mise != current.force_local_mise
+        || settings.bin_in_path != current.bin_in_path;
+    let task_shared = inner.clone();
+    tauri::async_runtime::spawn_blocking(move || -> CmdResult<()> {
+        settings.apply_folder_name(move_folder.unwrap_or(false))?;
+        settings.save()?;
+        apps::reload_settings(&task_shared, settings)?;
+        if mise_changed {
+            apps::refresh_mise(&task_shared);
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| CmdError::new("internal", e.to_string()))??;
+    let state = apps::wire(&inner);
+    reconcile_tray(&app, &state.settings);
+    apply_startup(&app, &state.settings);
+    apps::emit_state(&app, &inner);
+    Ok(state)
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -245,6 +259,7 @@ async fn reset_autark(
         settings.wizard_complete = false;
         settings.save()?;
         apps::reload_settings(&task_shared, settings)?;
+        apps::refresh_mise(&task_shared);
         Ok::<(), CmdError>(())
     })
     .await

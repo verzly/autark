@@ -1651,8 +1651,6 @@ pub fn reload_settings(shared: &Shared, settings: Settings) -> Result<()> {
         core.settings = settings;
         load_catalogue(&mut core);
     }
-    let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
-    core.mise = tools::probe(&core.settings);
     Ok(())
 }
 
