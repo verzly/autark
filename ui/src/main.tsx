@@ -108,6 +108,7 @@ export default function App() {
   const downloading = () => miseInstalling() && busy();
   const loadingPercent = () => (miseInstalling() ? (misePercent() ?? 0) : pickPercent());
   createEffect(() => { if (!busy()) { setMiseInstalling(false); setResetting(false); } });
+  createEffect(() => document.body.classList.toggle("is-loading", miseInstalling() || misePicking() || resetting()));
   const localInstalled = () => state().mise.bin.some(entry => entry.name.toLowerCase() === "mise.exe");
   const localSelected = () => {
     const selected = state().mise.path;
