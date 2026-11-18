@@ -12,7 +12,7 @@ use tauri::AppHandle;
 /// Console apps Autark starts must stay invisible; only the terminal button asks for a console.
 pub(crate) fn new_command(program: impl AsRef<OsStr>) -> Command {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let mut command = new_command(program);
+    let mut command = Command::new(program);
     command.creation_flags(CREATE_NO_WINDOW);
     command
 }
