@@ -69,6 +69,28 @@ impl Settings {
         PathBuf::from(self.root.trim())
     }
 
+    /// A folder picked in the dialog is the parent: Autark keeps its files in `<picked>\<folder name>`.
+    /// Returns the new `root` and `folder_name`; picking a folder already named that way keeps it as is.
+    pub fn adopt_picked_folder(picked: &str, folder_name: &str) -> (String, String) {
+        let trimmed = folder_name.trim();
+        let name = if trimmed.is_empty() {
+            DEFAULT_FOLDER_NAME
+        } else {
+            trimmed
+        };
+        let picked = PathBuf::from(picked.trim());
+        let already_named = picked
+            .file_name()
+            .and_then(|part| part.to_str())
+            .is_some_and(|part| part.eq_ignore_ascii_case(name));
+        let root = if already_named {
+            picked
+        } else {
+            picked.join(name)
+        };
+        (root.to_string_lossy().to_string(), name.to_string())
+    }
+
     pub fn save(&self) -> Result<()> {
         let root = self.root_path();
         fs::create_dir_all(&root)
@@ -176,4 +198,22 @@ pub fn write_pointer(root: &Path) -> Result<()> {
         "root": root.to_string_lossy(),
     }))?;
     fs::write(path, text).context("cannot write launcher-root.json")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Settings;
+
+    #[test]
+    fn a_picked_folder_becomes_the_parent_of_the_root() {
+        let (root, name) = Settings::adopt_picked_folder(r"D:\program", "Autark");
+        assert_eq!(root, r"D:\program\Autark");
+        assert_eq!(name, "Autark");
+    }
+
+    #[test]
+    fn a_picked_folder_already_named_autark_is_the_root() {
+        let (root, _) = Settings::adopt_picked_folder(r"D:\program\autark", "");
+        assert_eq!(root, r"D:\program\autark");
+    }
 }

@@ -203,6 +203,14 @@ async fn save_settings(
     settings.active_tab = current.active_tab.clone();
     settings.marketplace_last_refresh = current.marketplace_last_refresh;
     settings.wizard_complete |= current.wizard_complete;
+    // The folder dialog returns the parent, so a new root means <picked>\<folder name>.
+    let picked = settings.root_path();
+    if picked != current.root_path() {
+        let (root, folder_name) =
+            Settings::adopt_picked_folder(&settings.root, &settings.folder_name);
+        settings.root = root;
+        settings.folder_name = folder_name;
+    }
     let mise_changed = settings.mise_path != current.mise_path
         || settings.force_local_mise != current.force_local_mise
         || settings.bin_in_path != current.bin_in_path;
