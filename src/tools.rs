@@ -330,6 +330,13 @@ _.path = { path = [
 git = "github:git-for-windows/git"
 "##;
 
+/// The shells the terminal button can open. bash and sh are only usable when an exe exists.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct TerminalInfo {
+    pub bash: Option<String>,
+    pub sh: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct GitExternal {
     pub path: String,
@@ -395,6 +402,27 @@ fn external_git(root: &Path) -> Option<GitExternal> {
         });
     }
     None
+}
+
+pub fn probe_terminal(root: &Path) -> TerminalInfo {
+    // git ships its own bash and sh, so a built-in git is enough on its own.
+    let git = own_git(root).and_then(|(exe, _)| exe.parent().and_then(|bin| bin.parent()).map(Path::to_path_buf));
+    let from_git = |relative: &[&str]| {
+        git.as_ref()
+            .map(|dir| relative.iter().fold(dir.clone(), |path, part| path.join(part)))
+            .filter(|path| path.is_file())
+            .map(|path| path.display().to_string())
+    };
+    let on_path = |name: &str| {
+        where_tool(name)
+            .into_iter()
+            .next()
+            .map(|path| path.display().to_string())
+    };
+    TerminalInfo {
+        bash: from_git(&["bin", "bash.exe"]).or_else(|| on_path("bash")),
+        sh: from_git(&["usr", "bin", "sh.exe"]).or_else(|| on_path("sh")),
+    }
 }
 
 pub fn probe_git(settings: &Settings) -> GitInfo {

@@ -318,6 +318,7 @@ pub struct State {
     pub busy: bool,
     pub mise: MiseInfo,
     pub git: tools::GitInfo,
+    pub terminal: tools::TerminalInfo,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -332,6 +333,7 @@ pub struct Core {
     pub marketplace: MarketplaceInfo,
     pub mise: MiseInfo,
     pub git: tools::GitInfo,
+    pub terminal: tools::TerminalInfo,
 }
 
 pub struct Shared {
@@ -348,6 +350,7 @@ impl Shared {
             settings: settings.clone(),
             mise: tools::probe(&settings),
             git: tools::probe_git(&settings),
+            terminal: tools::probe_terminal(&root),
             records: Vec::new(),
             marketplace: MarketplaceInfo {
                 path: marketplace::dir(&root).to_string_lossy().to_string(),
@@ -497,6 +500,7 @@ pub fn wire(shared: &Shared) -> State {
         busy,
         mise: core.mise.clone(),
         git: core.git.clone(),
+        terminal: core.terminal.clone(),
     }
 }
 
@@ -948,6 +952,7 @@ pub fn refresh_mise(shared: &Arc<Shared>) {
     let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
     core.mise = tools::probe(&core.settings);
     core.git = tools::probe_git(&core.settings);
+    core.terminal = tools::probe_terminal(&core.settings.root_path());
 }
 
 fn apply_environment(

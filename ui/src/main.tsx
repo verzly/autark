@@ -255,7 +255,11 @@ export default function App() {
       else await run(() => api.saveSettings({ ...state().settings, root: picked }, false));
     } catch (e) { setRequestError(errText(e)); }
   };
-  const setGlobalPref = (key: "tray_enabled" | "start_with_windows" | "close_to_tray" | "experimental_local_apps" | "force_local_mise" | "animations", next: boolean) => {
+  const setTerminal = (terminal: string) => {
+    const settings = { ...state().settings, terminal };
+    if (mockMode()) { setState(s => ({ ...s, settings })); return; }
+    void run(() => api.saveSettings(settings));
+  };  const setGlobalPref = (key: "tray_enabled" | "start_with_windows" | "close_to_tray" | "experimental_local_apps" | "force_local_mise" | "animations", next: boolean) => {
     const settings = { ...state().settings, [key]: next };
     if (key === "experimental_local_apps" && !next) setMarketFilter("marketplace");
     if (mockMode()) setState(s => ({ ...s, settings }));
@@ -457,6 +461,14 @@ export default function App() {
         <Show when={settingsTab() === "General"}>
         <section class="setting-row"><div><h2>Root folder</h2><p>Apps and managed tools live here.</p><button class="path" onClick={() => reveal("root")}>{state().settings.root}</button></div><button class="button" disabled={state().busy} onClick={() => void changeRoot()}>Change</button></section>
         <section class="setting-row"><div><h2>mise</h2><p>{state().mise.path ?? "not resolved"}{state().mise.version ? ` · ${state().mise.version}` : ""}</p></div><button class="button" disabled={state().busy} onClick={() => { setMiseScreen(true); setSettingsOpen(false); setActive(null); setChooser(false); }}>Change</button></section>
+        <section class="preference-section"><h2>Terminal</h2><p>The &gt;_ button opens this shell in the Autark folder. System default uses bash when git is available.</p>
+          <div class="market-filters" role="group" aria-label="Terminal shell">
+            <For each={[["system", "System default"], ["powershell", "PowerShell"], ["cmd", "cmd"], ["sh", "sh"], ["bash", "bash"]] as const}>{([value, label]) => {
+              const missing = () => (value === "sh" && !state().terminal.sh) || (value === "bash" && !state().terminal.bash);
+              return <button class={`market-filter ${state().settings.terminal === value ? "active" : ""}`} aria-pressed={state().settings.terminal === value} disabled={missing()} title={missing() ? `${label} was not found on this machine` : `Open ${label}`} onClick={() => setTerminal(value)}>{label}</button>;
+            }}</For>
+          </div>
+        </section>
         <section class="preference-section"><h2>Reset Autark</h2><p>Deletes the marketplace clone, runtime tools and every installed app in the Autark folder, then starts the wizard again.</p>
           <Show when={!resetConfirm()}><button class="button" disabled={state().busy} onClick={() => { setResetText(""); setResetConfirm(true); }}>Reset Autark</button></Show>
           <Show when={resetConfirm()}><div class="inline-panel remove-panel"><p class="danger-note">This deletes every user setting, preference and file inside the Autark folder.</p><label>Type RESET<input value={resetText()} onInput={e => setResetText(e.currentTarget.value)} /></label><div><button class="button" onClick={() => setResetConfirm(false)}>Cancel</button><button class="button primary" disabled={state().busy || resetText() !== "RESET"} onClick={() => { setResetConfirm(false); setWizardStep(1); const after = () => { setMiseScreen(false); setSettingsOpen(false); setChooser(false); setAppSettingsOpen(null); setActive(null); setBuffers({}); }; if (mockMode()) { setState(s => ({ ...s, settings: { ...s.settings, wizard_complete: false } })); after(); } else { setResetting(true); void run(() => api.resetAutark("RESET")).then(after); } }}>Confirm</button></div></div></Show>

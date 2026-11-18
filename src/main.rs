@@ -737,8 +737,16 @@ fn open_url(url: String) -> CmdResult<()> {
 
 #[tauri::command]
 fn open_terminal(shared: TauriState<'_, Arc<Shared>>) -> CmdResult<String> {
-    let root = shared.inner().root();
-    terminal::open(&root)?;
+    let inner = shared.inner().clone();
+    let root = inner.root();
+    let shell = inner.plugin_settings().terminal;
+    let shells = inner
+        .core
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .terminal
+        .clone();
+    terminal::open(&root, &shell, &shells)?;
     Ok(format!("Terminal opened in {}", root.display()))
 }
 
