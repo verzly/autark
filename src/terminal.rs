@@ -25,9 +25,17 @@ fn autark_path(root: &Path) -> OsString {
 /// Opens the machine's terminal in the Autark root with Autark's PATH and a short banner.
 pub fn open(root: &Path) -> Result<()> {
     // The console host is whatever Windows uses by default, so this lands in Windows Terminal where it is set.
-    let banner = "Write-Host 'Autark terminal · Autark bin and mise shims are on PATH' -ForegroundColor DarkGray";
     let mut command = Command::new("powershell.exe");
-    command.args(["-NoLogo", "-NoExit", "-Command", banner]);
+    let banner = format!(
+        "Write-Host 'Autark terminal · {root}' -ForegroundColor DarkGray; \
+         Write-Host 'Autark {version} · AGPL-3.0 · github.com/verzly/autark' -ForegroundColor DarkGray; \
+         Write-Host '© 2026 rozsazoltan · apps, tools and settings stay in this folder' -ForegroundColor DarkGray; \
+         Write-Host 'Autark bin and mise shims are on PATH' -ForegroundColor DarkGray; \
+         Write-Host ''",
+        root = root.display(),
+        version = env!("CARGO_PKG_VERSION"),
+    );
+    command.args(["-NoLogo", "-NoExit", "-Command", &banner]);
     tools::environment(&mut command, root);
     command
         .env("PATH", autark_path(root))
