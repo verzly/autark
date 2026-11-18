@@ -202,12 +202,14 @@ pub fn install_local(app: &AppHandle, id: &str, root: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn self_update(app: &AppHandle, id: &str, settings: &Settings) -> Result<()> {
-    let root = settings.root_path();
-    let path = resolve(settings, &root).context("invalid_argument: mise is unavailable")?;
+pub fn self_update(app: &AppHandle, id: &str, root: &Path) -> Result<()> {
+    let path = local_mise(root);
+    if !path.is_file() {
+        bail!("invalid_argument: Autark's own mise is not installed");
+    }
     let mut command = Command::new(path);
     command.arg("self-update");
-    environment(&mut command, &root);
+    environment(&mut command, root);
     apps::run_tool_streaming(app, id, "updating mise".to_string(), command)
 }
 

@@ -138,8 +138,8 @@ async fn install_mise(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> Cm
 #[tauri::command(rename_all = "snake_case")]
 async fn update_mise(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> CmdResult<State> {
     let inner = shared.inner().clone();
-    let settings = inner.plugin_settings();
-    tauri::async_runtime::spawn_blocking(move || tools::self_update(&app, "mise.exe", &settings)).await.map_err(|e| CmdError::new("internal", e.to_string()))??;
+    let root = inner.root();
+    tauri::async_runtime::spawn_blocking(move || tools::self_update(&app, "mise.exe", &root)).await.map_err(|e| CmdError::new("internal", e.to_string()))??;
     apps::refresh_mise(&inner);
     Ok(apps::wire(&inner))
 }
