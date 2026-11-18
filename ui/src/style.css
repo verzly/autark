@@ -105,3 +105,10 @@ a:hover,a:visited:hover{color:#fff;text-decoration-color:#8a8a8a}
 /* footer: pencil and path share one line box, centres aligned */
 .mise-onboarding footer{display:flex;align-items:center;justify-content:center;gap:7px;flex-wrap:wrap}
 .mise-onboarding footer .icon-button{vertical-align:0;align-self:center;line-height:1;flex:none}
+
+/* mise step: detected mise.exe entries, one click each */
+.mise-detected{display:flex;flex-direction:column;gap:4px;width:100%}
+.mise-detected-row{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;padding:7px 9px;border:0;border-radius:7px;background:#151515;color:#cfcfcf;font:11px var(--mono);text-align:left;cursor:pointer}
+.mise-detected-row:hover{background:#1d1d1d;color:#fff}
+.mise-detected-row.selected{background:#222;color:#fff}
+.mise-detected-row small{flex:none;color:#8a8a8a;font-size:10px}

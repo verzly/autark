@@ -17,6 +17,12 @@ pub struct BinEntry {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct DetectedMise {
+    pub path: String,
+    pub version: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct MiseInfo {
     pub available: bool,
     pub source: String,
@@ -26,6 +32,7 @@ pub struct MiseInfo {
     pub bin_path: String,
     pub bin_in_path: bool,
     pub bin: Vec<BinEntry>,
+    pub detected: Vec<DetectedMise>,
     pub force_local: bool,
 }
 
@@ -51,18 +58,29 @@ pub fn resolve(settings: &Settings, root: &Path) -> Option<PathBuf> {
     where_mise()
 }
 
+/// Every `mise` on PATH, so the mise step can offer them as one click.
+fn where_all() -> Vec<PathBuf> {
+    let output = match Command::new("where").arg("mise").output() {
+        Ok(output) if output.status.success() => output,
+        _ => return Vec::new(),
+    };
+    let mut found: Vec<PathBuf> = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let path = PathBuf::from(line.trim());
+        if line.trim().is_empty() || !path.is_file() {
+            continue;
+        }
+        if found.iter().any(|seen| seen.to_string_lossy().eq_ignore_ascii_case(&path.to_string_lossy())) {
+            continue;
+        }
+        found.push(path);
+    }
+    found
+}
+
 /// `where.exe` turns the PATH entry into a real path, which the UI lists and reports.
 fn where_mise() -> Option<PathBuf> {
-    let output = Command::new("where").arg("mise").output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(PathBuf::from)
-        .find(|path| path.is_file())
+    where_all().into_iter().next()
 }
 
 fn environment(command: &mut Command, root: &Path) {
@@ -150,11 +168,20 @@ pub fn probe(settings: &Settings) -> MiseInfo {
     if let Some(mise) = bin.iter_mut().find(|entry| entry.name.eq_ignore_ascii_case("mise.exe")) {
         mise.version = version.clone();
     }
+    let detected: Vec<DetectedMise> = where_all()
+        .into_iter()
+        .filter_map(|candidate| {
+            run_version(&candidate, &root).map(|found| DetectedMise {
+                path: candidate.to_string_lossy().to_string(),
+                version: Some(found),
+            })
+        })
+        .collect();
     MiseInfo {
         available: version.is_some(), source: source.to_string(), path, version,
         local_path: bin_dir(&root).join("mise.exe").to_string_lossy().to_string(),
         bin_path: bin_path.to_string_lossy().to_string(),
-        bin_in_path: registry_has_path(&bin_path), bin, force_local: settings.force_local_mise,
+        bin_in_path: registry_has_path(&bin_path), bin, detected, force_local: settings.force_local_mise,
     }
 }
 
