@@ -241,7 +241,7 @@ async fn reset_autark(
     let task_shared = inner.clone();
     tauri::async_runtime::spawn_blocking(move || {
         apps::stop_all(&task_shared);
-        let mut settings = task_shared.plugin_settings();
+        let settings = task_shared.plugin_settings();
         let root = settings.root_path();
         if root.exists() {
             let entries = std::fs::read_dir(&root).map_err(anyhow::Error::from)?;
@@ -254,11 +254,18 @@ async fn reset_autark(
                 }
             }
         }
-        settings.open_tabs.clear();
-        settings.active_tab = None;
-        settings.wizard_complete = false;
-        settings.save()?;
-        apps::reload_settings(&task_shared, settings)?;
+        // A reset forgets every preference: only the folder itself survives.
+        let folder_name = settings.folder_name.clone();
+        let root_text = root.to_string_lossy().to_string();
+        let had_path = settings.bin_in_path;
+        let mut fresh = Settings::default();
+        fresh.root = root_text;
+        fresh.folder_name = folder_name;
+        fresh.save()?;
+        if had_path {
+            let _ = tools::set_path_registration(&root, false);
+        }
+        apps::reload_settings(&task_shared, fresh)?;
         apps::refresh_mise(&task_shared);
         Ok::<(), CmdError>(())
     })
