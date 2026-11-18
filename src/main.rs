@@ -667,12 +667,16 @@ fn reveal_path(
     shared: TauriState<'_, Arc<Shared>>,
     target: String,
     app_id: Option<String>,
+    path: Option<String>,
 ) -> CmdResult<()> {
     let root = shared.root();
     let path = match target.as_str() {
         "root" => root.clone(),
         "marketplace" => marketplace::dir(&root),
         "settings" => settings::settings_path(),
+        "file" => std::path::PathBuf::from(
+            path.ok_or_else(|| CmdError::new("invalid_argument", "path is required"))?,
+        ),
         "app" => {
             let id = app_id
                 .clone()
@@ -687,7 +691,7 @@ fn reveal_path(
         }
     };
     let mut command = std::process::Command::new("explorer");
-    if target == "settings" && path.exists() {
+    if (target == "settings" || target == "file") && path.exists() {
         command.arg(format!("/select,{}", path.display()));
     } else {
         command.arg(&path);

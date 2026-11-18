@@ -46,8 +46,7 @@ export default function App() {
     const mise = state().mise;
     const entries = mise.bin.slice();
     const hasLocalMise = entries.some(entry => entry.name.toLowerCase() === "mise.exe");
-    const path = mise.path;
-    if (!hasLocalMise) entries.unshift({ name: "mise.exe", path: path ?? "", version: mise.version, size: 0 });
+    if (!hasLocalMise) entries.unshift({ name: "mise.exe", path: "", version: null, size: 0 });
     return entries.filter(entry => `${entry.name} ${entry.version ?? ""}`.toLowerCase().includes(search().toLowerCase()));
   });
   const isResolvedMise = (name: string) => name.toLowerCase() === "mise.exe" && !state().mise.bin.some(entry => entry.name.toLowerCase() === "mise.exe");
@@ -303,6 +302,7 @@ export default function App() {
     catch (e) { setRequestError(errText(e)); }
   };
   const openUrl = (url: string) => { if (!mockMode()) void api.openUrl(url).catch(e => setRequestError(errText(e))); };
+  const revealFile = (path: string) => { if (!mockMode()) void api.revealFile(path).catch(e => setRequestError(errText(e))); };
   const reveal = (target: "root" | "marketplace" | "app" | "settings", id?: string) => { if (!mockMode()) void api.revealPath(target, id).catch(e => setRequestError(errText(e))); };
   const refresh = () => mockMode() ? undefined : void run(() => api.refreshMarketplace());
   const doUpdateAll = () => {
@@ -520,17 +520,18 @@ export default function App() {
                 <div class="marketplace-grid" role="list" aria-label="Built-in apps"><For each={builtinApps()}>{(entry, i) => {
                   const title = entry.name.replace(/\.exe$/i, "");
                   const systemMise = isResolvedMise(entry.name);
+                  const external = state().mise.path;
                   return <article role="listitem" class={`market-card ${selected() === i() ? "market-selected" : ""}`} onMouseEnter={() => setSelected(i())}>
-                    <div class="market-card-head"><span class="badge large" style={{ "--hue": hue(entry.name) }}><Show when={entry.name.toLowerCase() === "mise.exe"} fallback={title[0]?.toUpperCase()}>{<img src={miseLogo} alt="" />}</Show></span><div><h2>{title}</h2><code>{entry.name}</code></div><span class="local-tag">{systemMise ? (entry.path ? "By your machine" : "Not installed") : "By Autark"}</span></div>
+                    <div class="market-card-head"><span class="badge large" style={{ "--hue": hue(entry.name) }}><Show when={entry.name.toLowerCase() === "mise.exe"} fallback={title[0]?.toUpperCase()}>{<img src={miseLogo} alt="" />}</Show></span><div><h2>{title}</h2><code>{entry.name}</code></div><span class="local-tag">{systemMise ? "Not installed" : "By Autark"}</span></div>
                     <p class="market-description">{systemMise ? "Autark runs every app through this mise." : "Managed in Autark's own bin folder."}</p>
-                    <div class="market-versions"><span>Version <b>{entry.version ?? "unknown"}</b></span><span>Size <b>{entry.size ? `${(entry.size / 1048576).toFixed(1)} MB` : state().mise.source}</b></span></div>
-                    <div class="market-links"><span>{systemMise ? (entry.path || "not detected") : state().mise.bin_path}</span></div>
+                    <Show when={!systemMise}><div class="market-versions"><span>Version <b>{entry.version ?? "unknown"}</b></span><span>Size <b>{entry.size ? `${(entry.size / 1048576).toFixed(1)} MB` : state().mise.source}</b></span></div>
+                      <div class="market-links"><span>{state().mise.bin_path}</span></div></Show>
                     <div class="market-actions"><Show when={entry.name.toLowerCase() === "mise.exe" && !systemMise}><button class="button primary market-action" disabled={busy()} onClick={() => { openBuiltin(entry.name); void run(() => api.updateMise()); }}>Update</button></Show>
                       <Show when={!systemMise}>
                         <Show when={binRemoveConfirm() !== entry.name}><button class="button market-view-action" onClick={() => setBinRemoveConfirm(entry.name)}>Remove</button></Show>
                         <Show when={binRemoveConfirm() === entry.name}><div class="confirm-strip"><span>Remove {entry.name} from Autark's bin folder?</span><button class="button" onClick={() => setBinRemoveConfirm(null)}>Cancel</button><button class="button" disabled={busy()} onClick={() => { setBinRemoveConfirm(null); void run(() => api.removeBinEntry(entry.name)); }}>Remove</button></div></Show>
                       </Show>
-                      <Show when={systemMise}><p class="market-unavailable">Not available: Autark runs the mise selected in Settings.</p></Show>
+                      <Show when={systemMise}><p class="market-unavailable">{external ? <>Autark currently uses the external mise at <button class="inline-link" onClick={() => revealFile(external)}>{external}</button></> : "No mise found on this machine."}</p></Show>
                     </div>
                   </article>;
                 }}</For></div>

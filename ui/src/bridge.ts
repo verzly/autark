@@ -59,6 +59,7 @@ export const api = {
   createShortcut: (app_id: string) => invoke<State>("create_shortcut", { app_id }),
   cancelOperation: (app_id: string) => invoke<State>("cancel_operation", { app_id }),
   revealPath: (target: "root" | "marketplace" | "app" | "settings", app_id?: string) => invoke<void>("reveal_path", { target, ...(app_id ? { app_id } : {}) }),
+  revealFile: (path: string) => invoke<void>("reveal_path", { target: "file", path }),
   openUrl: (url: string) => invoke<void>("open_url", { url }),
   exitApp: () => invoke<void>("exit_app"),
   onFocus: async (fn: (app_id: string | null) => void) => {
