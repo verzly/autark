@@ -74,7 +74,7 @@ impl Settings {
         fs::create_dir_all(&root)
             .with_context(|| format!("cannot create root folder {}", root.display()))?;
         let text = serde_json::to_string_pretty(self)?;
-        fs::write(settings_path(), text).context("cannot write launcher-settings.json")?;
+        fs::write(root.join("launcher-settings.json"), text).context("cannot write launcher-settings.json")?;
         write_pointer(&root)?;
         Ok(())
     }
