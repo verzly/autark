@@ -314,17 +314,15 @@ export default function App() {
              <label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.experimental_local_apps} onChange={e => e.currentTarget.checked ? setLocalAppsConfirm(true) : setGlobalPref("experimental_local_apps", false)} /><span><b>Local apps</b><small>Allow apps from manifests you supply.</small><small class="preference-note">Local app manifests can run commands on this machine.</small></span></label>
             <Show when={localAppsConfirm() && !state().settings.experimental_local_apps}><div class="inline-panel"><p>Local apps run setup commands from a file you supply. Only add manifests you trust.</p><div><button class="button" onClick={() => setLocalAppsConfirm(false)}>Cancel</button><button class="button primary" onClick={enableLocalApps}>Enable local apps</button></div></div></Show>
           </section>
-          <section class="preference-section"><h2>mise</h2>
+          <section class="preference-section"><h2>Built-ins</h2>
             <p class="settings-muted">mise: {state().mise.path ?? "not resolved"} · {state().mise.version ?? "version unknown"}{state().mise.source ? ` (${state().mise.source})` : ""}</p>
             <label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.force_local_mise} onChange={e => setGlobalPref("force_local_mise", e.currentTarget.checked)} /><span><b>Always use Autark's own mise</b><small>Ignore the mise on this machine and require Autark's own copy.</small></span></label>
             <label class="preference-toggle"><input type="checkbox" role="switch" checked={state().mise.bin_in_path} onChange={e => void run(() => api.setBinPath(e.currentTarget.checked))} /><span><b>Add Autark's bin folder to PATH</b><small>{state().mise.bin_path}</small></span></label>
           </section>
           <p class="settings-muted">Experimental features may change or break.</p>
         </Show>
-        <Show when={settingsTab() === "General"}>
-          <section class="setting-row"><div><h2>Marketplace</h2><p>{state().marketplace.exists ? <button class="path" onClick={() => reveal("marketplace")}>{state().marketplace.path}</button> : "Marketplace has not been loaded."}</p><Show when={state().marketplace.last_refresh}><small>Last refreshed {new Date(state().marketplace.last_refresh! * 1000).toLocaleString()}</small></Show></div><button class="button" disabled={state().busy} onClick={refresh}>{state().marketplace.exists ? "Reload marketplace" : "Load marketplace"}</button></section>
-        </Show>
         <Show when={settingsTab() === "Apps"}>
+        <section class="setting-row"><div><h2>Marketplace</h2><p>{state().marketplace.exists ? <button class="path" onClick={() => reveal("marketplace")}>{state().marketplace.path}</button> : "Marketplace has not been loaded."}</p><Show when={state().marketplace.last_refresh}><small>Last refreshed {new Date(state().marketplace.last_refresh! * 1000).toLocaleString()}</small></Show></div><button class="button" disabled={state().busy} onClick={refresh}>{state().marketplace.exists ? "Reload marketplace" : "Load marketplace"}</button></section>
         <section class="setting-row"><div><h2>Updates</h2><p>Check marketplace versions manually.</p></div><button class="button" disabled={state().busy} onClick={() => mockMode() ? undefined : void run(() => api.checkUpdates())}>Check for updates</button></section>
         <section class="updates"><h2>Update all</h2><p>Running apps stop during updates and cannot be used until each update finishes.</p>
           <div class="update-table">
@@ -393,10 +391,9 @@ export default function App() {
                   const title = entry.name.replace(/\.exe$/i, "");
                   const systemMise = isResolvedMise(entry.name);
                   return <article role="listitem" class={`market-card ${selected() === i() ? "market-selected" : ""}`} onMouseEnter={() => setSelected(i())}>
-                    <div class="market-card-head"><span class="badge large" style={{ "--hue": hue(entry.name) }}><Show when={entry.name.toLowerCase() === "mise.exe"} fallback={title[0]?.toUpperCase()}>{<img src={miseLogo} alt="" />}</Show></span><div><h2>{title}</h2><code>{entry.name}</code></div><span class="local-tag">Built-in</span></div>
-                    <p class="market-description">{systemMise ? (entry.path ? "The mise Autark runs from your machine." : "mise is not on this machine yet.") : "Ships with Autark, managed in its own bin folder."}</p>
+                    <div class="market-card-head"><span class="badge large" style={{ "--hue": hue(entry.name) }}><Show when={entry.name.toLowerCase() === "mise.exe"} fallback={title[0]?.toUpperCase()}>{<img src={miseLogo} alt="" />}</Show></span><div><h2>{title}</h2><code>{entry.name}</code></div><span class="local-tag">{systemMise ? (entry.path ? "By your machine" : "Not installed") : "By Autark"}</span></div>
+                    <p class="market-description">{systemMise ? "Autark runs every app through this mise." : "Managed in Autark's own bin folder."}</p>
                     <div class="market-versions"><span>Version <b>{entry.version ?? "unknown"}</b></span><span>Size <b>{entry.size ? `${(entry.size / 1048576).toFixed(1)} MB` : state().mise.source}</b></span></div>
-                    <div class="market-requirements"><span>{systemMise ? "From your machine" : "Ships with Autark"}</span></div>
                     <div class="market-links"><span>{systemMise ? (entry.path || "not detected") : state().mise.bin_path}</span></div>
                     <div class="market-actions"><Show when={entry.name.toLowerCase() === "mise.exe"}><button class="button primary market-action" disabled={busy()} onClick={() => void run(() => state().mise.source === "local" ? api.updateMise() : api.installMise())}>{state().mise.source === "local" ? "Update" : "Install"}</button></Show>
                       <Show when={!systemMise}>
