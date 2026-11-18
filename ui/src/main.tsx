@@ -208,6 +208,14 @@ export default function App() {
       if (!mockMode()) void run(() => api.setActiveTab(last));
     }
   };
+  // Never leave the window empty: a closed or unknown tab opens the Autark tab again.
+  createEffect(() => {
+    if (!state().settings.wizard_complete || !state().mise.available || miseScreen() || settingsOpen() || chooser()) return;
+    const id = active();
+    if (id === AUTARK_TAB || isBuiltin(id) || currentApp()) return;
+    setAutarkTab(true);
+    setActive(AUTARK_TAB);
+  });
   const action = (kind: "install" | "update" | "reinstall" | "start" | "stop" | "open" | "remove" | "cancel", app: AppState) => {
     if (mockMode()) {
       if (kind === "install" || kind === "update" || kind === "reinstall") setState(s => ({ ...s, apps: s.apps.map(a => a.id === app.id ? { ...a, ...previewVariants.installing } : a) }));
