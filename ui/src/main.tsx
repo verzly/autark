@@ -35,7 +35,8 @@ export default function App() {
   const [selected, setSelected] = createSignal(0);
   const [panel, setPanel] = createSignal<InlineAction>(null);
   const [removeText, setRemoveText] = createSignal("");
-  const [requestError, setRequestError] = createSignal("");
+  const [requestError, setRequestError] = createSignal("")
+  const [terminalNotice, setTerminalNotice] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [buffers, setBuffers] = createSignal<Record<string, string[]>>(mockMode() ? { "unsloth-studio": previewLogs } : {});
   const [follow, setFollow] = createSignal(true);
@@ -309,6 +310,16 @@ export default function App() {
     }
     catch (e) { setRequestError(errText(e)); }
   };
+  // A click must say something happened; the shell itself opens in its own window.
+  const openTerminal = () => {
+    if (mockMode()) { setTerminalNotice("Terminal opened in the preview folder."); return; }
+    void api.openTerminal().then(message => setTerminalNotice(message)).catch(e => setRequestError(errText(e)));
+  };
+  createEffect(() => {
+    if (!terminalNotice()) return;
+    const timer = setTimeout(() => setTerminalNotice(""), 6000);
+    onCleanup(() => clearTimeout(timer));
+  });
   const openUrl = (url: string) => { if (!mockMode()) void api.openUrl(url).catch(e => setRequestError(errText(e))); };
   const revealFile = (path: string) => { if (!mockMode()) void api.revealFile(path).catch(e => setRequestError(errText(e))); };
   const reveal = (target: "root" | "marketplace" | "app" | "settings", id?: string) => { if (!mockMode()) void api.revealPath(target, id).catch(e => setRequestError(errText(e))); };
@@ -409,7 +420,7 @@ export default function App() {
         }
       }}><Icon name="menu" /></button>
       <button class={`add-tab marketplace-tab ${chooser() ? "selected" : ""}`} aria-label="Open marketplace" aria-pressed={chooser()} onClick={() => (chooser() ? hideChooser() : showChooser())}><Icon name="gridPlus" /></button>
-      <button class="add-tab terminal-launch" aria-label="Open terminal" title="Open the Autark terminal" onClick={() => { if (!mockMode()) void api.openTerminal().catch(e => setRequestError(errText(e))); }}>&gt;_</button>
+      <button class="add-tab terminal-launch" aria-label="Open terminal" title="Open the Autark terminal" onClick={openTerminal}>&gt;_</button>
       <div class="tabs" role="tablist" aria-label="Open apps">
         <For each={openIds()}>{id => {
           const app = () => state().apps.find(a => a.id === id);
@@ -659,6 +670,7 @@ export default function App() {
       <Show when={requestError() || currentApp()?.last_error || state().marketplace.error}>
       <div class="toasts">
         <Show when={requestError()}><div class="toast error-banner" role="alert">{requestError()}</div></Show>
+        <Show when={terminalNotice()}><div class="toast notice-banner" role="status">{terminalNotice()}</div></Show>
         <Show when={currentApp()?.last_error}>{err => <div class="toast error-banner" role="alert">{err().message}</div>}</Show>
         <Show when={state().marketplace.error}>{err => <div class="toast error-banner" role="alert">{err().message}</div>}</Show>
       </div>

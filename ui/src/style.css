@@ -202,3 +202,6 @@ body.is-loading{overflow:hidden}
 /* terminal tab: one shell, Autark's own tools already on PATH */
 .terminal-launch{font:11px var(--mono);letter-spacing:.04em;line-height:1}
 .terminal-tab .badge{background:hsl(152 23% 26%);color:#dff3e8;font:10px var(--mono)}
+
+/* terminal feedback: the shell opens in its own window, so the click reports back here */
+.notice-banner{padding:9px 12px;border:1px solid #2e4034;border-radius:6px;background:#121b15;color:#a9c7b2;font-size:12px}

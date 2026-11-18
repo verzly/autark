@@ -736,9 +736,10 @@ fn open_url(url: String) -> CmdResult<()> {
 }
 
 #[tauri::command]
-fn open_terminal(shared: TauriState<'_, Arc<Shared>>) -> CmdResult<()> {
-    terminal::open(&shared.inner().root())?;
-    Ok(())
+fn open_terminal(shared: TauriState<'_, Arc<Shared>>) -> CmdResult<String> {
+    let root = shared.inner().root();
+    terminal::open(&root)?;
+    Ok(format!("Terminal opened in {}", root.display()))
 }
 
 #[tauri::command(rename_all = "snake_case")]

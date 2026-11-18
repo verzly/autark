@@ -1,10 +1,14 @@
 use std::ffi::OsString;
+use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::process::Command;
 
 use anyhow::{Context, Result};
 
 use crate::tools;
+
+/// The shell needs its own console window, even though Autark itself has none.
+const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
 
 /// Autark's own tools come first, so the shell has mise, git and every installed tool by name.
 fn autark_path(root: &Path) -> OsString {
@@ -28,7 +32,8 @@ pub fn open(root: &Path) -> Result<()> {
     command
         .env("PATH", autark_path(root))
         .env("AUTARK_ROOT", root)
-        .current_dir(root);
+        .current_dir(root)
+        .creation_flags(CREATE_NEW_CONSOLE);
     command.spawn().context("cannot open the terminal")?;
     Ok(())
 }

@@ -66,7 +66,7 @@ export const api = {
   revealFile: (path: string) => invoke<void>("reveal_path", { target: "file", path }),
   openUrl: (url: string) => invoke<void>("open_url", { url }),
   exitApp: () => invoke<void>("exit_app"),
-  openTerminal: () => invoke<void>("open_terminal"),
+  openTerminal: () => invoke<string>("open_terminal"),
   onFocus: async (fn: (app_id: string | null) => void) => {
     if (!isTauri()) return () => {};
     const { listen } = await import("@tauri-apps/api/event");
