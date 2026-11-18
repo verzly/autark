@@ -147,7 +147,7 @@ export default function App() {
   };
   const run = async (fn: () => Promise<State | void>) => {
     setBusy(true); setRequestError("");
-    try { const next = await fn(); if (next) { setState(next); setActive(next.settings.active_tab ?? (active() === null ? null : AUTARK_TAB)); } }
+    try { const next = await fn(); if (next) { const current = active(); setState(next); if (!isBuiltin(current) && current !== AUTARK_TAB) setActive(next.settings.active_tab ?? (current === null ? null : AUTARK_TAB)); } }
     catch (e) { setRequestError(errText(e)); }
     finally { setBusy(false); }
   };
