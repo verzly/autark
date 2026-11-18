@@ -1,11 +1,11 @@
 export type Phase = "not_installed" | "installing" | "installed" | "starting" | "running" | "stopping" | "updating" | "removing" | "failed";
-export interface Settings { root: string; folder_name: string; force_local_mise: boolean; open_tabs: string[]; active_tab: string | null; tray_enabled: boolean; start_with_windows: boolean; close_to_tray: boolean }
+export interface Settings { root: string; folder_name: string; force_local_mise: boolean; open_tabs: string[]; active_tab: string | null; tray_enabled: boolean; start_with_windows: boolean; close_to_tray: boolean; experimental_local_apps: boolean }
 export interface AppSetting { key: string; label: string; kind: "text" | "number" | "port" | "boolean" | "path"; default: unknown; help?: string | null }
 export interface SettingsLock { key: string; var: string; value: string }
 export interface AppPrefs { auto_start: boolean; shortcut_autostart: boolean; shortcut_background: boolean }
 export interface AppState {
   id: string; name: string; description: string; version_installed: string | null; version_app: string | null; version_latest: string | null;
-    update_available: boolean; installed: boolean; phase: Phase; settings: Record<string, unknown>; settings_schema: AppSetting[]; settings_locked: SettingsLock[]; prefs: AppPrefs;
+    update_available: boolean; installed: boolean; local: boolean; phase: Phase; settings: Record<string, unknown>; settings_schema: AppSetting[]; settings_locked: SettingsLock[]; prefs: AppPrefs;
    url: string | null; homepage: string | null; license: string | null; icon_path: string | null; icon_data: string | null;
   requirements: { disk_gb: number | null; webview2: boolean };
   last_error: { code: string; message: string } | null; step: { index: number; total: number; name: string } | null;
@@ -27,6 +27,9 @@ export const api = {
   getState: () => invoke<State>("get_state"),
   saveSettings: (settings: Settings, moveFolder?: boolean) => invoke<State>("save_settings", { settings, ...(moveFolder === undefined ? {} : { move_folder: moveFolder }) }),
   pickDirectory: (target: "root_parent") => invoke<string | null>("pick_directory", { target }),
+  pickFile: (title: string) => invoke<string | null>("pick_file", { title }),
+  addLocalApp: (path: string) => invoke<State>("add_local_app", { path }),
+  replaceLocalApp: (app_id: string, path: string) => invoke<State>("replace_local_app", { app_id, path }),
   setActiveTab: (app_id: string | null) => invoke<State>("set_active_tab", { app_id }),
   closeTab: (app_id: string) => invoke<State>("close_tab", { app_id }),
   openAppTab: (app_id: string) => invoke<State>("open_app_tab", { app_id }),

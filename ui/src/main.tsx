@@ -18,6 +18,7 @@ export default function App() {
   const [state, setState] = createSignal<State>(previewState);
   const [active, setActive] = createSignal<string | null>(previewState.settings.active_tab ?? AUTARK_TAB);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
+  const [settingsTab, setSettingsTab] = createSignal<"General" | "Apps" | "Experimental" | "About">("General");
   const [settingsReturn, setSettingsReturn] = createSignal<string | null>(null);
   const [appSettingsOpen, setAppSettingsOpen] = createSignal<string | null>(null);
   const [chooser, setChooser] = createSignal(false);
@@ -33,6 +34,8 @@ export default function App() {
   const [drafts, setDrafts] = createSignal<Record<string, Record<string, unknown>>>({});
   const [root, setRoot] = createSignal("");
   const [allConfirm, setAllConfirm] = createSignal(false);
+  const [localAppsConfirm, setLocalAppsConfirm] = createSignal(false);
+  const [marketFilter, setMarketFilter] = createSignal<"marketplace" | "local">("marketplace");
   const [clock, setClock] = createSignal(Date.now() / 1000);
   let dialogInput: HTMLInputElement | undefined;
   let output: HTMLDivElement | undefined;
@@ -42,6 +45,7 @@ export default function App() {
   const [shortcutDone, setShortcutDone] = createSignal<string[]>([]);
   const [shortcutBusy, setShortcutBusy] = createSignal<string[]>([]);
   const available = createMemo(() => state().apps.filter(a => `${a.name} ${a.description} ${a.id}`.toLowerCase().includes(search().toLowerCase())));
+  const marketplaceApps = createMemo(() => state().apps.filter(a => (marketFilter() === "local" ? a.local : !a.local) && `${a.name} ${a.description} ${a.id}`.toLowerCase().includes(search().toLowerCase())));
   const showChooser = () => { setSettingsOpen(false); setActive(null); setChooser(true); setSearch(""); setSelected(0); };
   const hideChooser = () => { setChooser(false); setAutarkTab(true); setActive(AUTARK_TAB); setSearch(""); setSelected(0); };
 
@@ -81,7 +85,6 @@ export default function App() {
     });
   };
   const run = async (fn: () => Promise<State | void>) => {
-    if (mockMode()) return;
     setBusy(true); setRequestError("");
     try { const next = await fn(); if (next) { setState(next); setActive(next.settings.active_tab ?? (active() === null ? null : AUTARK_TAB)); } }
     catch (e) { setRequestError(errText(e)); }
@@ -150,11 +153,37 @@ export default function App() {
       else await run(() => api.saveSettings(settings));
     } catch (e) { setRequestError(errText(e)); }
   };
-  const setGlobalPref = (key: "tray_enabled" | "start_with_windows" | "close_to_tray", next: boolean) => {
+  const setGlobalPref = (key: "tray_enabled" | "start_with_windows" | "close_to_tray" | "experimental_local_apps", next: boolean) => {
     const settings = { ...state().settings, [key]: next };
+    if (key === "experimental_local_apps" && !next) setMarketFilter("marketplace");
     if (mockMode()) setState(s => ({ ...s, settings }));
     else void run(() => api.saveSettings(settings, false));
   };
+  const enableLocalApps = () => {
+    setLocalAppsConfirm(false);
+    const settings = { ...state().settings, experimental_local_apps: true };
+    if (mockMode()) setState(s => ({ ...s, settings }));
+    else void run(() => api.saveSettings(settings, false));
+  };
+  const addLocalApp = () => void run(async () => {
+    const path = mockMode() ? "D:\\Manifests\\my-local-app\\app.json" : await api.pickFile("Choose an app manifest");
+    if (!path) return;
+    if (mockMode()) {
+      const app = { ...previewState.apps[3], id: `local-app-${state().apps.length}`, name: "Local app" };
+      setState(s => ({ ...s, apps: [...s.apps, app] }));
+      return;
+    }
+    return api.addLocalApp(path);
+  });
+  const replaceLocalApp = (app: AppState) => void run(async () => {
+    const path = mockMode() ? "D:\\Manifests\\replacement\\app.json" : await api.pickFile("Choose a replacement app manifest");
+    if (!path) return;
+    if (mockMode()) {
+      setState(s => ({ ...s, apps: s.apps.map(a => a.id === app.id ? { ...a, name: "Replaced local app" } : a) }));
+      return;
+    }
+    return api.replaceLocalApp(app.id, path);
+  });
   const setAppPref = (app: AppState, key: keyof AppState["prefs"], next: boolean) => {
     const prefs = { ...app.prefs, [key]: next };
     if (mockMode()) setState(s => ({ ...s, apps: s.apps.map(a => a.id === app.id ? { ...a, prefs } : a) }));
@@ -219,7 +248,7 @@ export default function App() {
       <button class={`gear ${settingsOpen() ? "selected" : ""}`} aria-label="Settings" aria-pressed={settingsOpen()} onClick={() => {
         if (!settingsOpen()) {
           setSettingsReturn(active());
-          setSettingsOpen(true); setAppSettingsOpen(null); setActive(null); setChooser(false);
+          setSettingsOpen(true); setSettingsTab("General"); setAppSettingsOpen(null); setActive(null); setChooser(false);
         }
       }} onDblClick={() => {
         if (settingsOpen()) {
@@ -254,14 +283,30 @@ export default function App() {
       <Show when={settingsOpen()}><section class="settings-view">
         <button class="back-button" onClick={() => { const target = settingsReturn() ?? AUTARK_TAB; setSettingsOpen(false); setActive(target); setChooser(false); setAppSettingsOpen(null); }}>← back to homepage</button>
         <div class="view-heading"><div><span class="eyebrow">AUTARK</span><h1>Settings</h1></div></div>
+        <nav class="settings-tabs" role="tablist" aria-label="Settings sections">
+          <For each={["General", "Apps", "Experimental", "About"] as const}>{tab => <button class={`settings-tab ${settingsTab() === tab ? "active" : ""}`} role="tab" aria-selected={settingsTab() === tab} onClick={() => setSettingsTab(tab)}>{tab}</button>}</For>
+        </nav>
+        <div class="settings-content">
+        <Show when={settingsTab() === "General"}>
         <section class="setting-row"><div><h2>Root folder</h2><p>Apps and managed tools live here.</p><button class="path" onClick={() => reveal("root")}>{state().settings.root}</button></div><button class="button" disabled={state().busy} onClick={() => void changeRoot()}>Change</button></section>
          <section class="setting-row"><div><h2>Settings file</h2><p>Portable launcher preferences.</p><button class="path" onClick={() => reveal("settings")}>{state().settings_path}</button></div></section>
-         <section class="preference-section window-preferences"><h2>Window</h2>
-           <section class="setting-row"><label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.tray_enabled} onChange={e => setGlobalPref("tray_enabled", e.currentTarget.checked)} /><span><b>Tray icon</b><small>Keep Autark in the notification area.</small></span></label></section>
-           <section class="setting-row"><label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.start_with_windows} disabled={!state().settings.tray_enabled} onChange={e => setGlobalPref("start_with_windows", e.currentTarget.checked)} /><span><b>Start with Windows</b><small>Starts hidden in the tray when you sign in.</small><Show when={!state().settings.tray_enabled}><small class="preference-note">Needs the tray icon.</small></Show></span></label></section>
-           <section class="setting-row"><label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.close_to_tray} disabled={!state().settings.tray_enabled} onChange={e => setGlobalPref("close_to_tray", e.currentTarget.checked)} /><span><b>Close to tray</b><small>The X button hides the window instead of quitting.</small><Show when={!state().settings.tray_enabled}><small class="preference-note">Needs the tray icon.</small></Show></span></label></section>
-         </section>
-         <section class="setting-row"><div><h2>Marketplace</h2><p>{state().marketplace.exists ? <button class="path" onClick={() => reveal("marketplace")}>{state().marketplace.path}</button> : "Marketplace has not been loaded."}</p><Show when={state().marketplace.last_refresh}><small>Last refreshed {new Date(state().marketplace.last_refresh! * 1000).toLocaleString()}</small></Show></div><button class="button" disabled={state().busy} onClick={refresh}>{state().marketplace.exists ? "Reload marketplace" : "Load marketplace"}</button></section>
+          <section class="preference-section window-preferences"><h2>Window</h2>
+            <section class="setting-row"><label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.tray_enabled} onChange={e => setGlobalPref("tray_enabled", e.currentTarget.checked)} /><span><b>Tray icon</b><small>Keep Autark in the notification area.</small></span></label></section>
+            <section class="setting-row"><label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.start_with_windows} disabled={!state().settings.tray_enabled} onChange={e => setGlobalPref("start_with_windows", e.currentTarget.checked)} /><span><b>Start with Windows</b><small>Starts hidden in the tray when you sign in.</small><Show when={!state().settings.tray_enabled}><small class="preference-note">Needs the tray icon.</small></Show></span></label></section>
+            <section class="setting-row"><label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.close_to_tray} disabled={!state().settings.tray_enabled} onChange={e => setGlobalPref("close_to_tray", e.currentTarget.checked)} /><span><b>Close to tray</b><small>The X button hides the window instead of quitting.</small><Show when={!state().settings.tray_enabled}><small class="preference-note">Needs the tray icon.</small></Show></span></label></section>
+          </section>
+        </Show>
+        <Show when={settingsTab() === "Experimental"}>
+          <section class="preference-section"><h2>Experimental</h2>
+            <label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.experimental_local_apps} onChange={e => e.currentTarget.checked ? setLocalAppsConfirm(true) : setGlobalPref("experimental_local_apps", false)} /><span><b>Local apps</b><small>Allow apps from manifests you supply.</small><small class="preference-note">Local app manifests can run commands on this machine.</small></span></label>
+            <Show when={localAppsConfirm() && !state().settings.experimental_local_apps}><div class="inline-panel"><p>Local apps run setup commands from a file you supply. Only add manifests you trust.</p><div><button class="button" onClick={() => setLocalAppsConfirm(false)}>Cancel</button><button class="button primary" onClick={enableLocalApps}>Enable local apps</button></div></div></Show>
+          </section>
+          <p class="settings-muted">Experimental features may change or break.</p>
+        </Show>
+        <Show when={settingsTab() === "General"}>
+          <section class="setting-row"><div><h2>Marketplace</h2><p>{state().marketplace.exists ? <button class="path" onClick={() => reveal("marketplace")}>{state().marketplace.path}</button> : "Marketplace has not been loaded."}</p><Show when={state().marketplace.last_refresh}><small>Last refreshed {new Date(state().marketplace.last_refresh! * 1000).toLocaleString()}</small></Show></div><button class="button" disabled={state().busy} onClick={refresh}>{state().marketplace.exists ? "Reload marketplace" : "Load marketplace"}</button></section>
+        </Show>
+        <Show when={settingsTab() === "Apps"}>
         <section class="setting-row"><div><h2>Updates</h2><p>Check marketplace versions manually.</p></div><button class="button" disabled={state().busy} onClick={() => mockMode() ? undefined : void run(() => api.checkUpdates())}>Check for updates</button></section>
         <section class="updates"><h2>Update all</h2><p>Running apps stop during updates and cannot be used until each update finishes.</p>
           <div class="update-table">
@@ -270,28 +315,59 @@ export default function App() {
           <Show when={!allConfirm()}><button class="button primary" disabled={state().busy || !state().apps.some(a => a.installed && a.update_available)} onClick={() => setAllConfirm(true)}>Update all</button></Show>
           <Show when={allConfirm()}><div class="confirm-strip"><span>Update every installed app now?</span><button class="button" onClick={() => setAllConfirm(false)}>Cancel</button><button class="button primary" disabled={state().busy} onClick={doUpdateAll}>Confirm</button></div></Show>
         </section>
+        </Show>
+        <Show when={settingsTab() === "About"}>
+          <section class="settings-about">
+            <p class="settings-about-description">Autark is a portable launcher for managing and running your apps. Every app comes from a marketplace manifest or a local file you add, and installs into its own folder with its own tools.</p>
+            <div class="settings-about-row"><span>License</span><b>AGPL-3.0</b></div>
+            <div class="settings-about-row"><span>Source</span><button onClick={() => openUrl("https://github.com/verzly/autark")}>github.com/verzly/autark</button></div>
+            <div class="settings-about-row"><span>Marketplace</span><button onClick={() => openUrl("https://github.com/verzly/autark-marketplace")}>github.com/verzly/autark-marketplace</button></div>
+          </section>
+        </Show>
+        </div>
         <footer class="about"><span>Autark <b>v{version()}</b></span><span>AGPL-3.0</span><button onClick={() => openUrl("https://github.com/verzly/autark")}>Source</button><button onClick={() => openUrl("https://github.com/verzly/autark-marketplace")}>Marketplace</button></footer>
       </section></Show>
       <Show when={chooser()}><section class="marketplace-view" onKeyDown={chooserKeys}>
-        <div class="marketplace-heading"><button class="back-button" onClick={hideChooser}>← back to homepage</button><div><span class="eyebrow">MARKETPLACE</span><h1>Add an app</h1></div><div class="marketplace-tools"><input ref={dialogInput} class="search" aria-label="Search marketplace apps" placeholder="Search apps..." value={search()} onInput={e => { setSearch(e.currentTarget.value); setSelected(0); }} /><button class="button" disabled={state().busy || state().marketplace.refreshing} onClick={refresh}>{state().marketplace.refreshing ? "Refreshing..." : "Reload marketplace"}</button><Show when={state().marketplace.last_refresh}><small>Last refreshed {new Date(state().marketplace.last_refresh! * 1000).toLocaleString()}</small></Show></div></div>
+         <div class="marketplace-heading"><button class="back-button" onClick={hideChooser}>← back to homepage</button><div><span class="eyebrow">MARKETPLACE</span><h1>Add an app</h1></div><div class="marketplace-tools"><input ref={dialogInput} class="search" aria-label="Search marketplace apps" placeholder="Search apps..." value={search()} onInput={e => { setSearch(e.currentTarget.value); setSelected(0); }} /><Show when={marketFilter() === "marketplace"}><button class="button" disabled={state().busy || state().marketplace.refreshing} onClick={refresh}>{state().marketplace.refreshing ? "Refreshing..." : "Reload marketplace"}</button></Show><Show when={marketFilter() === "local" && state().settings.experimental_local_apps}><button class="button" disabled={busy()} onClick={addLocalApp}>Add local app</button></Show><Show when={state().marketplace.last_refresh && marketFilter() === "marketplace"}><small>Last refreshed {new Date(state().marketplace.last_refresh! * 1000).toLocaleString()}</small></Show></div></div>
+         <Show when={state().settings.experimental_local_apps}><div class="market-filters" role="group" aria-label="App source"><button class={`market-filter ${marketFilter() === "marketplace" ? "active" : ""}`} aria-pressed={marketFilter() === "marketplace"} onClick={() => setMarketFilter("marketplace")}>Marketplace</button><button class={`market-filter ${marketFilter() === "local" ? "active" : ""}`} aria-pressed={marketFilter() === "local"} onClick={() => setMarketFilter("local")}>Local</button></div></Show>
 
-        <Show when={!state().marketplace.exists} fallback={<Show when={!state().marketplace.refreshing} fallback={<div class="marketplace-load">Refreshing marketplace...</div>}><Show when={available().length} fallback={<div class="marketplace-load">No apps match your search.</div>}><div class="marketplace-grid" role="list" aria-label="Marketplace apps"><For each={available()}>{(a, i) => {
-          const opened = () => openIds().includes(a.id);
-          return <article role="listitem" class={`market-card ${opened() ? "market-opened" : ""} ${selected() === i() ? "market-selected" : ""}`} onMouseEnter={() => setSelected(i())}>
-            <div class="market-card-head"><span class="badge large" style={{ "--hue": hue(a.id) }}><Show when={a.icon_data} fallback={a.id[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><div><h2>{a.name}</h2><code>{a.id}</code></div><Show when={a.update_available}><span class="update-pill">Update</span></Show></div>
-            <p class="market-description">{a.description}</p><div class="market-versions"><span>Installed <b>{a.version_installed ?? "not installed"}</b></span><span>Marketplace <b>{a.version_latest ?? "unknown"}</b></span></div>
-            <div class="market-requirements"><Show when={a.requirements.disk_gb != null}><span>{a.requirements.disk_gb} GB disk</span></Show><Show when={a.requirements.webview2}><span>WebView2</span></Show></div>
-            <div class="market-links"><Show when={a.license}><span>{a.license}</span></Show><Show when={a.homepage}><button onClick={() => openUrl(a.homepage!)}>Homepage ↗</button></Show></div>
-            <Show when={a.installed} fallback={<div class="market-actions">
-              <button class="button market-view-action" disabled={working(a.phase)} onClick={() => openApp(a.id)}>View</button>
-              <button class="button primary market-action" disabled={working(a.phase)} onClick={() => installMarketplaceApp(a)}>Install</button>
-            </div>}>
-              <button class={`button market-action ${opened() ? "opened-action" : "primary"}`} disabled={!opened() && working(a.phase)} onClick={() => opened() ? openApp(a.id) : activateMarketplaceApp(a)}>{opened() ? "Opened" : "Open"}</button>
-            </Show>
-          </article>;
-        }}</For></div></Show></Show>}>
-          <div class="marketplace-load"><p>{state().marketplace.refreshing ? "Refreshing marketplace..." : "Marketplace has not been loaded."}</p><button class="button primary" disabled={state().marketplace.refreshing} onClick={refresh}>Load marketplace</button></div>
-        </Show>
+         <Show when={marketFilter() !== "local"}>
+           <Show when={state().marketplace.exists} fallback={<div class="marketplace-load"><p>Marketplace has not been loaded.</p><button class="button primary" disabled={state().marketplace.refreshing} onClick={refresh}>Load marketplace</button></div>}>
+             <Show when={!state().marketplace.refreshing} fallback={<div class="marketplace-load">Refreshing marketplace...</div>}>
+               <Show when={marketplaceApps().length} fallback={<div class="marketplace-load">No apps match your search.</div>}>
+                 <div class="marketplace-grid" role="list" aria-label="Marketplace apps"><For each={marketplaceApps()}>{(a, i) => {
+                   const opened = () => openIds().includes(a.id);
+                   return <article role="listitem" class={`market-card ${opened() ? "market-opened" : ""} ${selected() === i() ? "market-selected" : ""}`} onMouseEnter={() => setSelected(i())}>
+                      <div class="market-card-head"><span class="badge large" style={{ "--hue": hue(a.id) }}><Show when={a.icon_data} fallback={a.id[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><div><h2>{a.name}</h2><code>{a.id}</code></div><Show when={!a.local && a.update_available}><span class="update-pill">Update</span></Show></div>
+                      <p class="market-description">{a.description}</p><div class="market-versions"><span>Installed <b>{a.version_installed ?? "not installed"}</b></span><span>Marketplace <b>{a.local ? "local" : a.version_latest ?? "unknown"}</b></span></div>
+                     <div class="market-requirements"><Show when={a.requirements.disk_gb != null}><span>{a.requirements.disk_gb} GB disk</span></Show><Show when={a.requirements.webview2}><span>WebView2</span></Show></div>
+                     <div class="market-links"><Show when={a.license}><span>{a.license}</span></Show><Show when={a.homepage}><button onClick={() => openUrl(a.homepage!)}>Homepage ↗</button></Show></div>
+                      <Show when={a.installed} fallback={<div class="market-actions"><button class="button market-view-action" disabled={working(a.phase)} onClick={() => openApp(a.id)}>View</button><button class="button primary market-action" disabled={working(a.phase)} onClick={() => installMarketplaceApp(a)}>Install</button></div>}>
+                        <div class="market-actions"><Show when={a.local}><button class="button market-view-action" disabled={busy()} onClick={() => replaceLocalApp(a)}>Edit</button></Show><button class={`button market-action ${opened() ? "opened-action" : "primary"}`} disabled={!opened() && working(a.phase)} onClick={() => opened() ? openApp(a.id) : activateMarketplaceApp(a)}>{opened() ? "Opened" : "Open"}</button></div>
+                     </Show>
+                   </article>;
+                 }}</For></div>
+               </Show>
+             </Show>
+           </Show>
+         </Show>
+         <Show when={marketFilter() === "local"}>
+            <Show when={marketplaceApps().length} fallback={<div class="marketplace-load">No local apps yet.</div>}>
+             <div class="marketplace-grid" role="list" aria-label="Local apps"><For each={marketplaceApps()}>{(a, i) => {
+               const opened = () => openIds().includes(a.id);
+               return <article role="listitem" class={`market-card ${opened() ? "market-opened" : ""} ${selected() === i() ? "market-selected" : ""}`} onMouseEnter={() => setSelected(i())}>
+                  <div class="market-card-head"><span class="badge large" style={{ "--hue": hue(a.id) }}><Show when={a.icon_data} fallback={a.id[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><div><h2>{a.name}</h2><code>{a.id}</code></div><span class="local-tag">local</span></div>
+                  <p class="market-description">{a.description}</p><div class="market-versions"><span>Installed <b>{a.version_installed ?? "not installed"}</b></span><span>Marketplace <b>local</b></span></div>
+                 <div class="market-links"><Show when={a.license}><span>{a.license}</span></Show><Show when={a.homepage}><button onClick={() => openUrl(a.homepage!)}>Homepage ↗</button></Show></div>
+                 <div class="market-actions"><button class="button market-view-action" disabled={working(a.phase)} onClick={() => replaceLocalApp(a)}>Edit</button>
+                   <Show when={a.installed} fallback={<button class="button primary market-action" disabled={working(a.phase)} onClick={() => installMarketplaceApp(a)}>Install</button>}>
+                     <button class={`button market-action ${opened() ? "opened-action" : "primary"}`} disabled={!opened() && working(a.phase)} onClick={() => opened() ? openApp(a.id) : activateMarketplaceApp(a)}>{opened() ? "Opened" : "Open"}</button>
+                   </Show>
+                 </div>
+               </article>;
+             }}</For></div>
+           </Show>
+         </Show>
       </section></Show>
       <Show when={!chooser() && !settingsOpen() && active() === AUTARK_TAB}><section class="empty-state"><div class="empty-mark">autark</div>
         <div class="landing-app-list" role="list" aria-label="Installed apps">
@@ -312,11 +388,11 @@ export default function App() {
         const canStop = () => !busyApp() && (p() === "running" || p() === "starting");
         const confirmInstall = () => { setPanel(null); action(a().installed ? "update" : "install", a()); };
         return <Show when={appSettingsOpen() === a().id} fallback={<section class="app-view">
-          <div class="app-header"><div class="app-title"><span class="badge large" style={{ "--hue": hue(a().id) }}><Show when={a().icon_data} fallback={a().id[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><div><h1>{a().name}</h1><div class="version-line">{a().version_app ? `app ${a().version_app}` : "app version unknown"} · recipe {a().version_installed ?? "not installed"}<Show when={a().update_available}> · latest recipe {a().version_latest ?? "unknown"} <span class="update-pill">update</span></Show></div></div></div>
+          <div class="app-header"><div class="app-title"><span class="badge large" style={{ "--hue": hue(a().id) }}><Show when={a().icon_data} fallback={a().id[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><div><h1>{a().name}</h1><div class="version-line">{a().version_app ? `app ${a().version_app}` : "app version unknown"} · {a().local ? "local" : `recipe ${a().version_installed ?? "not installed"}`}<Show when={!a().local && a().update_available}> · latest recipe {a().version_latest ?? "unknown"} <span class="update-pill">update</span></Show></div></div></div>
             <div class="links"><Show when={a().homepage}><button onClick={() => openUrl(a().homepage!)}>Homepage ↗</button></Show><Show when={a().license}><span>{a().license}</span></Show></div></div>
           <div class="status-line"><span class={`dot ${p()}`} /><Show when={working(p())}><span class="progress"><i /></span></Show><span class="phase-label">{a().step ? `(${a().step?.index}/${a().step?.total}) ${a().step?.name}` : p().replace("_", " ")}</span><Show when={working(p()) && elapsed() != null}><span class="elapsed">run {duration(elapsed()!)}</span></Show></div>
           <div class="actions">
-            <button class="button primary" disabled={busyApp() || (a().installed && !a().update_available)} onClick={() => setPanel("install")}>{a().installed ? "Update" : "Install"}</button>
+             <Show when={!a().local}><button class="button primary" disabled={busyApp() || (a().installed && !a().update_available)} onClick={() => setPanel("install")}>{a().installed ? "Update" : "Install"}</button></Show>
             <button class="button" disabled={!canStart()} onClick={() => action("start", a())}>Start</button>
             <button class="button" disabled={!canStop()} onClick={() => action("stop", a())}>Stop</button>
             <button class="button" disabled={busyApp() || !a().url} onClick={() => action("open", a())}>Open</button>
@@ -329,7 +405,7 @@ export default function App() {
               <Show when={logs().length} fallback={<span class="quiet">Operation output will appear here.</span>}><For each={logEntries()}>{entry => <div class={entry.spacer ? "log-spacer" : `log ${lineTone(entry.line)}`} aria-hidden={entry.spacer || undefined}>{entry.spacer ? "\u00a0" : entry.line || "\u00a0"}</div>}</For></Show>
             </div><Show when={!follow() && logs().length}><button class="jump" onClick={() => { if (output) output.scrollTop = output.scrollHeight; setFollow(true); }}>Jump to latest</button></Show></div>
           </section>
-          <footer class="metadata"><button title={state().settings.root + "\\apps\\" + a().id} onClick={() => reveal("app", a().id)}>{`${state().settings.root}\\apps\\${a().id}`}</button><span>{a().version_app ? `app ${a().version_app}` : "app version unknown"} {a().update_available ? `latest ${a().version_latest ?? "unknown"}` : "latest"}<button class="check-button" title="Check the marketplace for a newer version" onClick={() => void run(() => api.checkUpdates())}>(check)</button></span><span>recipe {a().version_installed ?? "not installed"} {a().update_available ? `latest ${a().version_latest ?? "unknown"}` : "latest"}<button class="check-button" title="Check the marketplace for a newer version" onClick={() => void run(() => api.checkUpdates())}>(check)</button></span><code>{a().id}</code></footer>
+          <footer class="metadata"><button title={state().settings.root + "\\apps\\" + a().id} onClick={() => reveal("app", a().id)}>{`${state().settings.root}\\apps\\${a().id}`}</button><span>{a().version_app ? `app ${a().version_app}` : "app version unknown"} {a().update_available ? `latest ${a().version_latest ?? "unknown"}` : "latest"}<button class="check-button" title="Check the marketplace for a newer version" onClick={() => void run(() => api.checkUpdates())}>(check)</button></span><span>{a().local ? "local" : `recipe ${a().version_installed ?? "not installed"} ${a().update_available ? `latest ${a().version_latest ?? "unknown"}` : "latest"}`}{a().local ? null : <button class="check-button" title="Check the marketplace for a newer version" onClick={() => void run(() => api.checkUpdates())}>(check)</button>}</span><code>{a().id}</code></footer>
         </section>}>
           <section class="app-settings-page">
             <button class="back-button" onClick={() => setAppSettingsOpen(null)}>← back to app</button>

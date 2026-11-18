@@ -3,6 +3,7 @@
 mod apps;
 mod manifest;
 mod marketplace;
+mod local;
 mod prefs;
 mod settings;
 
@@ -144,6 +145,35 @@ fn pick_directory(target: String) -> Option<String> {
     dialog
         .pick_folder()
         .map(|path| path.to_string_lossy().to_string())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn pick_file(title: String) -> Result<Option<String>, CmdError> {
+    Ok(rfd::FileDialog::new()
+        .set_title(title)
+        .add_filter("App manifest", &["json"])
+        .pick_file()
+        .map(|path| path.to_string_lossy().to_string()))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn add_local_app(app: AppHandle, shared: TauriState<'_, Arc<Shared>>, path: String) -> CmdResult<State> {
+    let inner = shared.inner().clone();
+    let task = inner.clone();
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || apps::add_local_app(&handle, &task, &path))
+        .await.map_err(|error| CmdError::new("internal", error.to_string()))??;
+    Ok(apps::wire(&inner))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn replace_local_app(app: AppHandle, shared: TauriState<'_, Arc<Shared>>, app_id: String, path: String) -> CmdResult<State> {
+    let inner = shared.inner().clone();
+    let task = inner.clone();
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || apps::replace_local_app(&handle, &task, &app_id, &path))
+        .await.map_err(|error| CmdError::new("internal", error.to_string()))??;
+    Ok(apps::wire(&inner))
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -566,6 +596,9 @@ fn main() {
             get_state,
             save_settings,
             pick_directory,
+            pick_file,
+            add_local_app,
+            replace_local_app,
             set_active_tab,
             open_app_tab,
             close_tab,

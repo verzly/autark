@@ -2,6 +2,7 @@ use crate::{
     prefs::{self, Prefs},
     manifest::{self, AppSetting, Manifest, Requirements},
     marketplace,
+    local,
     settings::{self, Settings},
 };
 use anyhow::{bail, Context, Result};
@@ -96,6 +97,7 @@ pub struct StepInfo {
 #[derive(Clone, Debug, Serialize)]
 pub struct AppState {
     pub id: String,
+    pub local: bool,
     pub name: String,
     pub description: String,
     pub version_installed: Option<String>,
@@ -149,6 +151,7 @@ fn settings_locks(manifest: &Manifest) -> Vec<SettingsLock> {
 #[derive(Clone, Debug)]
 pub struct AppRecord {
     pub manifest: Manifest,
+    pub local: bool,
     pub manifest_dir: PathBuf,
     pub settings: Map<String, Value>,
     pub prefs: Prefs,
@@ -165,7 +168,7 @@ pub struct AppRecord {
 }
 
 impl AppRecord {
-    fn from_manifest(root: &Path, manifest_dir: &Path, manifest: Manifest, in_catalogue: bool) -> Self {
+    fn from_manifest(root: &Path, manifest_dir: &Path, manifest: Manifest, in_catalogue: bool, local: bool) -> Self {
         let app_dir = manifest::app_dir(root, &manifest.id);
         let installed_record = manifest::read_installed(&app_dir);
         let values = manifest::load_settings(&app_dir, &manifest);
@@ -187,7 +190,7 @@ impl AppRecord {
                 .as_ref()
                 .and_then(|record| record.app_version.clone())
                 .filter(|_| installed),
-            version_latest: in_catalogue.then(|| manifest.version.clone()),
+            version_latest: (in_catalogue && !local).then(|| manifest.version.clone()),
             installed,
             phase: if installed {
                 Phase::Installed
@@ -203,11 +206,12 @@ impl AppRecord {
             manifest_dir: manifest_dir.to_path_buf(),
             icon_data,
             manifest,
+            local,
         }
     }
 
     fn update_available(&self) -> bool {
-        self.installed
+        !self.local && self.installed
             && matches!(
                 (&self.installed_version, &self.version_latest),
                 (Some(installed), Some(latest)) if installed != latest
@@ -220,6 +224,7 @@ impl AppRecord {
             .map(|started| now().saturating_sub(started));
         AppState {
             id: self.manifest.id.clone(),
+            local: self.local,
             name: self.manifest.name.clone(),
             description: self.manifest.description.clone(),
             version_installed: self.installed_version.clone(),
@@ -370,15 +375,14 @@ pub fn load_catalogue(core: &mut Core) -> Vec<String> {
     core.marketplace.exists = market_dir.join("marketplace.json").exists();
 
     let mut warnings = Vec::new();
-    let mut discovered: Vec<(PathBuf, Manifest, bool)> = Vec::new();
+    let mut discovered: Vec<(PathBuf, Manifest, bool, bool)> = Vec::new();
     if core.marketplace.exists {
         match marketplace::scan(&root) {
             Ok(result) => {
                 warnings = result.warnings;
                 core.marketplace.error = None;
-                for manifest in result.manifests {
-                    let dir = market_dir.join("apps").join(&manifest.id);
-                    discovered.push((dir, manifest, true));
+                for scanned in result.manifests {
+                    discovered.push((scanned.dir, scanned.manifest, true, scanned.local));
                 }
             }
             Err(error) => core.marketplace.error = Some(ErrorInfo::from_error(&error)),
@@ -392,12 +396,32 @@ pub fn load_catalogue(core: &mut Core) -> Vec<String> {
                 continue;
             }
             let id = entry.file_name().to_string_lossy().to_string();
-            if discovered.iter().any(|(_, manifest, _)| manifest.id == id) {
+            if discovered.iter().any(|(_, manifest, _, _)| manifest.id == id) {
                 continue;
             }
             match Manifest::load(&entry.path()) {
-                Ok(manifest) => discovered.push((entry.path(), manifest, false)),
+                Ok(manifest) => {
+                    let local = local::dir(&root).join(&id).is_dir();
+                    discovered.push((entry.path(), manifest, false, local));
+                }
                 Err(_) => continue,
+            }
+        }
+    }
+
+    // Local apps must stay visible even when the marketplace clone is missing.
+    if let Ok(entries) = fs::read_dir(local::dir(&root)) {
+        for entry in entries.flatten() {
+            if !entry.path().is_dir() {
+                continue;
+            }
+            let id = entry.file_name().to_string_lossy().to_string();
+            if discovered.iter().any(|(_, manifest, _, _)| manifest.id == id) {
+                continue;
+            }
+            match Manifest::load(&entry.path()) {
+                Ok(manifest) => discovered.push((entry.path(), manifest, false, true)),
+                Err(error) => warnings.push(format!("{id}: {error:#}")),
             }
         }
     }
@@ -409,8 +433,8 @@ pub fn load_catalogue(core: &mut Core) -> Vec<String> {
         .collect();
 
     let mut records = Vec::with_capacity(discovered.len());
-    for (dir, manifest, in_catalogue) in discovered {
-        let mut record = AppRecord::from_manifest(&root, &dir, manifest, in_catalogue);
+    for (dir, manifest, in_catalogue, local) in discovered {
+        let mut record = AppRecord::from_manifest(&root, &dir, manifest, in_catalogue, local);
         if let Some(old) = previous.get(&record.manifest.id) {
             if old.phase.is_busy() || old.phase == Phase::Running {
                 record.phase = old.phase;
@@ -1457,6 +1481,45 @@ pub fn check_updates(app: &AppHandle, shared: &Shared) -> Result<()> {
         let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
         load_catalogue(&mut core);
     }
+    emit_state(app, shared);
+    Ok(())
+}
+
+pub fn add_local_app(app: &AppHandle, shared: &Arc<Shared>, path: &str) -> Result<()> {
+    let (root, enabled) = {
+        let core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
+        (core.settings.root_path(), core.settings.experimental_local_apps)
+    };
+    if !enabled {
+        bail!("local apps are experimental and turned off in settings");
+    }
+    let key = local::add(&root, Path::new(path))?;
+    let warnings = {
+        let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
+        load_catalogue(&mut core)
+    };
+    for warning in warnings {
+        log(app, "marketplace", format!("manifest warning: {warning}"));
+    }
+    log(app, &key, "local app added");
+    emit_state(app, shared);
+    Ok(())
+}
+
+pub fn replace_local_app(app: &AppHandle, shared: &Arc<Shared>, id: &str, path: &str) -> Result<()> {
+    let record = find_record(shared, id).ok();
+    if !record.is_some_and(|record| record.local) {
+        bail!("the app is not a local app");
+    }
+    local::replace(&shared.root(), id, Path::new(path))?;
+    let warnings = {
+        let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
+        load_catalogue(&mut core)
+    };
+    for warning in warnings {
+        log(app, "marketplace", format!("manifest warning: {warning}"));
+    }
+    log(app, id, "local app replaced");
     emit_state(app, shared);
     Ok(())
 }

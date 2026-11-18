@@ -47,3 +47,14 @@
 .settings-view,.app-settings-page{padding-bottom:34px}
 .toasts{position:fixed;left:auto;right:22px;bottom:18px;display:flex;flex-direction:column;align-items:flex-end;gap:8px;z-index:60;max-width:min(420px,calc(100vw - 44px));pointer-events:none}
 .toast{pointer-events:auto;box-shadow:0 8px 24px rgba(0,0,0,.55)}
+.market-filters{display:flex;align-items:center;gap:6px;min-height:26px}.market-filters .quiet{margin-left:5px;font-size:11px}.market-filter{padding:5px 9px;border:0;border-radius:5px;background:transparent;color:#929292;font-size:11px}.market-filter:hover:not(:disabled),.market-filter.active{background:#191919;color:#ddd}.market-filter:disabled{opacity:.45;cursor:not-allowed}.local-tag{margin-left:auto;color:#888;font:10px var(--mono)}
+.settings-tabs{display:flex;align-items:center;gap:5px;margin:0 0 5px}.settings-tab{padding:6px 10px;border:0;border-radius:7px;background:transparent;color:#8a8a8a;font-size:12px}.settings-tab:hover,.settings-tab.active{background:#232323;color:#eee}.settings-about{display:flex;flex-direction:column;gap:13px;padding:4px 0}.settings-about-row{display:flex;align-items:center;gap:18px;color:#929292;font-size:12px}.settings-about-row>span{width:90px;flex:none}.settings-about-row b{color:#ddd;font-weight:500}.settings-about-row button{padding:0;border:0;background:transparent;color:#aaa;text-align:left}.settings-about-row button:hover{color:#eee;text-decoration:underline}.settings-muted{margin:0;color:#929292;font-size:12px}
+.settings-content{display:flex;flex:1 0 auto;flex-direction:column;gap:24px;padding-bottom:24px}.settings-about-description{margin:0;color:#aaa;font-size:12px;line-height:1.5}.settings-view .about{margin-top:auto;padding:4px 0}
+
+.market-filters{grid-column:1/-1;display:flex;align-items:center;gap:6px;margin:0 0 12px}
+.market-filter{border:0;background:transparent;color:#8a8a8a;padding:5px 11px;border-radius:7px;font:inherit;font-size:12px;cursor:pointer}
+.market-filter:hover:not(:disabled){background:#1a1a1a;color:#ddd}
+.market-filter.active{background:#232323;color:#eee}
+.market-filter:disabled{opacity:.4;cursor:default}
+.local-tag{background:#242424;color:#b9b9b9;font-size:11px;padding:2px 8px;border-radius:999px}
+.settings-view{min-height:100%}.settings-content{flex:1 1 auto}

@@ -145,6 +145,12 @@ Otherwise the folder-local values from `env` apply, which keeps models in `{app}
 - Update re-runs the whole setup (source refresh, tool install, steps) and reports the new installed version.
 - An app cannot be started while it updates; Start resumes after the update.
 
+## Local apps
+
+A user-supplied `app.json` is copied into `<root>/local-apps/<key>/`. The marketplace version column shows
+`local`; local apps never receive marketplace updates. Duplicate ids are allowed and receive a `-2` suffix
+and higher suffixes. Re-uploading a file replaces an existing local entry.
+
 ## Security rules for marketplace authors
 
 - Only https URLs, only public repos.
