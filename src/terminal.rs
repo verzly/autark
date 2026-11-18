@@ -45,13 +45,17 @@ fn selected(requested: &str, shells: &tools::TerminalInfo) -> &'static str {
     }
 }
 
-fn banner(root: &Path) -> Vec<String> {
+/// The banner: color code and text per line. 38;5;n keeps it soft on any terminal.
+fn banner(root: &Path) -> Vec<(u8, String)> {
     vec![
-        format!("Autark v{}", env!("CARGO_PKG_VERSION")),
-        format!("Autark terminal · {}", root.display()),
-        "AGPL-3.0 · github.com/verzly/autark".to_string(),
-        "© 2026 rozsazoltan · apps, tools and settings stay in this folder".to_string(),
-        "Autark bin and mise shims are on PATH".to_string(),
+        (110, format!("Autark v{}", env!("CARGO_PKG_VERSION"))),
+        (245, format!("Autark terminal · {}", root.display())),
+        (245, "AGPL-3.0 · github.com/verzly/autark".to_string()),
+        (
+            245,
+            "© 2026 rozsazoltan · apps, tools and settings stay in this folder".to_string(),
+        ),
+        (240, "Autark bin and mise shims are on PATH".to_string()),
     ]
 }
 
@@ -60,18 +64,16 @@ fn profile(root: &Path) -> Result<PathBuf> {
     let dir = root.join("runtime").join("terminal");
     fs::create_dir_all(&dir).with_context(|| format!("cannot create {}", dir.display()))?;
     let path = dir.join("profile.sh");
-    let quoted = banner(root)
-        .iter()
-        .map(|line| format!("'{line}'"))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let text = format!(
-        "[ -f \"$HOME/.bashrc\" ] && . \"$HOME/.bashrc\"\nprintf '%s\\n' {quoted}\nprintf '\\n'\n"
-    );
+    let mut text = String::from("[ -f \"$HOME/.bashrc\" ] && . \"$HOME/.bashrc\"\n");
+    for (color, line) in banner(root) {
+        text.push_str(&format!(
+            "printf '\\033[38;5;{color}m%s\\033[0m\\n' '{line}'\n"
+        ));
+    }
+    text.push_str("printf '\\n'\n");
     fs::write(&path, text).with_context(|| format!("cannot write {}", path.display()))?;
     Ok(path)
 }
-
 /// Opens the chosen shell in the Autark root, with its banner above the first prompt.
 pub fn open(root: &Path, requested: &str, shells: &tools::TerminalInfo) -> Result<()> {
     let shell = selected(requested, shells);
@@ -95,7 +97,7 @@ pub fn open(root: &Path, requested: &str, shells: &tools::TerminalInfo) -> Resul
         "cmd" => {
             let script = banner(root)
                 .iter()
-                .map(|line| format!("echo {line}"))
+                .map(|(_, line)| format!("echo {line}"))
                 .collect::<Vec<_>>()
                 .join(" & ");
             args.push("/K".to_string());
@@ -103,10 +105,12 @@ pub fn open(root: &Path, requested: &str, shells: &tools::TerminalInfo) -> Resul
             "cmd.exe".to_string()
         }
         _ => {
-            let script = banner(root)
-                .iter()
-                .map(|line| format!("Write-Host '{line}' -ForegroundColor DarkGray; "))
-                .collect::<String>()
+            let script = "$e=[char]27; "
+                .to_string()
+                + &banner(root)
+                    .iter()
+                    .map(|(color, line)| format!("Write-Host \"$e[38;5;{color}m{line}$e[0m\"; "))
+                    .collect::<String>()
                 + "Write-Host ''";
             args.extend(["-NoLogo", "-NoExit", "-Command"].map(str::to_string));
             args.push(script);
@@ -158,6 +162,17 @@ mod tests {
             .collect();
         assert_eq!(parts[0], "C:\\Autark\\bin");
         assert_eq!(parts[1], "C:\\Autark\\runtime\\mise-data\\shims");
+    }
+
+    #[test]
+    fn the_profile_carries_a_colored_banner() {
+        let root = std::env::temp_dir().join("autark-terminal-profile-test");
+        let path = super::profile(&root).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("[38;5;110m"));
+        assert!(text.contains("Autark v"));
+        assert!(text.contains("$HOME/.bashrc"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
