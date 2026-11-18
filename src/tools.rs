@@ -168,8 +168,11 @@ pub fn probe(settings: &Settings) -> MiseInfo {
     if let Some(mise) = bin.iter_mut().find(|entry| entry.name.eq_ignore_ascii_case("mise.exe")) {
         mise.version = version.clone();
     }
-    let detected: Vec<DetectedMise> = where_all()
+    let own = local_mise(&root);
+    let own_key = own.to_string_lossy().to_lowercase();
+    let mut detected: Vec<DetectedMise> = where_all()
         .into_iter()
+        .filter(|candidate| candidate.to_string_lossy().to_lowercase() != own_key)
         .filter_map(|candidate| {
             run_version(&candidate, &root).map(|found| DetectedMise {
                 path: candidate.to_string_lossy().to_string(),
@@ -177,6 +180,10 @@ pub fn probe(settings: &Settings) -> MiseInfo {
             })
         })
         .collect();
+    // Autark's own copy is listed first once it runs, so it can be picked like any other mise.
+    if let Some(found) = run_version(&own, &root) {
+        detected.insert(0, DetectedMise { path: own.to_string_lossy().to_string(), version: Some(found) });
+    }
     MiseInfo {
         available: version.is_some(), source: source.to_string(), path, version,
         local_path: bin_dir(&root).join("mise.exe").to_string_lossy().to_string(),
@@ -189,7 +196,7 @@ pub fn install_local(app: &AppHandle, id: &str, root: &Path) -> Result<()> {
     let target = bin_dir(root).join("mise.exe");
     fs::create_dir_all(bin_dir(root))?;
     let target_arg = target.to_string_lossy().replace('\'', "''");
-    let script = format!("$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; $headers=@{{'User-Agent'='autark'}}; $release=Invoke-RestMethod -Uri 'https://api.github.com/repos/jdx/mise/releases/latest' -Headers $headers; $asset=$release.assets | Where-Object {{ $_.name -like '*windows-x64.exe' }} | Select-Object -First 1; if (-not $asset) {{ throw 'no windows-x64 asset in the latest mise release' }}; Invoke-WebRequest -Uri $asset.browser_download_url -OutFile '{target_arg}' -Headers $headers");
+    let script = format!("$ErrorActionPreference='Stop'; $headers=@{{'User-Agent'='autark'}}; $release=Invoke-RestMethod -Uri 'https://api.github.com/repos/jdx/mise/releases/latest' -Headers $headers; $asset=$release.assets | Where-Object {{ $_.name -like '*windows-x64.exe' }} | Select-Object -First 1; if (-not $asset) {{ throw 'no windows-x64 asset in the latest mise release' }}; $total=[long]$asset.size; $request=[System.Net.HttpWebRequest]::Create($asset.browser_download_url); $request.UserAgent='autark'; $response=$request.GetResponse(); $input=$response.GetResponseStream(); $output=[System.IO.File]::Create('{target_arg}'); $buffer=New-Object byte[] 1048576; $done=[long]0; $last=-1; while (($read=$input.Read($buffer,0,$buffer.Length)) -gt 0) {{ $output.Write($buffer,0,$read); $done+=$read; if ($total -gt 0) {{ $pct=[math]::Floor($done*100/$total); if ($pct -ne $last) {{ $last=$pct; Write-Output ('mise download ' + $pct + '%') }} }} }}; $output.Close(); $input.Close(); $response.Close(); Write-Output 'mise download 100%'");
     let mut command = Command::new("powershell");
     command.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script]);
     apps::run_tool_streaming(app, id, "downloading mise".to_string(), command)?;
