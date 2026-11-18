@@ -47,11 +47,13 @@ pub fn local_mise(root: &Path) -> PathBuf {
 
 pub fn resolve(settings: &Settings, root: &Path) -> Option<PathBuf> {
     let local = local_mise(root);
-    if local.exists() { return Some(local); }
-    if settings.force_local_mise { return None; }
+    if settings.force_local_mise {
+        return local.exists().then_some(local);
+    }
     if let Some(path) = settings.mise_path.as_ref().map(PathBuf::from).filter(|p| p.is_file()) {
         return Some(path);
     }
+    if local.exists() { return Some(local); }
     if let Some(path) = env::var_os("MISE_BIN").map(PathBuf::from).filter(|p| p.is_file()) {
         return Some(path);
     }
@@ -170,7 +172,7 @@ pub fn probe(settings: &Settings) -> MiseInfo {
     }
     let own = local_mise(&root);
     let own_key = own.to_string_lossy().to_lowercase();
-    let mut detected: Vec<DetectedMise> = where_all()
+    let detected: Vec<DetectedMise> = where_all()
         .into_iter()
         .filter(|candidate| candidate.to_string_lossy().to_lowercase() != own_key)
         .filter_map(|candidate| {
@@ -180,10 +182,6 @@ pub fn probe(settings: &Settings) -> MiseInfo {
             })
         })
         .collect();
-    // Autark's own copy is listed first once it runs, so it can be picked like any other mise.
-    if let Some(found) = run_version(&own, &root) {
-        detected.insert(0, DetectedMise { path: own.to_string_lossy().to_string(), version: Some(found) });
-    }
     MiseInfo {
         available: version.is_some(), source: source.to_string(), path, version,
         local_path: bin_dir(&root).join("mise.exe").to_string_lossy().to_string(),
