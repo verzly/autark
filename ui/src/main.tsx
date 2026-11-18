@@ -334,8 +334,18 @@ export default function App() {
   const introPane = () => (
     <>
       <div class="empty-mark" aria-hidden="true">autark</div>
-          <div><h1>Apps stay in their own folder</h1><p>Autark installs apps from a marketplace, each one into its own folder with its own tools. Nothing is installed machine-wide, and every app runs from a tab here.</p></div>
-          <button class="button primary" onClick={() => setWizardStep(2)}>Next</button>
+      <h1>Apps installed properly on Windows</h1>
+      <p class="settings-muted">Autark keeps every app, its data and its tools in one folder of your choice.</p>
+      <div class="intro-list">
+        <section class="intro-card"><h2>No telemetry</h2><p>Autark collects no diagnostics or telemetry. Nothing leaves this machine unless you ask for it.</p></section>
+        <section class="intro-card"><h2>Free and open</h2><p>The app is free and carries no ads. The source code is public under AGPL-3.0: <button class="inline-link" onClick={() => openUrl("https://github.com/verzly/autark")}>source</button>.</p></section>
+        <section class="intro-card"><h2>Made by rozsazoltan</h2><p>Built by <button class="inline-link" onClick={() => openUrl("https://github.com/rozsazoltan")}>rozsazoltan</button>.</p></section>
+        <section class="intro-card"><h2>Why Autark exists</h2><p>Apps with heavy setup steps are often only practical with Docker on Windows. Autark aims for native installs instead, so their dependencies never collide and nothing is scattered across random places on the machine.</p></section>
+        <section class="intro-card"><h2>One place for everything</h2><p>Apps live together in one folder, with their data and dependencies stored in order. Install, update, remove or run them with one click, plus the extra commands each app declares.</p></section>
+        <section class="intro-card"><h2>Reviewed marketplace</h2><p>Apps come from the marketplace. They are third-party, and their install steps are checked before a recipe is published.</p></section>
+        <section class="intro-card"><h2>Ideas and bugs</h2><p>Have an app idea or found a bug? Report it in <button class="inline-link" onClick={() => openUrl("https://github.com/verzly/autark/issues")}>autark issues</button> or in the <button class="inline-link" onClick={() => openUrl("https://github.com/verzly/autark-marketplace")}>marketplace</button>.</p></section>
+      </div>
+      <button class="button primary" onClick={() => setWizardStep(2)}>Next</button>
     </>
   );
   const folderPane = () => (

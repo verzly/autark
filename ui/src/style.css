@@ -159,3 +159,9 @@ a:hover,a:visited:hover{color:#fff;text-decoration-color:#8a8a8a}
 
 /* loading screens lock the page behind them */
 body.is-loading{overflow:hidden}
+
+/* wizard intro: left aligned cards, no borders */
+.intro-list{display:flex;flex-direction:column;gap:9px;width:100%;text-align:left}
+.intro-card{padding:12px 14px;border-radius:9px;background:#151515}
+.intro-card h2{margin:0 0 4px}
+.intro-card p{margin:0;color:#a2a2a2;font-size:12px;line-height:1.5}
