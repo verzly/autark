@@ -18,6 +18,7 @@ export default function App() {
   const [state, setState] = createSignal<State>(previewState);
   const [active, setActive] = createSignal<string | null>(previewState.settings.active_tab ?? AUTARK_TAB);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
+  const [settingsTab, setSettingsTab] = createSignal<"General" | "Apps" | "Experimental" | "About">("General");
   const [settingsReturn, setSettingsReturn] = createSignal<string | null>(null);
   const [appSettingsOpen, setAppSettingsOpen] = createSignal<string | null>(null);
   const [chooser, setChooser] = createSignal(false);
@@ -247,7 +248,7 @@ export default function App() {
       <button class={`gear ${settingsOpen() ? "selected" : ""}`} aria-label="Settings" aria-pressed={settingsOpen()} onClick={() => {
         if (!settingsOpen()) {
           setSettingsReturn(active());
-          setSettingsOpen(true); setAppSettingsOpen(null); setActive(null); setChooser(false);
+          setSettingsOpen(true); setSettingsTab("General"); setAppSettingsOpen(null); setActive(null); setChooser(false);
         }
       }} onDblClick={() => {
         if (settingsOpen()) {
@@ -282,6 +283,11 @@ export default function App() {
       <Show when={settingsOpen()}><section class="settings-view">
         <button class="back-button" onClick={() => { const target = settingsReturn() ?? AUTARK_TAB; setSettingsOpen(false); setActive(target); setChooser(false); setAppSettingsOpen(null); }}>← back to homepage</button>
         <div class="view-heading"><div><span class="eyebrow">AUTARK</span><h1>Settings</h1></div></div>
+        <nav class="settings-tabs" role="tablist" aria-label="Settings sections">
+          <For each={["General", "Apps", "Experimental", "About"] as const}>{tab => <button class={`settings-tab ${settingsTab() === tab ? "active" : ""}`} role="tab" aria-selected={settingsTab() === tab} onClick={() => setSettingsTab(tab)}>{tab}</button>}</For>
+        </nav>
+        <div class="settings-content">
+        <Show when={settingsTab() === "General"}>
         <section class="setting-row"><div><h2>Root folder</h2><p>Apps and managed tools live here.</p><button class="path" onClick={() => reveal("root")}>{state().settings.root}</button></div><button class="button" disabled={state().busy} onClick={() => void changeRoot()}>Change</button></section>
          <section class="setting-row"><div><h2>Settings file</h2><p>Portable launcher preferences.</p><button class="path" onClick={() => reveal("settings")}>{state().settings_path}</button></div></section>
           <section class="preference-section window-preferences"><h2>Window</h2>
@@ -289,11 +295,18 @@ export default function App() {
             <section class="setting-row"><label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.start_with_windows} disabled={!state().settings.tray_enabled} onChange={e => setGlobalPref("start_with_windows", e.currentTarget.checked)} /><span><b>Start with Windows</b><small>Starts hidden in the tray when you sign in.</small><Show when={!state().settings.tray_enabled}><small class="preference-note">Needs the tray icon.</small></Show></span></label></section>
             <section class="setting-row"><label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.close_to_tray} disabled={!state().settings.tray_enabled} onChange={e => setGlobalPref("close_to_tray", e.currentTarget.checked)} /><span><b>Close to tray</b><small>The X button hides the window instead of quitting.</small><Show when={!state().settings.tray_enabled}><small class="preference-note">Needs the tray icon.</small></Show></span></label></section>
           </section>
+        </Show>
+        <Show when={settingsTab() === "Experimental"}>
           <section class="preference-section"><h2>Experimental</h2>
             <label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.experimental_local_apps} onChange={e => e.currentTarget.checked ? setLocalAppsConfirm(true) : setGlobalPref("experimental_local_apps", false)} /><span><b>Local apps</b><small>Allow apps from manifests you supply.</small><small class="preference-note">Local app manifests can run commands on this machine.</small></span></label>
             <Show when={localAppsConfirm() && !state().settings.experimental_local_apps}><div class="inline-panel"><p>Local apps run setup commands from a file you supply. Only add manifests you trust.</p><div><button class="button" onClick={() => setLocalAppsConfirm(false)}>Cancel</button><button class="button primary" onClick={enableLocalApps}>Enable local apps</button></div></div></Show>
           </section>
-         <section class="setting-row"><div><h2>Marketplace</h2><p>{state().marketplace.exists ? <button class="path" onClick={() => reveal("marketplace")}>{state().marketplace.path}</button> : "Marketplace has not been loaded."}</p><Show when={state().marketplace.last_refresh}><small>Last refreshed {new Date(state().marketplace.last_refresh! * 1000).toLocaleString()}</small></Show></div><button class="button" disabled={state().busy} onClick={refresh}>{state().marketplace.exists ? "Reload marketplace" : "Load marketplace"}</button></section>
+          <p class="settings-muted">Experimental features may change or break.</p>
+        </Show>
+        <Show when={settingsTab() === "General"}>
+          <section class="setting-row"><div><h2>Marketplace</h2><p>{state().marketplace.exists ? <button class="path" onClick={() => reveal("marketplace")}>{state().marketplace.path}</button> : "Marketplace has not been loaded."}</p><Show when={state().marketplace.last_refresh}><small>Last refreshed {new Date(state().marketplace.last_refresh! * 1000).toLocaleString()}</small></Show></div><button class="button" disabled={state().busy} onClick={refresh}>{state().marketplace.exists ? "Reload marketplace" : "Load marketplace"}</button></section>
+        </Show>
+        <Show when={settingsTab() === "Apps"}>
         <section class="setting-row"><div><h2>Updates</h2><p>Check marketplace versions manually.</p></div><button class="button" disabled={state().busy} onClick={() => mockMode() ? undefined : void run(() => api.checkUpdates())}>Check for updates</button></section>
         <section class="updates"><h2>Update all</h2><p>Running apps stop during updates and cannot be used until each update finishes.</p>
           <div class="update-table">
@@ -302,6 +315,16 @@ export default function App() {
           <Show when={!allConfirm()}><button class="button primary" disabled={state().busy || !state().apps.some(a => a.installed && a.update_available)} onClick={() => setAllConfirm(true)}>Update all</button></Show>
           <Show when={allConfirm()}><div class="confirm-strip"><span>Update every installed app now?</span><button class="button" onClick={() => setAllConfirm(false)}>Cancel</button><button class="button primary" disabled={state().busy} onClick={doUpdateAll}>Confirm</button></div></Show>
         </section>
+        </Show>
+        <Show when={settingsTab() === "About"}>
+          <section class="settings-about">
+            <p class="settings-about-description">Autark is a portable launcher for managing and running your apps. Every app comes from a marketplace manifest or a local file you add, and installs into its own folder with its own tools.</p>
+            <div class="settings-about-row"><span>License</span><b>AGPL-3.0</b></div>
+            <div class="settings-about-row"><span>Source</span><button onClick={() => openUrl("https://github.com/verzly/autark")}>github.com/verzly/autark</button></div>
+            <div class="settings-about-row"><span>Marketplace</span><button onClick={() => openUrl("https://github.com/verzly/autark-marketplace")}>github.com/verzly/autark-marketplace</button></div>
+          </section>
+        </Show>
+        </div>
         <footer class="about"><span>Autark <b>v{version()}</b></span><span>AGPL-3.0</span><button onClick={() => openUrl("https://github.com/verzly/autark")}>Source</button><button onClick={() => openUrl("https://github.com/verzly/autark-marketplace")}>Marketplace</button></footer>
       </section></Show>
       <Show when={chooser()}><section class="marketplace-view" onKeyDown={chooserKeys}>
