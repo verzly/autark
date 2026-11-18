@@ -1,5 +1,5 @@
 use crate::{apps, settings::Settings};
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use serde::Serialize;
 use std::{
     env, fs,
