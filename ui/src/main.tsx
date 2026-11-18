@@ -384,8 +384,8 @@ export default function App() {
         const p = () => a().phase;
         const busyApp = () => appBusy(a());
         const elapsed = () => a().elapsed_secs ?? (a().started_at ? Math.max(0, clock() - a().started_at!) : null);
-        const canStart = () => !busyApp() && a().installed && p() === "installed";
-        const canStop = () => !busyApp() && (p() === "running" || p() === "starting");
+        const canStart = () => !busyApp() && a().installed && a().can_start && p() === "installed";
+        const canStop = () => !busyApp() && a().can_start && (p() === "running" || p() === "starting");
         const confirmInstall = () => { setPanel(null); action(a().installed ? "update" : "install", a()); };
         return <Show when={appSettingsOpen() === a().id} fallback={<section class="app-view">
           <div class="app-header"><div class="app-title"><span class="badge large" style={{ "--hue": hue(a().id) }}><Show when={a().icon_data} fallback={a().id[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><div><h1>{a().name}</h1><div class="version-line">{a().version_app ? `app ${a().version_app}` : "app version unknown"} · {a().local ? "local" : `recipe ${a().version_installed ?? "not installed"}`}<Show when={!a().local && a().update_available}> · latest recipe {a().version_latest ?? "unknown"} <span class="update-pill">update</span></Show></div></div></div>
@@ -393,8 +393,10 @@ export default function App() {
           <div class="status-line"><span class={`dot ${p()}`} /><Show when={working(p())}><span class="progress"><i /></span></Show><span class="phase-label">{a().step ? `(${a().step?.index}/${a().step?.total}) ${a().step?.name}` : p().replace("_", " ")}</span><Show when={working(p()) && elapsed() != null}><span class="elapsed">run {duration(elapsed()!)}</span></Show></div>
           <div class="actions">
              <Show when={!a().local}><button class="button primary" disabled={busyApp() || (a().installed && !a().update_available)} onClick={() => setPanel("install")}>{a().installed ? "Update" : "Install"}</button></Show>
-            <button class="button" disabled={!canStart()} onClick={() => action("start", a())}>Start</button>
-            <button class="button" disabled={!canStop()} onClick={() => action("stop", a())}>Stop</button>
+            <Show when={a().can_start}>
+              <button class="button" disabled={!canStart()} onClick={() => action("start", a())}>Start</button>
+              <button class="button" disabled={!canStop()} onClick={() => action("stop", a())}>Stop</button>
+            </Show>
             <button class="button" disabled={busyApp() || !a().url} onClick={() => action("open", a())}>Open</button>
              <button class="button" aria-label={`${a().name} settings`} onClick={() => { setPanel(null); setAppSettingsOpen(a().id); }}><Icon name="menu" /> Settings</button>
              <For each={a().actions}>{item => <button class="button" disabled={busyApp() || !a().installed} onClick={() => item.confirm ? setPanel(`action:${item.id}`) : void run(() => api.runAction(a().id, item.id))}>{item.label}</button>}</For>

@@ -98,6 +98,9 @@ pub struct Setup {
 #[serde(default)]
 pub struct Launch {
     pub run: Vec<String>,
+    /// Graceful shutdown command; Autark still kills the process tree afterwards.
+    #[serde(default)]
+    pub stop: Vec<String>,
     pub url: Option<String>,
 }
 
@@ -186,8 +189,11 @@ impl Manifest {
                 bail!("invalid_argument: manifest field `{field}` is empty");
             }
         }
-        if self.launch.run.is_empty() || self.launch.run[0].trim().is_empty() {
+        if !self.launch.run.is_empty() && self.launch.run[0].trim().is_empty() {
             bail!("invalid_argument: `launch.run` must start with a program");
+        }
+        if !self.launch.stop.is_empty() && self.launch.stop[0].trim().is_empty() {
+            bail!("invalid_argument: `launch.stop` must start with a program");
         }
         if let Some(url) = &self.launch.url {
             self.check_template(url, "launch.url")?;
@@ -217,6 +223,9 @@ impl Manifest {
         }
         for arg in &self.launch.run {
             self.check_template(arg, "launch.run")?;
+        }
+        for arg in &self.launch.stop {
+            self.check_template(arg, "launch.stop")?;
         }
         let mut action_ids = std::collections::BTreeSet::new();
         for action in &self.actions {
@@ -621,5 +630,24 @@ mod tests {
             {"id":"refresh","label":"Refresh","run":["demo.exe"],"url":"https://example.com"}]}"#;
         let manifest: Manifest = serde_json::from_str(valid).unwrap();
         assert!(manifest.validate("demo").is_ok());
+    }
+
+    #[test]
+    fn launch_is_optional_and_stop_is_checked() {
+        let no_launch = r#"{"schema":1,"id":"demo","name":"Demo","description":"d","version":"1"}"#;
+        let manifest: Manifest = serde_json::from_str(no_launch).unwrap();
+        assert!(manifest.validate("demo").is_ok());
+        assert!(manifest.launch.run.is_empty());
+
+        let with_stop = r#"{"schema":1,"id":"demo","name":"Demo","description":"d","version":"1",
+            "launch":{"run":["demo.exe"],"stop":["demo.exe","--quit"]}}"#;
+        let manifest: Manifest = serde_json::from_str(with_stop).unwrap();
+        manifest.validate("demo").unwrap();
+        assert_eq!(manifest.launch.stop.len(), 2);
+
+        let blank_stop = r#"{"schema":1,"id":"demo","name":"Demo","description":"d","version":"1",
+            "launch":{"run":["demo.exe"],"stop":[" "]}}"#;
+        let manifest: Manifest = serde_json::from_str(blank_stop).unwrap();
+        assert!(manifest.validate("demo").is_err());
     }
 }

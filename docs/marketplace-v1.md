@@ -58,6 +58,7 @@ README.md
   },
   "launch": {
     "run": ["{app}/app/unsloth_studio/Scripts/python.exe", "-I", "-m", "unsloth_cli", "studio", "-H", "127.0.0.1", "-p", "{settings.port}"],
+    "stop": ["{app}/app/unsloth_studio/Scripts/python.exe", "-I", "-m", "unsloth_cli", "studio", "shutdown"],
     "url": "http://127.0.0.1:{settings.port}"
   },
   "env": { "UNSLOTH_SKIP_AUTOSTART": "1", "HF_HOME": "{app}/huggingface" },
@@ -85,7 +86,7 @@ README.md
 | `setup.installed_check` | no | Path template; when set, the app counts as installed only if the path exists |
 | `setup.version_check` | no | Argument vector; its last non-empty stdout line is stored as the app's real version |
 | `setup.steps` | yes | Ordered commands run after tool install and source fetch |
-| `launch` | yes | Command used by Start, plus the optional local URL for Open |
+| `launch` | no | Command used by Start, optional `stop` for a graceful shutdown, plus the optional local URL for Open. Omit it when the app has nothing to start |
 | `actions` | no | App-specific buttons and commands |
 | `env` | no | Extra environment variables for setup steps and launch |
 | `env_keep_parent` | no | Env names that keep the parent process value when the machine already sets any of them |
@@ -132,6 +133,16 @@ shell, so no quoting rules apply. When `setup.tools` is non-empty every command 
 Setup steps run in order. A step with `"optional": true` may fail without failing the install. A step with
 `"when_setting": "key"` runs only when that boolean app setting is on, so an app can offer opt-in work such as
 copying an existing user config into the install. Every step streams its output to the app log.
+
+### Launch, stop and Open
+
+`launch` is optional. With a `run` vector Autark shows Start and the app runs until Stop; without it the app has
+no Start button at all, which suits recipes that only install tools or expose actions. `launch.url` adds an Open
+button that points at that address once the app is running.
+
+Stop never needs a command, because Autark kills the process tree it started. An optional `launch.stop` argv runs
+first, so an app that detaches itself or needs a graceful shutdown can clean up before the tree is killed. A stop
+command that fails is logged and does not block the kill.
 
 ### Actions
 

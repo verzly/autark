@@ -113,6 +113,8 @@ pub struct AppState {
     pub settings_locked: Vec<SettingsLock>,
     /// Buttons the manifest declares for this app.
     pub actions: Vec<AppAction>,
+    /// Whether the manifest declares a start command.
+    pub can_start: bool,
     pub url: Option<String>,
     pub homepage: Option<String>,
     pub license: Option<String>,
@@ -251,6 +253,7 @@ impl AppRecord {
                 label: action.label.clone(),
                 confirm: action.confirm,
             }).collect(),
+            can_start: !self.manifest.launch.run.is_empty(),
             url: self.url.clone(),
             homepage: self.manifest.homepage.clone(),
             license: self.manifest.license.clone(),
@@ -1225,6 +1228,9 @@ fn start_inner(app: &AppHandle, shared: &Arc<Shared>, id: &str) -> Result<()> {
     if record.phase == Phase::Running {
         return Ok(());
     }
+    if record.manifest.launch.run.is_empty() {
+        bail!("invalid_argument: this app has no start command");
+    }
     let settings = shared.plugin_settings();
     let root = settings.root_path();
     let force_local_mise = settings.force_local_mise;
@@ -1352,8 +1358,66 @@ pub fn stop(app: &AppHandle, shared: &Arc<Shared>, id: &str) -> Result<()> {
     result
 }
 
+/// Runs the manifest shutdown command before the process tree is killed.
+fn run_stop_command(app: &AppHandle, shared: &Shared, id: &str) {
+    let record = match find_record(shared, id) {
+        Ok(record) => record,
+        Err(_) => return,
+    };
+    let stop = record.manifest.launch.stop.clone();
+    if stop.is_empty() {
+        return;
+    }
+    let settings = shared.plugin_settings();
+    let root = settings.root_path();
+    let force_local_mise = settings.force_local_mise;
+    let app_dir = manifest::app_dir(&root, id);
+    let values = record.settings.clone();
+    let expanded = stop
+        .iter()
+        .map(|arg| manifest::expand(arg, &root, &app_dir, &values))
+        .collect::<Result<Vec<_>>>();
+    let expanded = match expanded {
+        Ok(expanded) => expanded,
+        Err(error) => {
+            log(app, id, format!("shutdown command skipped: {error:#}"));
+            return;
+        }
+    };
+    let program = &expanded[0];
+    let args = &expanded[1..];
+    let mut command = if record.manifest.setup.tools.is_empty() {
+        Command::new(program)
+    } else {
+        let mut command = mise_command(&root, force_local_mise);
+        command
+            .arg("--cd")
+            .arg(&app_dir)
+            .arg("exec")
+            .arg("--")
+            .arg(program);
+        command
+    };
+    command.args(args);
+    if let Err(error) = apply_environment(&mut command, &root, &app_dir, &record.manifest, &values)
+    {
+        log(app, id, format!("shutdown command skipped: {error:#}"));
+        return;
+    }
+    command.current_dir(&app_dir);
+    let mut label = program.clone();
+    if !args.is_empty() {
+        label.push(' ');
+        label.push_str(&args.join(" "));
+    }
+    if let Err(error) = run_streaming(app, id, label, command) {
+        log(app, id, format!("shutdown command failed: {error:#}"));
+    }
+}
+
 fn stop_inner(app: &AppHandle, shared: &Shared, id: &str) -> Result<()> {
     set_phase(app, shared, id, Phase::Stopping);
+    run_stop_command(app, shared, id);
     kill_child(shared, id);
     mutate(app, shared, id, |record| {
         record.phase = if record.installed {
