@@ -178,3 +178,8 @@ body.is-loading{overflow:hidden}
 .path-row .icon-button{display:inline-flex;flex:none;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:0;border-radius:5px;background:transparent;color:#8a8a8a;cursor:pointer}
 .path-row .icon-button:hover{background:#1a1a1a;color:#eee}
 .path-row .icon-button svg{width:13px;height:13px}
+
+/* folder path: text and pencil in one button, so they never wrap apart */
+.path-edit{display:inline-flex;align-items:center;gap:7px;max-width:100%;white-space:nowrap}
+.path-edit svg{flex:none;width:13px;height:13px;color:#8a8a8a}
+.path-edit:hover svg{color:#eee}
