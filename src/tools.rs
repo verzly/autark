@@ -48,7 +48,21 @@ pub fn resolve(settings: &Settings, root: &Path) -> Option<PathBuf> {
     if let Some(path) = env::var_os("MISE_BIN").map(PathBuf::from).filter(|p| p.is_file()) {
         return Some(path);
     }
-    Some(PathBuf::from("mise"))
+    where_mise()
+}
+
+/// `where.exe` turns the PATH entry into a real path, which the UI lists and reports.
+fn where_mise() -> Option<PathBuf> {
+    let output = Command::new("where").arg("mise").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(PathBuf::from)
+        .find(|path| path.is_file())
 }
 
 fn environment(command: &mut Command, root: &Path) {

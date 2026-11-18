@@ -2,6 +2,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show }
 import type { AppSetting, AppState, Phase, State } from "./bridge";
 import { api, mockMode } from "./bridge";
 import { previewLogs, previewState, previewVariants } from "./mock";
+import miseLogo from "./mise.png";
 
 type InlineAction = "install" | "reinstall" | "remove" | `action:${string}` | null;
 const working = (p: Phase) => ["installing", "starting", "stopping", "updating", "removing"].includes(p);
@@ -36,6 +37,16 @@ export default function App() {
   const [allConfirm, setAllConfirm] = createSignal(false);
   const [localAppsConfirm, setLocalAppsConfirm] = createSignal(false);
   const [binRemoveConfirm, setBinRemoveConfirm] = createSignal<string | null>(null);
+  // A mise that lives outside Autark's bin still gets a card, otherwise Built-in looks empty.
+  const builtinApps = createMemo(() => {
+    const mise = state().mise;
+    const entries = mise.bin.slice();
+    const hasLocalMise = entries.some(entry => entry.name.toLowerCase() === "mise.exe");
+    const path = mise.path;
+    if (!hasLocalMise) entries.unshift({ name: "mise.exe", path: path ?? "", version: mise.version, size: 0 });
+    return entries.filter(entry => `${entry.name} ${entry.version ?? ""}`.toLowerCase().includes(search().toLowerCase()));
+  });
+  const isResolvedMise = (name: string) => name.toLowerCase() === "mise.exe" && !state().mise.bin.some(entry => entry.name.toLowerCase() === "mise.exe");
   const [marketFilter, setMarketFilter] = createSignal<"builtin" | "marketplace" | "local">("marketplace");
   const [clock, setClock] = createSignal(Date.now() / 1000);
   let dialogInput: HTMLInputElement | undefined;
@@ -303,6 +314,11 @@ export default function App() {
              <label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.experimental_local_apps} onChange={e => e.currentTarget.checked ? setLocalAppsConfirm(true) : setGlobalPref("experimental_local_apps", false)} /><span><b>Local apps</b><small>Allow apps from manifests you supply.</small><small class="preference-note">Local app manifests can run commands on this machine.</small></span></label>
             <Show when={localAppsConfirm() && !state().settings.experimental_local_apps}><div class="inline-panel"><p>Local apps run setup commands from a file you supply. Only add manifests you trust.</p><div><button class="button" onClick={() => setLocalAppsConfirm(false)}>Cancel</button><button class="button primary" onClick={enableLocalApps}>Enable local apps</button></div></div></Show>
           </section>
+          <section class="preference-section"><h2>mise</h2>
+            <p class="settings-muted">mise: {state().mise.path ?? "not resolved"} · {state().mise.version ?? "version unknown"}{state().mise.source ? ` (${state().mise.source})` : ""}</p>
+            <label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.force_local_mise} onChange={e => setGlobalPref("force_local_mise", e.currentTarget.checked)} /><span><b>Always use Autark's own mise</b><small>Ignore the mise on this machine and require Autark's own copy.</small></span></label>
+            <label class="preference-toggle"><input type="checkbox" role="switch" checked={state().mise.bin_in_path} onChange={e => void run(() => api.setBinPath(e.currentTarget.checked))} /><span><b>Add Autark's bin folder to PATH</b><small>{state().mise.bin_path}</small></span></label>
+          </section>
           <p class="settings-muted">Experimental features may change or break.</p>
         </Show>
         <Show when={settingsTab() === "General"}>
@@ -372,23 +388,18 @@ export default function App() {
           </Show>
           <Show when={marketFilter() === "builtin"}>
             <section class="builtin-content">
-              <div class="mise-panel">
-                <p class="settings-muted">mise: {state().mise.path ?? "not resolved"} · {state().mise.version ?? "version unknown"}{state().mise.source ? ` (${state().mise.source})` : ""}</p>
-                <label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.force_local_mise} onChange={e => setGlobalPref("force_local_mise", e.currentTarget.checked)} /><span><b>Always use Autark's own mise</b></span></label>
-                <label class="preference-toggle"><input type="checkbox" role="switch" checked={state().mise.bin_in_path} onChange={e => void run(() => api.setBinPath(e.currentTarget.checked))} /><span><b>Add Autark's bin folder to PATH</b><small>{state().mise.bin_path}</small></span></label>
-                <Show when={state().mise.source !== "local"}><button class="button quiet-button" disabled={busy()} onClick={() => void run(() => api.installMise())}>Install Autark's own mise</button></Show>
-              </div>
-              <Show when={state().mise.bin.length} fallback={<p class="marketplace-load">No built-in apps yet. Autark's own tools appear here.</p>}>
-                <div class="marketplace-grid" role="list" aria-label="Built-in apps"><For each={state().mise.bin.filter(entry => `${entry.name} ${entry.version ?? ""}`.toLowerCase().includes(search().toLowerCase()))}>{(entry, i) => {
+              <Show when={builtinApps().length} fallback={<p class="marketplace-load">No built-in apps yet. Autark's own tools appear here.</p>}>
+                <div class="marketplace-grid" role="list" aria-label="Built-in apps"><For each={builtinApps()}>{(entry, i) => {
                   const title = entry.name.replace(/\.exe$/i, "");
+                  const systemMise = isResolvedMise(entry.name);
                   return <article role="listitem" class={`market-card ${selected() === i() ? "market-selected" : ""}`} onMouseEnter={() => setSelected(i())}>
-                    <div class="market-card-head"><span class="badge large" style={{ "--hue": hue(entry.name) }}>{title[0]?.toUpperCase()}</span><div><h2>{title}</h2><code>{entry.name}</code></div><span class="local-tag">Built-in</span></div>
-                    <p class="market-description">Ships with Autark, managed in its own bin folder.</p>
-                    <div class="market-versions"><span>Version <b>{entry.version ?? "unknown"}</b></span><span>Size <b>{(entry.size / 1048576).toFixed(1)} MB</b></span></div>
-                    <div class="market-requirements"><span>Ships with Autark</span></div>
-                    <div class="market-links"><span>{state().mise.bin_path}</span></div>
-                    <div class="market-actions"><Show when={entry.name.toLowerCase() === "mise.exe" && state().mise.source === "local"}><button class="button primary market-action" disabled={busy()} onClick={() => void run(() => api.updateMise())}>Update</button></Show>
-                      <Show when={!(entry.name.toLowerCase() === "mise.exe" && state().mise.source !== "local")}>
+                    <div class="market-card-head"><span class="badge large" style={{ "--hue": hue(entry.name) }}><Show when={entry.name.toLowerCase() === "mise.exe"} fallback={title[0]?.toUpperCase()}>{<img src={miseLogo} alt="" />}</Show></span><div><h2>{title}</h2><code>{entry.name}</code></div><span class="local-tag">Built-in</span></div>
+                    <p class="market-description">{systemMise ? (entry.path ? "The mise Autark runs from your machine." : "mise is not on this machine yet.") : "Ships with Autark, managed in its own bin folder."}</p>
+                    <div class="market-versions"><span>Version <b>{entry.version ?? "unknown"}</b></span><span>Size <b>{entry.size ? `${(entry.size / 1048576).toFixed(1)} MB` : state().mise.source}</b></span></div>
+                    <div class="market-requirements"><span>{systemMise ? "From your machine" : "Ships with Autark"}</span></div>
+                    <div class="market-links"><span>{systemMise ? (entry.path || "not detected") : state().mise.bin_path}</span></div>
+                    <div class="market-actions"><Show when={entry.name.toLowerCase() === "mise.exe"}><button class="button primary market-action" disabled={busy()} onClick={() => void run(() => state().mise.source === "local" ? api.updateMise() : api.installMise())}>{state().mise.source === "local" ? "Update" : "Install"}</button></Show>
+                      <Show when={!systemMise}>
                         <Show when={binRemoveConfirm() !== entry.name}><button class="button market-view-action" onClick={() => setBinRemoveConfirm(entry.name)}>Remove</button></Show>
                         <Show when={binRemoveConfirm() === entry.name}><div class="confirm-strip"><span>Remove {entry.name} from Autark's bin folder?</span><button class="button" onClick={() => setBinRemoveConfirm(null)}>Cancel</button><button class="button" disabled={busy()} onClick={() => { setBinRemoveConfirm(null); void run(() => api.removeBinEntry(entry.name)); }}>Remove</button></div></Show>
                       </Show>
