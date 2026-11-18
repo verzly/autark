@@ -243,24 +243,12 @@ async fn reset_autark(
         apps::stop_all(&task_shared);
         let settings = task_shared.plugin_settings();
         let root = settings.root_path();
-        if root.exists() {
-            let entries = std::fs::read_dir(&root).map_err(anyhow::Error::from)?;
-            for entry in entries {
-                let path = entry.map_err(anyhow::Error::from)?.path();
-                if path.is_dir() {
-                    std::fs::remove_dir_all(path).map_err(anyhow::Error::from)?;
-                } else {
-                    std::fs::remove_file(path).map_err(anyhow::Error::from)?;
-                }
-            }
-        }
-        // A reset forgets every preference: only the folder itself survives.
-        let folder_name = settings.folder_name.clone();
-        let root_text = root.to_string_lossy().to_string();
         let had_path = settings.bin_in_path;
-        let mut fresh = Settings::default();
-        fresh.root = root_text;
-        fresh.folder_name = folder_name;
+        // A reset forgets the folder as well: the next run starts from the wizard intro.
+        if root.exists() {
+            let _ = std::fs::remove_dir_all(&root);
+        }
+        let fresh = Settings::default();
         fresh.save()?;
         if had_path {
             let _ = tools::set_path_registration(&root, false);
