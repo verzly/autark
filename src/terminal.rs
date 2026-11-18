@@ -1,5 +1,4 @@
 use std::ffi::OsString;
-use std::fs;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -45,57 +44,27 @@ fn selected(requested: &str, shells: &tools::TerminalInfo) -> &'static str {
     }
 }
 
-/// The banner: color code and text per line. 38;5;n keeps it soft on any terminal.
-fn banner(root: &Path) -> Vec<(u8, String)> {
-    vec![
-        (110, format!("Autark v{}", env!("CARGO_PKG_VERSION"))),
-        (245, format!("Autark terminal · {}", root.display())),
-        (245, "AGPL-3.0 · github.com/verzly/autark".to_string()),
-        (
+/// PowerShell prints the banner for every shell, so one code path colours all of them.
+fn banner(root: &Path) -> String {
+    let line = |code: u8, text: &str| format!("Write-Host \"$e[38;5;{code}m{text}$e[0m\"; ");
+    "$e=[char]27; ".to_string()
+        + &line(110, &format!("Autark v{}", env!("CARGO_PKG_VERSION")))
+        + &line(245, &format!("Autark terminal · {}", root.display()))
+        + &line(245, "AGPL-3.0 · github.com/verzly/autark")
+        + &line(
             245,
-            "© 2026 rozsazoltan · apps, tools and settings stay in this folder".to_string(),
-        ),
-        (240, "Autark bin and mise shims are on PATH".to_string()),
-    ]
+            "© 2026 rozsazoltan · apps, tools and settings stay in this folder",
+        )
+        + &line(240, "Autark bin and mise shims are on PATH")
+        + "Write-Host ''"
 }
 
-/// cmd prints text as-is only when the shell metacharacters are escaped.
-fn cmd_text(text: &str) -> String {
-    text.replace('·', "-")
-        .replace('©', "(c)")
-        .replace('^', "^^")
-        .replace('&', "^&")
-        .replace('|', "^|")
-        .replace('<', "^<")
-        .replace('>', "^>")
-}
-
-/// A single quote would end the printf argument early.
-fn shell_quote(text: &str) -> String {
-    text.replace('\'', "'\\''")
-}
-
-/// A startup file is the only way to get a banner into a real interactive shell.
-fn profile(root: &Path) -> Result<PathBuf> {
-    let dir = root.join("runtime").join("terminal");
-    fs::create_dir_all(&dir).with_context(|| format!("cannot create {}", dir.display()))?;
-    let path = dir.join("profile.sh");
-    let mut text = String::from("[ -f \"$HOME/.bashrc\" ] && . \"$HOME/.bashrc\"\n");
-    for (color, line) in banner(root) {
-        text.push_str(&format!(
-            "printf '\\033[38;5;{color}m%s\\033[0m\\n' '{}'\n",
-            shell_quote(&line)
-        ));
-    }
-    text.push_str("printf '\\n'\n");
-    fs::write(&path, text).with_context(|| format!("cannot write {}", path.display()))?;
-    Ok(path)
-}
-/// Opens the chosen shell in the Autark root, with its banner above the first prompt.
+/// Opens PowerShell in the Autark root, prints the banner, then hands over to the chosen shell.
 pub fn open(root: &Path, requested: &str, shells: &tools::TerminalInfo) -> Result<()> {
     let shell = selected(requested, shells);
-    let mut args: Vec<String> = Vec::new();
-    let program = match shell {
+    let mut script = banner(root);
+    let mut interactive = false;
+    match shell {
         "bash" | "sh" => {
             let exe = if shell == "bash" {
                 shells.bash.clone()
@@ -103,46 +72,30 @@ pub fn open(root: &Path, requested: &str, shells: &tools::TerminalInfo) -> Resul
                 shells.sh.clone()
             }
             .context("that shell is not available")?;
-            let file = profile(root)?;
-            if shell == "bash" {
-                args.push("--init-file".to_string());
-                args.push(file.display().to_string());
-            }
-            args.push("-i".to_string());
-            exe
+            script.push_str(&format!("; & '{exe}'"));
         }
-        "cmd" => {
-            // `echo(` prints the spaces exactly, and the joins carry no separator spaces.
-            let script = banner(root)
-                .iter()
-                .map(|(_, line)| format!("echo({}", cmd_text(line)))
-                .collect::<Vec<_>>()
-                .join("&");
-            args.push("/K".to_string());
-            args.push(format!("chcp 65001>nul&{script}&echo."));
-            "cmd.exe".to_string()
-        }
-        _ => {
-            let script = "$e=[char]27; "
-                .to_string()
-                + &banner(root)
-                    .iter()
-                    .map(|(color, line)| format!("Write-Host \"$e[38;5;{color}m{line}$e[0m\"; "))
-                    .collect::<String>()
-                + "Write-Host ''";
-            args.extend(["-NoLogo", "-NoExit", "-Command"].map(str::to_string));
-            args.push(script);
-            "powershell.exe".to_string()
-        }
-    };
+        "cmd" => script.push_str("; cmd.exe"),
+        // PowerShell is the target itself, so the session must survive the banner.
+        _ => interactive = true,
+    }
+    let mut args = vec!["-NoLogo".to_string()];
+    if interactive {
+        args.push("-NoExit".to_string());
+    }
+    args.push("-Command".to_string());
+    args.push(script);
     let mut command = match windows_terminal() {
         Some(wt) => {
             let mut command = Command::new(wt);
-            command.arg("-d").arg(root).arg(&program).args(&args);
+            command
+                .arg("-d")
+                .arg(root)
+                .arg("powershell.exe")
+                .args(&args);
             command
         }
         None => {
-            let mut command = Command::new(&program);
+            let mut command = Command::new("powershell.exe");
             command.args(&args);
             command
         }
@@ -154,22 +107,13 @@ pub fn open(root: &Path, requested: &str, shells: &tools::TerminalInfo) -> Resul
         .current_dir(root)
         // Without Windows Terminal the shell still needs its own console window.
         .creation_flags(0x0000_0010);
-    if shell == "sh" {
-        // POSIX sh reads $ENV instead of an rc flag, so it gets the same banner file.
-        if let Ok(file) = profile(root) {
-            command.env("ENV", file);
-        }
-    }
-    if matches!(shell, "bash" | "sh") {
-        command.env("TERM", "xterm-256color");
-    }
     command.spawn().context("cannot open the terminal")?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{autark_path, selected};
+    use super::{autark_path, banner, selected};
     use crate::tools::TerminalInfo;
     use std::path::Path;
 
@@ -183,21 +127,11 @@ mod tests {
     }
 
     #[test]
-    fn cmd_lines_keep_their_text() {
-        assert_eq!(super::cmd_text("Autark · ©"), "Autark - (c)");
-        assert_eq!(super::cmd_text("a & b | c"), "a ^& b ^| c");
-        assert_eq!(super::shell_quote("it's"), "it'\\''s");
-    }
-
-    #[test]
-    fn the_profile_carries_a_colored_banner() {
-        let root = std::env::temp_dir().join("autark-terminal-profile-test");
-        let path = super::profile(&root).unwrap();
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("[38;5;110m"));
-        assert!(text.contains("Autark v"));
-        assert!(text.contains("$HOME/.bashrc"));
-        let _ = std::fs::remove_dir_all(&root);
+    fn the_banner_is_colored_and_versioned() {
+        let text = banner(Path::new("C:\\Autark"));
+        assert!(text.contains("$e[38;5;110m"));
+        assert!(text.contains(env!("CARGO_PKG_VERSION")));
+        assert!(text.contains("C:\\Autark"));
     }
 
     #[test]
