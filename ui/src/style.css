@@ -81,3 +81,7 @@ a,a:visited{color:#cfcfcf;text-decoration:underline;text-decoration-color:#444;t
 a:hover,a:visited:hover{color:#fff;text-decoration-color:#8a8a8a}
 .links button,.about button,.metadata button,.market-links button,.output-head button,.group-heading button,.path{color:#cfcfcf;text-decoration-color:#444}
 .links button:hover,.about button:hover,.metadata button:hover,.market-links button:hover,.output-head button:hover,.group-heading button:hover,.path:hover{color:#fff;text-decoration-color:#8a8a8a}
+
+/* Inline links inside copy: a button, because the webview does not hand off anchors */
+.inline-link{padding:0;border:0;background:none;font:inherit;color:#cfcfcf;text-decoration:underline;text-decoration-color:#444;text-underline-offset:2px;cursor:pointer}
+.inline-link:hover{color:#fff;text-decoration-color:#8a8a8a}
