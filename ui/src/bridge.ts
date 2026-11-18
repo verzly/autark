@@ -66,9 +66,7 @@ export const api = {
   revealFile: (path: string) => invoke<void>("reveal_path", { target: "file", path }),
   openUrl: (url: string) => invoke<void>("open_url", { url }),
   exitApp: () => invoke<void>("exit_app"),
-  startTerminal: () => invoke<void>("terminal_start"),
-  writeTerminal: (input: string) => invoke<void>("terminal_write", { input }),
-  stopTerminal: () => invoke<void>("terminal_stop"),
+  openTerminal: () => invoke<void>("open_terminal"),
   onFocus: async (fn: (app_id: string | null) => void) => {
     if (!isTauri()) return () => {};
     const { listen } = await import("@tauri-apps/api/event");
@@ -84,9 +82,5 @@ export const api = {
     const { listen } = await import("@tauri-apps/api/event");
     return listen<{ app_id: string; line: string }>("log", event => fn(event.payload));
   },
-  onTerminal: async (fn: (chunk: string) => void) => {
-    if (!isTauri()) return () => {};
-    const { listen } = await import("@tauri-apps/api/event");
-    return listen<string>("terminal", event => fn(event.payload));
-  },
+
 };

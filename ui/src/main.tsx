@@ -16,7 +16,6 @@ const hue = (id: string) => { let h = 0; for (const c of id) h = (h * 31 + c.cha
 const duration = (s: number) => `${Math.floor(s / 60)}m ${String(Math.floor(s % 60)).padStart(2, "0")}s`;
 const calver = (version: string | null) => version ? version.match(/^\d+\.\d+\.\d+/)?.[0] ?? version : "version unknown";
 const AUTARK_TAB = "__autark__";
-const TERMINAL_TAB = "__terminal__";
 // Built-in tools with a real logo; everything else falls back to its first letter.
 const builtinLogo = (name: string) => {
   const lower = name.toLowerCase();
@@ -69,12 +68,6 @@ export default function App() {
   // Settings can reopen the mise screen instead of duplicating the picker.
   const [miseScreen, setMiseScreen] = createSignal(false);
   const [builtinTabs, setBuiltinTabs] = createSignal<string[]>([]);
-  // One shell for the whole session; the button switches the view, not the process.
-  const [terminalReturn, setTerminalReturn] = createSignal<string | null>(AUTARK_TAB);
-  const [termText, setTermText] = createSignal("");
-  const [termLine, setTermLine] = createSignal("");
-  let termOutput: HTMLDivElement | undefined;
-  let termInput: HTMLInputElement | undefined;
   const [shortcutDone, setShortcutDone] = createSignal<string[]>([]);
   const [shortcutBusy, setShortcutBusy] = createSignal<string[]>([]);
   const available = createMemo(() => state().apps.filter(a => `${a.name} ${a.description} ${a.id}`.toLowerCase().includes(search().toLowerCase())));
@@ -84,25 +77,21 @@ export default function App() {
 
   onMount(() => {
     let offState: (() => void) | undefined, offLog: (() => void) | undefined, offFocus: (() => void) | undefined;
-    let offTerm: (() => void) | undefined;
     if (!mockMode()) api.getState().then(s => { setState(s); setActive(s.settings.active_tab ?? AUTARK_TAB); }).catch(e => setRequestError(errText(e)));
     api.onState(s => { setState(s); setRequestError(""); }).then(f => offState = f);
     api.onFocus(id => { if (!id) return; setSettingsOpen(false); setAppSettingsOpen(null); setChooser(false); setActive(id); }).then(f => offFocus = f);
     api.onLog(({ app_id, line }) => setBuffers(prev => ({ ...prev, [app_id]: [...(prev[app_id] ?? []), line].slice(-500) }))).then(f => offLog = f);
-    api.onTerminal(chunk => setTermText(prev => (prev + chunk).slice(-200000))).then(f => offTerm = f);
     const keys = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "t" && !e.altKey && !e.shiftKey && !(e.target instanceof HTMLElement && ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName))) { e.preventDefault(); setAutarkTab(true); setActive(AUTARK_TAB); setChooser(false); return; }
       if (chooser()) chooserKeys(e);
     };
     window.addEventListener("keydown", keys);
     if ("__TAURI_INTERNALS__" in window) import("@tauri-apps/api/app").then(({ getVersion }) => getVersion().then(setVersion)).catch(() => {});
-    onCleanup(() => { offState?.(); offLog?.(); offTerm?.(); window.removeEventListener("keydown", keys); });
+    onCleanup(() => { offState?.(); offLog?.(); window.removeEventListener("keydown", keys); });
   });
   const [version, setVersion] = createSignal("dev");
   createEffect(() => { if (chooser()) queueMicrotask(() => dialogInput?.focus()); });
   createEffect(() => { logs(); if (output && follow()) output.scrollTop = output.scrollHeight; });
-  createEffect(() => { termText(); if (termOutput) termOutput.scrollTop = termOutput.scrollHeight; });
-  createEffect(() => { if (active() === TERMINAL_TAB) queueMicrotask(() => termInput?.focus()); });
   createEffect(() => {
     const app = currentApp();
     if (!app || !working(app.phase)) return;
@@ -202,23 +191,6 @@ export default function App() {
       return next;
     });
   };
-  const toggleTerminal = () => {
-    if (active() === TERMINAL_TAB) { setActive(terminalReturn() ?? AUTARK_TAB); return; }
-    setTerminalReturn(active() ?? AUTARK_TAB);
-    setChooser(false); setSettingsOpen(false); setAppSettingsOpen(null);
-    setActive(TERMINAL_TAB);
-    if (mockMode()) { if (!termText()) setTermText("PowerShell 5.1 · Autark's tools are on PATH\n"); return; }
-    void api.startTerminal().catch(e => setRequestError(errText(e)));
-  };
-  const sendTerminal = (event: Event) => {
-    event.preventDefault();
-    const line = termLine();
-    setTermLine("");
-    setTermText(prev => `${prev}$ ${line}\n`);
-    if (mockMode()) { setTermText(prev => `${prev}${line ? `mock: ${line}` : ""}\n`); return; }
-    void api.writeTerminal(line).catch(e => { setRequestError(errText(e)); setTermText(prev => `${prev}${errText(e)}\n`); });
-  };
-
   const builtinName = (id: string | null) => (id ?? "").replace(/\.exe$/i, "");
   const isBuiltin = (id: string | null) => builtinTabs().includes(id ?? "");
   const openBuiltin = (name: string) => {
@@ -247,7 +219,7 @@ export default function App() {
   createEffect(() => {
     if (!state().settings.wizard_complete || !state().mise.available || miseScreen() || settingsOpen() || chooser()) return;
     const id = active();
-    if (id === AUTARK_TAB || id === TERMINAL_TAB || isBuiltin(id) || currentApp()) return;
+    if (id === AUTARK_TAB || isBuiltin(id) || currentApp()) return;
     setAutarkTab(true);
     setActive(AUTARK_TAB);
   });
@@ -437,7 +409,7 @@ export default function App() {
         }
       }}><Icon name="menu" /></button>
       <button class={`add-tab marketplace-tab ${chooser() ? "selected" : ""}`} aria-label="Open marketplace" aria-pressed={chooser()} onClick={() => (chooser() ? hideChooser() : showChooser())}><Icon name="gridPlus" /></button>
-      <button class={`add-tab terminal-launch ${active() === TERMINAL_TAB && !settingsOpen() ? "selected" : ""}`} aria-label="Open terminal" title="Terminal" onClick={() => toggleTerminal()}>&gt;_</button>
+      <button class="add-tab terminal-launch" aria-label="Open terminal" title="Open the Autark terminal" onClick={() => { if (!mockMode()) void api.openTerminal().catch(e => setRequestError(errText(e))); }}>&gt;_</button>
       <div class="tabs" role="tablist" aria-label="Open apps">
         <For each={openIds()}>{id => {
           const app = () => state().apps.find(a => a.id === id);
@@ -476,7 +448,7 @@ export default function App() {
         <section class="setting-row"><div><h2>mise</h2><p>{state().mise.path ?? "not resolved"}{state().mise.version ? ` · ${state().mise.version}` : ""}</p></div><button class="button" disabled={state().busy} onClick={() => { setMiseScreen(true); setSettingsOpen(false); setActive(null); setChooser(false); }}>Change</button></section>
         <section class="preference-section"><h2>Reset Autark</h2><p>Deletes the marketplace clone, runtime tools and every installed app in the Autark folder, then starts the wizard again.</p>
           <Show when={!resetConfirm()}><button class="button" disabled={state().busy} onClick={() => { setResetText(""); setResetConfirm(true); }}>Reset Autark</button></Show>
-          <Show when={resetConfirm()}><div class="inline-panel remove-panel"><p class="danger-note">This deletes every user setting, preference and file inside the Autark folder.</p><label>Type RESET<input value={resetText()} onInput={e => setResetText(e.currentTarget.value)} /></label><div><button class="button" onClick={() => setResetConfirm(false)}>Cancel</button><button class="button primary" disabled={state().busy || resetText() !== "RESET"} onClick={() => { setResetConfirm(false); setWizardStep(1); const after = () => { setMiseScreen(false); setSettingsOpen(false); setChooser(false); setAppSettingsOpen(null); setActive(null); setBuffers({}); setTermText(""); if (!mockMode()) void api.stopTerminal().catch(() => {}); }; if (mockMode()) { setState(s => ({ ...s, settings: { ...s.settings, wizard_complete: false } })); after(); } else { setResetting(true); void run(() => api.resetAutark("RESET")).then(after); } }}>Confirm</button></div></div></Show>
+          <Show when={resetConfirm()}><div class="inline-panel remove-panel"><p class="danger-note">This deletes every user setting, preference and file inside the Autark folder.</p><label>Type RESET<input value={resetText()} onInput={e => setResetText(e.currentTarget.value)} /></label><div><button class="button" onClick={() => setResetConfirm(false)}>Cancel</button><button class="button primary" disabled={state().busy || resetText() !== "RESET"} onClick={() => { setResetConfirm(false); setWizardStep(1); const after = () => { setMiseScreen(false); setSettingsOpen(false); setChooser(false); setAppSettingsOpen(null); setActive(null); setBuffers({}); }; if (mockMode()) { setState(s => ({ ...s, settings: { ...s.settings, wizard_complete: false } })); after(); } else { setResetting(true); void run(() => api.resetAutark("RESET")).then(after); } }}>Confirm</button></div></div></Show>
         </section>
          <section class="setting-row"><div><h2>Settings file</h2><p>Portable launcher preferences.</p><button class="path" onClick={() => reveal("settings")}>{state().settings_path}</button></div></section>
           <section class="preference-section window-preferences"><h2>Window</h2>
@@ -605,15 +577,6 @@ export default function App() {
           <For each={logEntries()}>{entry => entry.spacer ? <div class="log-spacer" aria-hidden="true" /> : <div class={`log ${lineTone(entry.line)}`}>{entry.line}</div>}</For>
         </div></div>
         <footer class="metadata"><span>{active()?.toLowerCase() === "git.exe" ? state().git.path ?? "not resolved" : state().mise.path ?? "not resolved"}</span><code>{builtinName(active())}</code></footer>
-      </section></Show>
-      <Show when={!chooser() && !settingsOpen() && active() === TERMINAL_TAB}><section class="terminal-view">
-        <div class="terminal-screen" ref={termOutput} onClick={() => termInput?.focus()}>
-          <pre class="terminal-output">{termText()}</pre>
-          <form class="terminal-line" onSubmit={sendTerminal}>
-            <span aria-hidden="true">$</span>
-            <input ref={termInput} class="terminal-input" aria-label="Terminal command" autocomplete="off" spellcheck={false} value={termLine()} onInput={e => setTermLine(e.currentTarget.value)} />
-          </form>
-        </div>
       </section></Show>
       <Show when={!chooser() && !settingsOpen() && active() === AUTARK_TAB}><section class="empty-state"><div class="empty-mark">autark</div>
         <div class="landing-app-list" role="list" aria-label="Installed apps">

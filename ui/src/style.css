@@ -202,9 +202,3 @@ body.is-loading{overflow:hidden}
 /* terminal tab: one shell, Autark's own tools already on PATH */
 .terminal-launch{font:11px var(--mono);letter-spacing:.04em;line-height:1}
 .terminal-tab .badge{background:hsl(152 23% 26%);color:#dff3e8;font:10px var(--mono)}
-.terminal-view{display:flex;height:100%;min-height:0;padding:2px 2px 0}
-.terminal-screen{flex:1;min-height:0;overflow:auto;padding:12px 14px;border:1px solid #232323;border-radius:8px;background:#0c0c0c;color:#d0d0d0;font:12px/1.6 var(--mono);cursor:text}
-.terminal-output{margin:0;font:inherit;color:inherit;white-space:pre-wrap;overflow-wrap:anywhere}
-.terminal-line{display:flex;align-items:center;gap:6px;font:inherit;color:#eaeaea}
-.terminal-line span{flex:none;color:#7a7a7a}
-.terminal-input{flex:1;min-width:0;padding:0;border:0;background:transparent;color:inherit;font:inherit;caret-color:#eaeaea;outline:none}
