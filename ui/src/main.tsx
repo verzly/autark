@@ -385,7 +385,9 @@ export default function App() {
                     <div class="market-card-head"><span class="badge large" style={{ "--hue": hue(entry.name) }}>{title[0]?.toUpperCase()}</span><div><h2>{title}</h2><code>{entry.name}</code></div><span class="local-tag">Built-in</span></div>
                     <p class="market-description">Ships with Autark, managed in its own bin folder.</p>
                     <div class="market-versions"><span>Version <b>{entry.version ?? "unknown"}</b></span><span>Size <b>{(entry.size / 1048576).toFixed(1)} MB</b></span></div>
-                    <div class="market-actions"><Show when={entry.name.toLowerCase() === "mise.exe" && state().mise.source === "local"}><button class="button" disabled={busy()} onClick={() => void run(() => api.updateMise())}>Update</button></Show>
+                    <div class="market-requirements"><span>Ships with Autark</span></div>
+                    <div class="market-links"><span>{state().mise.bin_path}</span></div>
+                    <div class="market-actions"><Show when={entry.name.toLowerCase() === "mise.exe" && state().mise.source === "local"}><button class="button primary market-action" disabled={busy()} onClick={() => void run(() => api.updateMise())}>Update</button></Show>
                       <Show when={!(entry.name.toLowerCase() === "mise.exe" && state().mise.source !== "local")}>
                         <Show when={binRemoveConfirm() !== entry.name}><button class="button market-view-action" onClick={() => setBinRemoveConfirm(entry.name)}>Remove</button></Show>
                         <Show when={binRemoveConfirm() === entry.name}><div class="confirm-strip"><span>Remove {entry.name} from Autark's bin folder?</span><button class="button" onClick={() => setBinRemoveConfirm(null)}>Cancel</button><button class="button" disabled={busy()} onClick={() => { setBinRemoveConfirm(null); void run(() => api.removeBinEntry(entry.name)); }}>Remove</button></div></Show>
