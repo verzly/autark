@@ -3,7 +3,7 @@ import type { AppSetting, AppState, Phase, State } from "./bridge";
 import { api, mockMode } from "./bridge";
 import { previewLogs, previewState, previewVariants } from "./mock";
 
-type InlineAction = "install" | "reinstall" | "remove" | null;
+type InlineAction = "install" | "reinstall" | "remove" | `action:${string}` | null;
 const working = (p: Phase) => ["installing", "starting", "stopping", "updating", "removing"].includes(p);
 const errText = (e: unknown) => {
   if (e instanceof Error) return e.message;
@@ -396,10 +396,12 @@ export default function App() {
             <button class="button" disabled={!canStart()} onClick={() => action("start", a())}>Start</button>
             <button class="button" disabled={!canStop()} onClick={() => action("stop", a())}>Stop</button>
             <button class="button" disabled={busyApp() || !a().url} onClick={() => action("open", a())}>Open</button>
-            <button class="button" aria-label={`${a().name} settings`} onClick={() => { setPanel(null); setAppSettingsOpen(a().id); }}><Icon name="menu" /> Settings</button>
-            <Show when={working(p())}><button class="button" onClick={() => action("cancel", a())}>Cancel operation</button></Show>
-          </div>
-          <Show when={panel() === "install"}><div class="inline-panel"><p>Setup may install system components through mise and requires network access.</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={confirmInstall}>Confirm</button></div></div></Show>
+             <button class="button" aria-label={`${a().name} settings`} onClick={() => { setPanel(null); setAppSettingsOpen(a().id); }}><Icon name="menu" /> Settings</button>
+             <For each={a().actions}>{item => <button class="button" disabled={busyApp() || !a().installed} onClick={() => item.confirm ? setPanel(`action:${item.id}`) : void run(() => api.runAction(a().id, item.id))}>{item.label}</button>}</For>
+             <Show when={working(p())}><button class="button" onClick={() => action("cancel", a())}>Cancel operation</button></Show>
+           </div>
+           <Show when={panel() === "install"}><div class="inline-panel"><p>Setup may install system components through mise and requires network access.</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={confirmInstall}>Confirm</button></div></div></Show>
+           <For each={a().actions.filter(item => item.confirm && panel() === `action:${item.id}`)}>{item => <div class="inline-panel"><p>Run {item.label}?</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp() || !a().installed} onClick={() => { setPanel(null); void run(() => api.runAction(a().id, item.id)); }}>Confirm</button></div></div>}</For>
           <section class="output-section"><div class="output-head"><h2>Output</h2><button onClick={() => { setBuffers(b => ({ ...b, [a().id]: [] })); setFollow(true); }}>Clear</button></div>
             <div class="output-wrap"><div class="output" ref={output} onScroll={() => output && setFollow(output.scrollHeight - output.scrollTop - output.clientHeight < 24)}>
               <Show when={logs().length} fallback={<span class="quiet">Operation output will appear here.</span>}><For each={logEntries()}>{entry => <div class={entry.spacer ? "log-spacer" : `log ${lineTone(entry.line)}`} aria-hidden={entry.spacer || undefined}>{entry.spacer ? "\u00a0" : entry.line || "\u00a0"}</div>}</For></Show>

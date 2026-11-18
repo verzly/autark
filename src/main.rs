@@ -362,6 +362,21 @@ async fn start_app(
 }
 
 #[tauri::command(rename_all = "snake_case")]
+async fn run_action(
+    app: AppHandle,
+    shared: TauriState<'_, Arc<Shared>>,
+    app_id: String,
+    action_id: String,
+) -> CmdResult<State> {
+    let inner = shared.inner().clone();
+    let task = inner.clone();
+    tauri::async_runtime::spawn_blocking(move || apps::run_action(&app, &task, &app_id, &action_id))
+        .await
+        .map_err(|error| CmdError::new("internal", error.to_string()))??;
+    Ok(apps::wire(&inner))
+}
+
+#[tauri::command(rename_all = "snake_case")]
 async fn stop_app(
     app: AppHandle,
     shared: TauriState<'_, Arc<Shared>>,
@@ -609,6 +624,7 @@ fn main() {
             reinstall_app,
             update_all,
             start_app,
+            run_action,
             stop_app,
             open_app,
             remove_app,
