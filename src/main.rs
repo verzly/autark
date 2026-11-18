@@ -759,7 +759,8 @@ fn terminal_stop(shell: TauriState<'_, terminal::Terminal>) -> CmdResult<()> {
 }
 
 #[tauri::command(rename_all = "snake_case")]
-fn exit_app(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> CmdResult<()> {
+fn exit_app(app: AppHandle, shared: TauriState<'_, Arc<Shared>>, shell: TauriState<'_, terminal::Terminal>) -> CmdResult<()> {
+    shell.stop();
     apps::stop_all(&shared);
     app.exit(0);
     Ok(())
