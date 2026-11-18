@@ -317,6 +317,7 @@ pub struct State {
     pub operations: Vec<Operation>,
     pub busy: bool,
     pub mise: MiseInfo,
+    pub git: tools::GitInfo,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -330,6 +331,7 @@ pub struct Core {
     pub records: Vec<AppRecord>,
     pub marketplace: MarketplaceInfo,
     pub mise: MiseInfo,
+    pub git: tools::GitInfo,
 }
 
 pub struct Shared {
@@ -345,6 +347,7 @@ impl Shared {
         let mut core = Core {
             settings: settings.clone(),
             mise: tools::probe(&settings),
+            git: tools::probe_git(&settings),
             records: Vec::new(),
             marketplace: MarketplaceInfo {
                 path: marketplace::dir(&root).to_string_lossy().to_string(),
@@ -493,6 +496,7 @@ pub fn wire(shared: &Shared) -> State {
         operations,
         busy,
         mise: core.mise.clone(),
+        git: core.git.clone(),
     }
 }
 
@@ -943,6 +947,7 @@ pub fn run_tool_streaming(app: &AppHandle, id: &str, label: String, command: Com
 pub fn refresh_mise(shared: &Arc<Shared>) {
     let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
     core.mise = tools::probe(&core.settings);
+    core.git = tools::probe_git(&core.settings);
 }
 
 fn apply_environment(

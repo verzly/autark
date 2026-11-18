@@ -3,6 +3,8 @@ export interface Settings { root: string; folder_name: string; force_local_mise:
 export interface BinEntry { name: string; path: string; version: string | null; size: number }
 export interface DetectedMise { path: string; version: string | null }
 export interface MiseInfo { available: boolean; source: string; path: string | null; version: string | null; local_path: string; bin_path: string; bin_in_path: boolean; bin: BinEntry[]; detected: DetectedMise[]; force_local: boolean }
+export interface GitExternal { path: string; version: string | null; from_mise: boolean }
+export interface GitInfo { installed: boolean; version: string | null; path: string | null; external: GitExternal | null }
 export interface AppSetting { key: string; label: string; kind: "text" | "number" | "port" | "boolean" | "path"; default: unknown; help?: string | null }
 export interface AppAction { id: string; label: string; confirm: boolean }
 export interface SettingsLock { key: string; var: string; value: string }
@@ -18,7 +20,7 @@ export interface AppState {
 export interface State {
   settings: Settings; settings_path: string; settings_exists: boolean;
   marketplace: { path: string; url: string; exists: boolean; refreshing: boolean; last_refresh: number | null; error: { code: string; message: string } | null };
-  apps: AppState[]; operations: { app_id: string; kind: string }[]; busy: boolean; mise: MiseInfo;
+  apps: AppState[]; operations: { app_id: string; kind: string }[]; busy: boolean; mise: MiseInfo; git: GitInfo;
 }
 export const mockMode = () => import.meta.env.DEV && !("__TAURI_INTERNALS__" in window);
 const isTauri = () => "__TAURI_INTERNALS__" in window;
@@ -35,6 +37,8 @@ export const api = {
   setMisePath: (path: string | null) => invoke<State>("set_mise_path", { path }),
   installMise: () => invoke<State>("install_mise"),
   updateMise: () => invoke<State>("update_mise"),
+  installGit: () => invoke<State>("install_git"),
+  updateGit: () => invoke<State>("update_git"),
   setBinPath: (enabled: boolean) => invoke<State>("set_bin_path", { enabled }),
   removeBinEntry: (name: string) => invoke<State>("remove_bin_entry", { name }),
   addLocalApp: (path: string) => invoke<State>("add_local_app", { path }),

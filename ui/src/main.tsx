@@ -47,6 +47,8 @@ export default function App() {
     const entries = mise.bin.slice();
     const hasLocalMise = entries.some(entry => entry.name.toLowerCase() === "mise.exe");
     if (!hasLocalMise) entries.unshift({ name: "mise.exe", path: "", version: null, size: 0 });
+    // git lives in Autark's mise installs, not in bin, so its card is added here.
+    if (!entries.some(entry => entry.name.toLowerCase() === "git.exe")) entries.push({ name: "git.exe", path: state().git.path ?? "", version: state().git.version, size: 0 });
     return entries.filter(entry => `${entry.name} ${entry.version ?? ""}`.toLowerCase().includes(search().toLowerCase()));
   });
   const isResolvedMise = (name: string) => name.toLowerCase() === "mise.exe" && !state().mise.bin.some(entry => entry.name.toLowerCase() === "mise.exe");
@@ -129,8 +131,8 @@ export default function App() {
     setMisePickTarget(path);
     try {
       const next = await api.setMisePath(path);
-      if (!next.mise.available || next.settings.wizard_complete) return next;
-      return await api.saveSettings({ ...next.settings, wizard_complete: true }, false);
+      if (next.mise.available && !next.settings.wizard_complete) setWizardStep(4);
+      return next;
     } finally {
       setMisePicking(false);
       setMiseScreen(false);
@@ -338,7 +340,7 @@ export default function App() {
   };
 
   // One pane at a time: intro, then folder, then mise. A reopened mise screen wins.
-  const pane = () => state().settings.wizard_complete || miseScreen() ? misePane() : wizardStep() === 1 ? introPane() : wizardStep() === 2 ? folderPane() : misePane();
+  const pane = () => state().settings.wizard_complete || miseScreen() ? misePane() : wizardStep() === 1 ? introPane() : wizardStep() === 2 ? folderPane() : wizardStep() === 3 ? misePane() : gitPane();
   const introPane = () => (
     <>
       <div class="empty-mark" aria-hidden="true">autark</div>
@@ -368,6 +370,22 @@ export default function App() {
           <div><h1>{state().mise.available ? "Choose mise" : "mise is required"}</h1><p>Autark runs every app through <button class="inline-link" onClick={() => openUrl("https://github.com/jdx/mise")}>mise</button> and the <code>mise</code> command is not available on this machine.</p></div>
           <section><h2>I already have mise</h2><p>Point Autark at the existing <code>mise.exe</code>.</p><Show when={state().mise.detected.length}><div class="mise-detected" role="list" aria-label="Detected mise"><For each={state().mise.detected}>{entry => <button class={`mise-detected-row ${state().mise.path === entry.path ? "selected" : ""}`} role="listitem" title={entry.path} disabled={busy()} onClick={() => void run(() => pickMise(entry.path))}><span title={entry.path}>{entry.path}</span><small>{calver(entry.version)}</small></button>}</For></div></Show><button class="button" disabled={busy()} onClick={() => void run(async () => { const path = await api.pickFile("Choose mise.exe", "exe"); return path ? api.setMisePath(path) : undefined; })}>Choose another mise.exe</button></section>
           <section><h2>Install it for Autark</h2><p>Autark downloads mise into its own folder and keeps it there. Nothing is installed machine-wide.</p><footer><span>Local folder: {state().mise.local_path}{state().mise.force_local ? " · Always use Autark's own mise" : ""}</span><button class="icon-button" aria-label="Change Autark folder" title="Change Autark folder" onClick={() => void chooseRoot()}><Icon name="pencil" /></button></footer><Show when={localInstalled()}><div class={`mise-detected-row ${localSelected() ? "selected" : ""}`} role="listitem"><button class="mise-pick" title={state().mise.local_path} disabled={busy()} onClick={() => void run(() => pickMise(state().mise.local_path))}><span title={state().mise.local_path}>{state().mise.local_path}</span><small>{calver(state().mise.version)}</small></button><button class="icon-button" aria-label="Remove Autark's mise" title="Remove Autark's mise" disabled={busy()} onClick={() => void run(() => api.removeBinEntry("mise.exe"))}><Icon name="trash" /></button></div></Show><Show when={!localInstalled()}><Show when={downloading()}><div class="mise-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={misePercent() ?? 0}><span style={{ width: `${misePercent() ?? 0}%` }} /></div><small class="mise-progress">{misePercent() ?? 0}%</small></Show><button class="button primary" disabled={busy()} onClick={() => { setMiseInstalling(true); setBuffers(b => ({ ...b, "mise.exe": [] })); void run(() => api.installMise()); }}>Install</button></Show></section>
+          <Show when={state().mise.available}><button class="button primary" disabled={busy()} onClick={() => setWizardStep(4)}>Next</button></Show>
+    </>
+  );
+  const gitPane = () => (
+    <>
+      <div class="empty-mark" aria-hidden="true">autark</div>
+      <div><h1>One more tool: git</h1><p>Autark installs <button class="inline-link" onClick={() => openUrl("https://git-scm.com")}>git</button> once, through its own mise, so it stays in the same folder as everything else.</p></div>
+      <Show when={state().git.installed} fallback={
+        <section><h2>Install git for Autark</h2><p>PortableGit lands in Autark's mise installs and is never added machine-wide.</p>
+          <Show when={state().git.external}>{external => <div class="mise-detected" role="list" aria-label="Detected git"><div class="mise-detected-row" role="listitem"><span title={external().path}>{external().path}</span><small>{calver(external().version)}</small></div></div>}</Show>
+          <button class="button primary" disabled={busy()} onClick={() => { setBuffers(b => ({ ...b, "git.exe": [] })); void run(() => api.installGit()); }}>Install git</button></section>
+      }>
+        <section><h2>git is ready</h2><div class="mise-detected" role="list" aria-label="Autark git"><div class="mise-detected-row selected" role="listitem"><button class="mise-pick" title={state().git.path ?? ""} disabled={busy()} onClick={() => openBuiltin("git.exe")}><span title={state().git.path ?? ""}>{state().git.path}</span><small>{calver(state().git.version)}</small></button></div></div></section>
+      </Show>
+      <Show when={!state().git.installed && state().git.external}>{external => <p class="market-unavailable">Autark keeps its own copy. The git at <button class="inline-link" onClick={() => revealFile(external().path)}>{external().path}</button> stays untouched.</p>}</Show>
+      <button class="button primary" disabled={busy() || (!state().git.installed && !state().git.external)} onClick={() => { if (mockMode()) { setState(s => ({ ...s, settings: { ...s.settings, wizard_complete: true } })); return; } void run(() => api.saveSettings({ ...state().settings, wizard_complete: true }, false)); }}>Next</button>
     </>
   );
   return <div class={`app ${state().settings.animations ? "" : "no-animation"}`}>
@@ -519,19 +537,25 @@ export default function App() {
               <Show when={builtinApps().length} fallback={<p class="marketplace-load">No built-in apps yet. Autark's own tools appear here.</p>}>
                 <div class="marketplace-grid" role="list" aria-label="Built-in apps"><For each={builtinApps()}>{(entry, i) => {
                   const title = entry.name.replace(/\.exe$/i, "");
+                  const isGit = entry.name.toLowerCase() === "git.exe";
+                  const git = state().git;
                   const systemMise = isResolvedMise(entry.name);
-                  const external = state().mise.path;
+                  const tag = isGit ? (git.installed ? "By Autark" : git.external?.from_mise ? "By mise" : git.external ? "By your machine" : "Not installed") : systemMise ? "Not installed" : "By Autark";
+                  const external = isGit ? git.external?.path ?? null : state().mise.path;
                   return <article role="listitem" class={`market-card ${selected() === i() ? "market-selected" : ""}`} onMouseEnter={() => setSelected(i())}>
-                    <div class="market-card-head"><span class="badge large" style={{ "--hue": hue(entry.name) }}><Show when={entry.name.toLowerCase() === "mise.exe"} fallback={title[0]?.toUpperCase()}>{<img src={miseLogo} alt="" />}</Show></span><div><h2>{title}</h2><code>{entry.name}</code></div><span class="local-tag">{systemMise ? "Not installed" : "By Autark"}</span></div>
-                    <p class="market-description">{systemMise ? "Autark runs every app through this mise." : "Managed in Autark's own bin folder."}</p>
-                    <Show when={!systemMise}><div class="market-versions"><span>Version <b>{entry.version ?? "unknown"}</b></span><span>Size <b>{entry.size ? `${(entry.size / 1048576).toFixed(1)} MB` : state().mise.source}</b></span></div>
-                      <div class="market-links"><span>{state().mise.bin_path}</span></div></Show>
-                    <div class="market-actions"><Show when={entry.name.toLowerCase() === "mise.exe" && !systemMise}><button class="button primary market-action" disabled={busy()} onClick={() => { openBuiltin(entry.name); void run(() => api.updateMise()); }}>Update</button></Show>
-                      <Show when={!systemMise}>
+                    <div class="market-card-head"><span class="badge large" style={{ "--hue": hue(entry.name) }}><Show when={entry.name.toLowerCase() === "mise.exe"} fallback={title[0]?.toUpperCase()}>{<img src={miseLogo} alt="" />}</Show></span><div><h2>{title}</h2><code>{entry.name}</code></div><span class="local-tag">{tag}</span></div>
+                    <p class="market-description">{isGit ? "Installed once by Autark's mise, next to the rest of its runtime." : systemMise ? "Autark runs every app through this mise." : "Managed in Autark's own bin folder."}</p>
+                    <Show when={isGit ? git.installed : !systemMise}><div class="market-versions"><span>Version <b>{entry.version ?? "unknown"}</b></span><span>By <b>{isGit ? "Autark" : state().mise.source}</b></span></div>
+                      <div class="market-links"><span>{isGit ? git.path : state().mise.bin_path}</span></div></Show>
+                    <div class="market-actions">
+                      <Show when={!isGit && !systemMise}><button class="button primary market-action" disabled={busy()} onClick={() => { openBuiltin(entry.name); void run(() => api.updateMise()); }}>Update</button></Show>
+                      <Show when={isGit}><Show when={git.installed} fallback={<button class="button primary market-action" disabled={busy() || !state().mise.available} onClick={() => { openBuiltin(entry.name); void run(() => api.installGit()); }}>Install</button>}><button class="button primary market-action" disabled={busy()} onClick={() => { openBuiltin(entry.name); void run(() => api.updateGit()); }}>Update</button></Show></Show>
+                      <Show when={!systemMise && !isGit}>
                         <Show when={binRemoveConfirm() !== entry.name}><button class="button market-view-action" onClick={() => setBinRemoveConfirm(entry.name)}>Remove</button></Show>
                         <Show when={binRemoveConfirm() === entry.name}><div class="confirm-strip"><span>Remove {entry.name} from Autark's bin folder?</span><button class="button" onClick={() => setBinRemoveConfirm(null)}>Cancel</button><button class="button" disabled={busy()} onClick={() => { setBinRemoveConfirm(null); void run(() => api.removeBinEntry(entry.name)); }}>Remove</button></div></Show>
                       </Show>
                       <Show when={systemMise}><p class="market-unavailable">{external ? <>Autark currently uses the external mise at <button class="inline-link" onClick={() => revealFile(external)}>{external}</button></> : "No mise found on this machine."}</p></Show>
+                      <Show when={isGit && !git.installed}><p class="market-unavailable">{external ? <>Autark currently uses the {git.external?.from_mise ? "git installed by mise" : "git"} at <button class="inline-link" onClick={() => revealFile(external)}>{external}</button></> : "No git found on this machine."}</p></Show>
                     </div>
                   </article>;
                 }}</For></div>
@@ -540,12 +564,12 @@ export default function App() {
           </Show>
        </section></Show>
       <Show when={!chooser() && !settingsOpen() && isBuiltin(active())}><section class="app-view">
-        <div class="app-header"><div class="app-title"><span class="badge large"><Show when={active()?.toLowerCase() === "mise.exe"} fallback={builtinName(active())[0]?.toUpperCase()}>{<img src={miseLogo} alt="" />}</Show></span><div><h1>{builtinName(active())}</h1><div class="version-line">version {state().mise.version ?? "unknown"} · {state().mise.source === "local" ? "By Autark" : "By your machine"}</div></div></div></div>
-        <div class="actions"><button class="button" onClick={() => { setMarketFilter("builtin"); showChooser(); }}>Back to built-in apps</button><Show when={localInstalled()}><button class="button primary" disabled={busy()} onClick={() => void run(() => api.updateMise())}>Update</button></Show><button class="button" disabled={busy()} onClick={() => setMiseScreen(true)}>Change mise.exe</button><Show when={localInstalled()}><button class="button danger" disabled={busy()} onClick={() => void run(() => api.removeBinEntry("mise.exe"))}>Remove</button></Show></div>
+        <div class="app-header"><div class="app-title"><span class="badge large"><Show when={active()?.toLowerCase() === "mise.exe"} fallback={builtinName(active())[0]?.toUpperCase()}>{<img src={miseLogo} alt="" />}</Show></span><div><h1>{builtinName(active())}</h1><div class="version-line">version {active()?.toLowerCase() === "git.exe" ? state().git.version ?? "unknown" : state().mise.version ?? "unknown"} · {active()?.toLowerCase() === "git.exe" ? (state().git.installed ? "By Autark" : state().git.external?.from_mise ? "By mise" : state().git.external ? "By your machine" : "Not installed") : (state().mise.source === "local" ? "By Autark" : "By your machine")}</div></div></div></div>
+        <div class="actions"><button class="button" onClick={() => { setMarketFilter("builtin"); showChooser(); }}>Back to built-in apps</button><Show when={active()?.toLowerCase() !== "git.exe"}><Show when={localInstalled()}><button class="button primary" disabled={busy()} onClick={() => void run(() => api.updateMise())}>Update</button></Show><button class="button" disabled={busy()} onClick={() => setMiseScreen(true)}>Change mise.exe</button><Show when={localInstalled()}><button class="button danger" disabled={busy()} onClick={() => void run(() => api.removeBinEntry("mise.exe"))}>Remove</button></Show></Show><Show when={active()?.toLowerCase() === "git.exe"}><Show when={state().git.installed} fallback={<button class="button primary" disabled={busy()} onClick={() => void run(() => api.installGit())}>Install</button>}><button class="button primary" disabled={busy()} onClick={() => void run(() => api.updateGit())}>Update</button></Show></Show></div>
         <div class="output-wrap"><div class="output" ref={output} onScroll={() => output && setFollow(output.scrollHeight - output.scrollTop - output.clientHeight < 24)}>
           <For each={logEntries()}>{entry => entry.spacer ? <div class="log-spacer" aria-hidden="true" /> : <div class={`log ${lineTone(entry.line)}`}>{entry.line}</div>}</For>
         </div></div>
-        <footer class="metadata"><span>{state().mise.path ?? "not resolved"}</span><code>{builtinName(active())}</code></footer>
+        <footer class="metadata"><span>{active()?.toLowerCase() === "git.exe" ? state().git.path ?? "not resolved" : state().mise.path ?? "not resolved"}</span><code>{builtinName(active())}</code></footer>
       </section></Show>
       <Show when={!chooser() && !settingsOpen() && active() === AUTARK_TAB}><section class="empty-state"><div class="empty-mark">autark</div>
         <div class="landing-app-list" role="list" aria-label="Installed apps">
