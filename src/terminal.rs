@@ -59,6 +59,22 @@ fn banner(root: &Path) -> Vec<(u8, String)> {
     ]
 }
 
+/// cmd prints text as-is only when the shell metacharacters are escaped.
+fn cmd_text(text: &str) -> String {
+    text.replace('·', "-")
+        .replace('©', "(c)")
+        .replace('^', "^^")
+        .replace('&', "^&")
+        .replace('|', "^|")
+        .replace('<', "^<")
+        .replace('>', "^>")
+}
+
+/// A single quote would end the printf argument early.
+fn shell_quote(text: &str) -> String {
+    text.replace('\'', "'\\''")
+}
+
 /// A startup file is the only way to get a banner into a real interactive shell.
 fn profile(root: &Path) -> Result<PathBuf> {
     let dir = root.join("runtime").join("terminal");
@@ -67,7 +83,8 @@ fn profile(root: &Path) -> Result<PathBuf> {
     let mut text = String::from("[ -f \"$HOME/.bashrc\" ] && . \"$HOME/.bashrc\"\n");
     for (color, line) in banner(root) {
         text.push_str(&format!(
-            "printf '\\033[38;5;{color}m%s\\033[0m\\n' '{line}'\n"
+            "printf '\\033[38;5;{color}m%s\\033[0m\\n' '{}'\n",
+            shell_quote(&line)
         ));
     }
     text.push_str("printf '\\n'\n");
@@ -95,13 +112,14 @@ pub fn open(root: &Path, requested: &str, shells: &tools::TerminalInfo) -> Resul
             exe
         }
         "cmd" => {
+            // `echo(` prints the spaces exactly, and the joins carry no separator spaces.
             let script = banner(root)
                 .iter()
-                .map(|(_, line)| format!("echo {line}"))
+                .map(|(_, line)| format!("echo({}", cmd_text(line)))
                 .collect::<Vec<_>>()
-                .join(" & ");
+                .join("&");
             args.push("/K".to_string());
-            args.push(format!("chcp 65001>nul & {script} & echo."));
+            args.push(format!("chcp 65001>nul&{script}&echo."));
             "cmd.exe".to_string()
         }
         _ => {
@@ -162,6 +180,13 @@ mod tests {
             .collect();
         assert_eq!(parts[0], "C:\\Autark\\bin");
         assert_eq!(parts[1], "C:\\Autark\\runtime\\mise-data\\shims");
+    }
+
+    #[test]
+    fn cmd_lines_keep_their_text() {
+        assert_eq!(super::cmd_text("Autark · ©"), "Autark - (c)");
+        assert_eq!(super::cmd_text("a & b | c"), "a ^& b ^| c");
+        assert_eq!(super::shell_quote("it's"), "it'\\''s");
     }
 
     #[test]
