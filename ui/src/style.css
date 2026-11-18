@@ -124,3 +124,9 @@ a:hover,a:visited:hover{color:#fff;text-decoration-color:#8a8a8a}
 /* mise step: real download progress, and the picked option marked */
 .mise-bar{width:100%;height:5px;border-radius:999px;background:#242424;overflow:hidden}
 .mise-bar span{display:block;height:100%;border-radius:999px;background:#bfbfbf;transition:width .2s}
+
+/* mise step: the local record carries its own remove button */
+.mise-detected-row .mise-pick{display:flex;flex:1;min-width:0;align-items:center;justify-content:space-between;gap:10px;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.mise-detected-row .icon-button{display:inline-flex;flex:none;align-items:center;justify-content:center;width:20px;height:20px;padding:0;border:0;border-radius:4px;background:transparent;color:#8a8a8a;cursor:pointer}
+.mise-detected-row .icon-button:hover{background:#262626;color:#fff}
+.mise-detected-row .icon-button svg{width:12px;height:12px}

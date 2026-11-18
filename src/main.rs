@@ -162,15 +162,18 @@ async fn remove_bin_entry(shared: TauriState<'_, Arc<Shared>>, name: String) -> 
     let inner = shared.inner().clone();
     if operation_running(&inner) { return Err(CmdError::new("operation_in_progress", "another operation is running")); }
     if name.starts_with('.') || name.contains('/') || name.contains('\\') { return Err(CmdError::new("invalid_argument", "invalid binary name")); }
-    let settings = inner.plugin_settings();
+    let mut settings = inner.plugin_settings();
     let path = std::path::PathBuf::from(&name);
     let root = settings.root_path();
-    let selected = tools::resolve(&settings, &root);
-    if selected.as_ref().is_some_and(|p| p == &tools::bin_dir(&root).join(&name) || p == &tools::local_mise(&root) && name.eq_ignore_ascii_case("mise.exe")) {
-        return Err(CmdError::new("invalid_argument", "this is the mise Autark runs, update it instead"));
-    }
     let target = tools::bin_dir(&root).join(path);
+    let removed = target.clone();
     tauri::async_runtime::spawn_blocking(move || std::fs::remove_file(target)).await.map_err(|e| CmdError::new("internal", e.to_string()))?.map_err(anyhow::Error::from)?;
+    // A removed copy must not stay selected, otherwise mise looks broken.
+    if settings.mise_path.as_deref().map(std::path::Path::new) == Some(removed.as_path()) {
+        settings.mise_path = None;
+        settings.save()?;
+        apps::reload_settings(&inner, settings)?;
+    }
     apps::refresh_mise(&inner);
     Ok(apps::wire(&inner))
 }
@@ -210,7 +213,7 @@ fn save_settings(
 
 #[tauri::command(rename_all = "snake_case")]
 async fn reset_autark(
-    app: AppHandle,
+    _app: AppHandle,
     shared: TauriState<'_, Arc<Shared>>,
     confirm: String,
 ) -> CmdResult<State> {
