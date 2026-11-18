@@ -1,5 +1,5 @@
 use crate::{apps, settings::Settings};
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use std::{
     env, fs,
@@ -60,9 +60,9 @@ pub fn resolve(settings: &Settings, root: &Path) -> Option<PathBuf> {
     where_mise()
 }
 
-/// Every `mise` on PATH, so the mise step can offer them as one click.
-fn where_all() -> Vec<PathBuf> {
-    let output = match Command::new("where").arg("mise").output() {
+/// Every copy of `name` on PATH, so the setup steps can offer them as one click.
+fn where_tool(name: &str) -> Vec<PathBuf> {
+    let output = match Command::new("where").arg(name).output() {
         Ok(output) if output.status.success() => output,
         _ => return Vec::new(),
     };
@@ -82,7 +82,7 @@ fn where_all() -> Vec<PathBuf> {
 
 /// `where.exe` turns the PATH entry into a real path, which the UI lists and reports.
 fn where_mise() -> Option<PathBuf> {
-    where_all().into_iter().next()
+    where_tool("mise").into_iter().next()
 }
 
 fn environment(command: &mut Command, root: &Path) {
@@ -172,7 +172,7 @@ pub fn probe(settings: &Settings) -> MiseInfo {
     }
     let own = local_mise(&root);
     let own_key = own.to_string_lossy().to_lowercase();
-    let detected: Vec<DetectedMise> = where_all()
+    let detected: Vec<DetectedMise> = where_tool("mise")
         .into_iter()
         .filter(|candidate| candidate.to_string_lossy().to_lowercase() != own_key)
         .filter_map(|candidate| {
@@ -213,6 +213,228 @@ pub fn self_update(app: &AppHandle, id: &str, root: &Path) -> Result<()> {
     apps::run_tool_streaming(app, id, "updating mise".to_string(), command)
 }
 
+/// Autark's mise global config. git lives here, so every mise run of Autark sees it.
+pub fn global_config(root: &Path) -> PathBuf {
+    root.join("runtime").join("mise-config").join("config.toml")
+}
+
+fn git_postinstall(root: &Path) -> PathBuf {
+    global_config(root).with_file_name("postinstall-git.ps1")
+}
+
+fn git_config(root: &Path) -> String {
+    GIT_MISE_TOML.replace("@@POSTINSTALL@@", &git_postinstall(root).display().to_string())
+}
+
+/// git is a global tool of Autark's own mise, so its recipe is the global config file.
+/// The extraction step runs through PowerShell, so mise never has to parse it in cmd.
+const GIT_POSTINSTALL_PS: &str = r##"$ErrorActionPreference = 'Stop'
+
+$root = $env:MISE_TOOL_INSTALL_PATH
+$stage = Join-Path $root '.portablegit-stage'
+
+$archive = Get-ChildItem -LiteralPath $root -Recurse -File -Filter 'PortableGit-*.7z.exe' |
+    Select-Object -First 1
+
+if (!$archive) { throw "PortableGit archive not found" }
+if (Test-Path -LiteralPath $stage) { throw "Staging directory already exists" }
+
+New-Item -ItemType Directory -Path $stage | Out-Null
+
+$exe = Join-Path $stage $archive.Name
+Move-Item -LiteralPath $archive.FullName -Destination $exe
+
+$process = Start-Process -FilePath $exe `
+    -ArgumentList '-y -gm2' `
+    -WorkingDirectory $stage `
+    -Wait -PassThru
+
+if ($process.ExitCode -ne 0) {
+    throw "Extraction failed: $($process.ExitCode)"
+}
+
+$source = Join-Path $stage 'PortableGit'
+
+if (!(Test-Path "$source\cmd\git.exe")) {
+    throw "git.exe not found after extraction"
+}
+
+if (!(Test-Path "$source\usr\bin\gpg.exe")) {
+    throw "gpg.exe not found after extraction"
+}
+
+function Move-Merge {
+    param(
+        [string]$From,
+        [string]$To
+    )
+
+    foreach ($item in Get-ChildItem -LiteralPath $From -Force) {
+        $destination = Join-Path $To $item.Name
+
+        if ($item.PSIsContainer -and !$item.LinkType -and
+            (Test-Path -LiteralPath $destination -PathType Container)) {
+            Move-Merge -From $item.FullName -To $destination
+            Remove-Item -LiteralPath $item.FullName -Force
+        }
+        elseif (Test-Path -LiteralPath $destination) {
+            throw "Destination already exists: $destination"
+        }
+        else {
+            Move-Item -LiteralPath $item.FullName -Destination $destination
+        }
+    }
+}
+
+Move-Merge -From $source -To $root
+
+$git = Join-Path $root 'cmd\git.exe'
+$gpg = Join-Path $root 'usr\bin\gpg.exe'
+
+if (!(Test-Path $git)) { throw "git.exe not found" }
+if (!(Test-Path $gpg)) { throw "gpg.exe not found" }
+
+& $git --version
+if ($LASTEXITCODE -ne 0) { throw "Git verification failed" }
+
+& $gpg --version
+if ($LASTEXITCODE -ne 0) { throw "GPG verification failed" }
+
+Remove-Item -LiteralPath $stage -Recurse -Force"##;
+
+const GIT_MISE_TOML: &str = r##"# Managed by Autark. git is installed once, by Autark's own mise.
+[tools."git"]
+version = "latest"
+asset_pattern = "PortableGit-*-64-bit.7z.exe"
+format = "raw"
+bin_path = "cmd"
+
+postinstall = '''powershell -NoProfile -ExecutionPolicy Bypass -File "@@POSTINSTALL@@"'''
+
+[env]
+_.path = { path = [
+    "{{ tools.git.path }}/usr/bin",
+    "{{ tools.git.path }}/ucrt64/bin",
+], tools = true, position = "append" }
+
+[tool_alias]
+git = "github:git-for-windows/git"
+"##;
+
+#[derive(Clone, Debug, Serialize)]
+pub struct GitExternal {
+    pub path: String,
+    pub version: Option<String>,
+    pub from_mise: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct GitInfo {
+    pub installed: bool,
+    pub version: Option<String>,
+    pub path: Option<String>,
+    pub external: Option<GitExternal>,
+}
+
+fn git_installs(root: &Path) -> PathBuf {
+    root.join("runtime").join("mise-data").join("installs").join("git")
+}
+
+/// The newest git that Autark's mise installed. The folder name is the version mise resolved.
+fn own_git(root: &Path) -> Option<(PathBuf, String)> {
+    let mut found: Vec<(PathBuf, String)> = fs::read_dir(git_installs(root))
+        .ok()?
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| {
+            let exe = entry.path().join("cmd").join("git.exe");
+            exe.is_file().then(|| (exe, entry.file_name().to_string_lossy().to_string()))
+        })
+        .collect();
+    found.sort_by(|a, b| section_cmp(&b.1, &a.1));
+    found.into_iter().next()
+}
+
+/// Compares version folder names numerically so `2.10.0` sorts above `2.9.0`.
+fn section_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let split = |text: &str| text.split(|c: char| !c.is_ascii_digit()).filter(|part| !part.is_empty()).map(|part| part.parse::<u64>().unwrap_or(0)).collect::<Vec<_>>();
+    split(a).cmp(&split(b))
+}
+
+fn looks_mise_managed(path: &Path) -> bool {
+    let key = path.to_string_lossy().replace('/', "\\").to_lowercase();
+    key.contains("\\installs\\git\\") || key.contains("\\mise\\shims\\")
+}
+
+fn external_git(root: &Path) -> Option<GitExternal> {
+    let ours = git_installs(root).to_string_lossy().replace('/', "\\").to_lowercase();
+    for candidate in where_tool("git") {
+        let key = candidate.to_string_lossy().replace('/', "\\").to_lowercase();
+        if key.starts_with(&ours) {
+            continue;
+        }
+        let version = Command::new(&candidate)
+            .arg("--version")
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .and_then(|output| String::from_utf8_lossy(&output.stdout).lines().next().map(|line| line.trim().trim_start_matches("git version ").to_string()));
+        return Some(GitExternal {
+            from_mise: looks_mise_managed(&candidate),
+            path: candidate.to_string_lossy().to_string(),
+            version,
+        });
+    }
+    None
+}
+
+pub fn probe_git(settings: &Settings) -> GitInfo {
+    let root = settings.root_path();
+    let own = own_git(&root);
+    GitInfo {
+        installed: own.is_some(),
+        version: own.as_ref().map(|(_, version)| version.clone()),
+        path: own.map(|(exe, _)| exe.to_string_lossy().to_string()),
+        external: external_git(&root),
+    }
+}
+
+fn git_command(settings: &Settings, root: &Path) -> Command {
+    let mut command = Command::new(resolve(settings, root).unwrap_or_else(|| PathBuf::from("mise")));
+    // The global config is written by Autark, so mise does not need to ask about trusting it.
+    command.env("MISE_TRUSTED_CONFIG_PATHS", root.join("runtime").join("mise-config"));
+    environment(&mut command, root);
+    command.current_dir(root);
+    command
+}
+
+pub fn install_git(app: &AppHandle, id: &str, settings: &Settings, root: &Path) -> Result<()> {
+    if resolve(settings, root).is_none() {
+        bail!("invalid_argument: mise is required before git can be installed");
+    }
+    for sub in ["mise-data", "mise-config", "mise-cache", "mise-state", "tmp"] {
+        fs::create_dir_all(root.join("runtime").join(sub))?;
+    }
+    fs::write(global_config(root), git_config(root)).context("cannot write mise global config")?;
+    fs::write(git_postinstall(root), GIT_POSTINSTALL_PS).context("cannot write git postinstall")?;
+    let mut command = git_command(settings, root);
+    command.args(["install", "git"]);
+    apps::run_tool_streaming(app, id, "installing git".to_string(), command)?;
+    if own_git(root).is_none() {
+        bail!("internal: git did not land in Autark's mise installs");
+    }
+    Ok(())
+}
+
+pub fn update_git(app: &AppHandle, id: &str, settings: &Settings, root: &Path) -> Result<()> {
+    if own_git(root).is_none() {
+        bail!("invalid_argument: Autark's git is not installed");
+    }
+    let mut command = git_command(settings, root);
+    command.args(["upgrade", "git"]);
+    apps::run_tool_streaming(app, id, "updating git".to_string(), command)
+}
+
 pub fn set_path_registration(root: &Path, enabled: bool) -> Result<bool> {
     let path = bin_dir(root).to_string_lossy().to_string();
     let quoted = path.replace('\'', "''");
@@ -225,4 +447,21 @@ pub fn set_path_registration(root: &Path, enabled: bool) -> Result<bool> {
     let output = Command::new("powershell").args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script]).output()?;
     if !output.status.success() { bail!("{}", String::from_utf8_lossy(&output.stderr)); }
     Ok(registry_has_path(&bin_dir(root)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn git_outside_a_mise_install_is_third_party() {
+        assert!(looks_mise_managed(Path::new(r"C:\Users\me\AppData\Local\mise\installs\git\2.50.1\cmd\git.exe")));
+        assert!(!looks_mise_managed(Path::new(r"C:\Program Files\Git\cmd\git.exe")));
+    }
+
+    #[test]
+    fn version_folders_sort_numerically() {
+        assert_eq!(section_cmp("2.10.0", "2.9.0"), std::cmp::Ordering::Greater);
+        assert_eq!(section_cmp("2.9.0", "2.10.0"), std::cmp::Ordering::Less);
+    }
 }

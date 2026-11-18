@@ -145,6 +145,26 @@ async fn update_mise(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> Cmd
 }
 
 #[tauri::command(rename_all = "snake_case")]
+async fn install_git(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> CmdResult<State> {
+    let inner = shared.inner().clone();
+    let settings = inner.plugin_settings();
+    let root = inner.root();
+    tauri::async_runtime::spawn_blocking(move || tools::install_git(&app, "git.exe", &settings, &root)).await.map_err(|e| CmdError::new("internal", e.to_string()))??;
+    apps::refresh_mise(&inner);
+    Ok(apps::wire(&inner))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn update_git(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> CmdResult<State> {
+    let inner = shared.inner().clone();
+    let settings = inner.plugin_settings();
+    let root = inner.root();
+    tauri::async_runtime::spawn_blocking(move || tools::update_git(&app, "git.exe", &settings, &root)).await.map_err(|e| CmdError::new("internal", e.to_string()))??;
+    apps::refresh_mise(&inner);
+    Ok(apps::wire(&inner))
+}
+
+#[tauri::command(rename_all = "snake_case")]
 async fn set_bin_path(shared: TauriState<'_, Arc<Shared>>, enabled: bool) -> CmdResult<State> {
     let inner = shared.inner().clone();
     let root = inner.root();
@@ -754,6 +774,8 @@ fn main() {
             set_mise_path,
             install_mise,
             update_mise,
+            install_git,
+            update_git,
             set_bin_path,
             remove_bin_entry,
             pick_directory,

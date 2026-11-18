@@ -4,6 +4,7 @@ export const previewState: State = {
   settings: { root: "D:\\Portable\\Autark", folder_name: "Autark", force_local_mise: true, animations: true, open_tabs: ["unsloth-studio", "cognee"], active_tab: "unsloth-studio", tray_enabled: false, start_with_windows: false, close_to_tray: false, experimental_local_apps: false, wizard_complete: true },
   settings_path: "D:\\Portable\\Autark\\launcher-settings.json", settings_exists: true,
   mise: { available: true, source: "local", path: "C:\\Portable\\Autark\\bin\\mise.exe", version: "2026.11.1", local_path: "C:\\Portable\\Autark\\bin\\mise.exe", bin_path: "C:\\Portable\\Autark\\bin", bin_in_path: false, bin: [{ name: "mise.exe", path: "C:\\Portable\\Autark\\bin\\mise.exe", version: "2026.11.1", size: 41231360 }], detected: [{ path: "C:\\Program Files\\mise\\mise.exe", version: "2026.11.2" }], force_local: false },
+  git: { installed: true, version: "2.50.1", path: "C:\\Portable\\Autark\\runtime\\mise-data\\installs\\git\\2.50.1\\cmd\\git.exe", external: { path: "C:\\Program Files\\Git\\cmd\\git.exe", version: "2.49.0", from_mise: false } },
   marketplace: { path: "D:\\Portable\\Autark\\marketplace", url: "https://github.com/verzly/autark-marketplace", exists: true, refreshing: false, last_refresh: 1794931200, error: null },
   busy: false, operations: [],
   apps: [
