@@ -526,9 +526,9 @@ export default function App() {
         <small class="settings-muted">Step {wizardStep()} of 2</small>
         <Show when={wizardStep() === 1} fallback={<>
         <div><h1>Connect mise</h1><p>Autark runs every app through <button class="inline-link" onClick={() => openUrl("https://github.com/jdx/mise")}>mise</button> and the <code>mise</code> command is not available on this machine.</p></div>
-        <section><h2>I already have mise</h2><p>Point Autark at the existing <code>mise.exe</code>.</p><button class="button" disabled={busy()} onClick={() => void run(async () => { const path = await api.pickFile("Choose mise.exe", "exe"); return path ? api.setMisePath(path) : undefined; })}>Choose mise.exe</button><Show when={state().mise.path}><small class="settings-muted">{state().mise.path}{state().mise.version ? ` · ${state().mise.version}` : ""}</small></Show></section>
+        <section><h2>I already have mise</h2><p>Point Autark at the existing <code>mise.exe</code>.</p><Show when={state().mise.path}><small class="settings-muted">{state().mise.path}{state().mise.version ? ` · ${state().mise.version}` : ""}</small></Show><button class="button" disabled={busy()} onClick={() => void run(async () => { const path = await api.pickFile("Choose mise.exe", "exe"); return path ? api.setMisePath(path) : undefined; })}>Choose mise.exe</button></section>
         <section><h2>Install it for Autark</h2><p>Autark downloads mise into its own folder and keeps it there. Nothing is installed machine-wide.</p><button class="button primary" disabled={busy()} onClick={() => void run(() => api.installMise())}>Download mise</button></section>
-        <footer>Local folder: {state().mise.local_path}{state().mise.force_local ? " · Always use Autark's own mise" : ""} <button class="button" onClick={() => void chooseRoot()}>Change</button></footer>
+        <footer><span>Local folder: {state().mise.local_path}{state().mise.force_local ? " · Always use Autark's own mise" : ""}</span><button class="icon-button" aria-label="Change Autark folder" title="Change Autark folder" onClick={() => void chooseRoot()}><Icon name="pencil" /></button></footer>
         <div class="actions"><button class="button" onClick={() => setWizardStep(1)}>Back</button><button class="button primary" disabled={state().busy} onClick={finishWizard}>Finish</button></div>
         </>}>
           <div class="empty-mark" aria-hidden="true">autark</div><h1>Where should Autark keep its files?</h1>
@@ -540,9 +540,9 @@ export default function App() {
         </>}>
           <div class="empty-mark" aria-hidden="true">autark</div>
           <div><h1>mise is required</h1><p>Autark runs every app through <button class="inline-link" onClick={() => openUrl("https://github.com/jdx/mise")}>mise</button> and the <code>mise</code> command is not available on this machine.</p></div>
-          <section><h2>I already have mise</h2><p>Point Autark at the existing <code>mise.exe</code>.</p><button class="button" disabled={busy()} onClick={() => void run(async () => { const path = await api.pickFile("Choose mise.exe", "exe"); return path ? api.setMisePath(path) : undefined; })}>Choose mise.exe</button><Show when={state().mise.path}><small class="settings-muted">{state().mise.path}{state().mise.version ? ` · ${state().mise.version}` : ""}</small></Show></section>
+          <section><h2>I already have mise</h2><p>Point Autark at the existing <code>mise.exe</code>.</p><Show when={state().mise.path}><small class="settings-muted">{state().mise.path}{state().mise.version ? ` · ${state().mise.version}` : ""}</small></Show><button class="button" disabled={busy()} onClick={() => void run(async () => { const path = await api.pickFile("Choose mise.exe", "exe"); return path ? api.setMisePath(path) : undefined; })}>Choose mise.exe</button></section>
           <section><h2>Install it for Autark</h2><p>Autark downloads mise into its own folder and keeps it there. Nothing is installed machine-wide.</p><button class="button primary" disabled={busy()} onClick={() => void run(() => api.installMise())}>Download mise</button></section>
-          <footer>Local folder: {state().mise.local_path}{state().mise.force_local ? " · Always use Autark's own mise" : ""} <button class="button" onClick={() => void chooseRoot()}>Change</button></footer>
+          <footer><span>Local folder: {state().mise.local_path}{state().mise.force_local ? " · Always use Autark's own mise" : ""}</span><button class="icon-button" aria-label="Change Autark folder" title="Change Autark folder" onClick={() => void chooseRoot()}><Icon name="pencil" /></button></footer>
         </Show>
       </section>
       </Show>
@@ -576,6 +576,6 @@ function asPortable(picked: string, appDir: string) {
 function lineTone(line: string) {
   return /error|failed|fatal|stopped/i.test(line) ? "tone-error" : /warning|warn/i.test(line) ? "tone-warning" : /installed|complete|ready/i.test(line) ? "tone-success" : /downloading|extracting|^\s*\d+%/i.test(line) ? "tone-dim" : "";
 }
-function Icon(props: { name: "menu" | "gridPlus" | "close" | "min" | "max" }) {
-  return <svg viewBox="0 0 16 16" aria-hidden="true">{props.name === "menu" ? <path d="M2 4h12M2 8h12M2 12h12" /> : props.name === "gridPlus" ? <><rect x="1.5" y="1.5" width="5" height="5" rx="1" /><rect x="9.5" y="1.5" width="5" height="5" rx="1" /><rect x="1.5" y="9.5" width="5" height="5" rx="1" /><path d="M12 9v5m-2.5-2.5h5" /></> : props.name === "close" ? <path d="m4 4 8 8m0-8-8 8" /> : props.name === "min" ? <path d="M3 8h10" /> : <rect x="3.2" y="3.2" width="9.6" height="9.6" rx="1" />}</svg>;
+function Icon(props: { name: "menu" | "gridPlus" | "close" | "min" | "max" | "pencil" }) {
+  return <svg viewBox="0 0 16 16" aria-hidden="true">{props.name === "menu" ? <path d="M2 4h12M2 8h12M2 12h12" /> : props.name === "gridPlus" ? <><rect x="1.5" y="1.5" width="5" height="5" rx="1" /><rect x="9.5" y="1.5" width="5" height="5" rx="1" /><rect x="1.5" y="9.5" width="5" height="5" rx="1" /><path d="M12 9v5m-2.5-2.5h5" /></> : props.name === "close" ? <path d="m4 4 8 8m0-8-8 8" /> : props.name === "min" ? <path d="M3 8h10" /> : props.name === "max" ? <rect x="3.2" y="3.2" width="9.6" height="9.6" rx="1" /> : <><path d="M10.4 3.1 13 5.7" /><path d="M2.4 13.6 3.3 10 10.6 2.7a1.3 1.3 0 0 1 1.8 0l.9.9a1.3 1.3 0 0 1 0 1.8L6 12.8l-3.6.8Z" /></>}</svg>;
 }

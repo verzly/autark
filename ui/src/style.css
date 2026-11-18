@@ -90,3 +90,18 @@ a:hover,a:visited:hover{color:#fff;text-decoration-color:#8a8a8a}
 .mise-onboarding{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:20px;align-content:start;justify-items:center}
 .mise-onboarding>*{grid-column:1/-1;max-width:520px}
 .mise-onboarding>section{grid-column:auto;width:100%;max-width:none;padding:18px 16px 6px;border-radius:10px;background:#141414}
+/* mise choices: no block backgrounds, rows aligned to the top */
+.mise-onboarding{align-items:start}
+.mise-onboarding>section{grid-column:auto;width:100%;max-width:none;align-self:start;padding:0;background:none;border-radius:0}
+/* mise choices: room above and below the row, buttons pinned to its bottom */
+.mise-onboarding{align-items:stretch;grid-auto-rows:min-content}
+.mise-onboarding>section{display:flex;flex-direction:column;align-items:center;gap:10px;margin:26px 0}
+.mise-onboarding>section .button{margin-top:auto}
+.mise-onboarding footer .icon-button{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:0;border-radius:5px;background:transparent;color:#8a8a8a;cursor:pointer;vertical-align:-6px}
+.mise-onboarding footer .icon-button:hover{background:#1a1a1a;color:#eee}
+.mise-onboarding footer .icon-button svg{width:13px;height:13px}
+/* mise choices: both cells match the tallest, so their buttons share one row */
+.mise-onboarding>section{align-self:stretch}
+/* footer: pencil and path share one line box, centres aligned */
+.mise-onboarding footer{display:flex;align-items:center;justify-content:center;gap:7px;flex-wrap:wrap}
+.mise-onboarding footer .icon-button{vertical-align:0;align-self:center;line-height:1;flex:none}
