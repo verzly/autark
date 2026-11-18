@@ -85,3 +85,8 @@ a:hover,a:visited:hover{color:#fff;text-decoration-color:#8a8a8a}
 /* Inline links inside copy: a button, because the webview does not hand off anchors */
 .inline-link{padding:0;border:0;background:none;font:inherit;color:#cfcfcf;text-decoration:underline;text-decoration-color:#444;text-underline-offset:2px;cursor:pointer}
 .inline-link:hover{color:#fff;text-decoration-color:#8a8a8a}
+
+/* mise choices: two columns when the window allows, one when narrow */
+.mise-onboarding{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:20px;align-content:start;justify-items:center}
+.mise-onboarding>*{grid-column:1/-1;max-width:520px}
+.mise-onboarding>section{grid-column:auto;width:100%;max-width:none;padding:18px 16px 6px;border-radius:10px;background:#141414}
