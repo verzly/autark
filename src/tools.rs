@@ -85,7 +85,7 @@ fn where_mise() -> Option<PathBuf> {
     where_tool("mise").into_iter().next()
 }
 
-fn environment(command: &mut Command, root: &Path) {
+pub(crate) fn environment(command: &mut Command, root: &Path) {
     let runtime = root.join("runtime");
     command.env("MISE_DATA_DIR", runtime.join("mise-data"))
         .env("MISE_CONFIG_DIR", runtime.join("mise-config"))

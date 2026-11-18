@@ -6,6 +6,7 @@ mod marketplace;
 mod local;
 mod prefs;
 mod settings;
+mod terminal;
 mod tools;
 
 use apps::{Phase, SetupKind, Shared, State};
@@ -734,6 +735,29 @@ fn open_url(url: String) -> CmdResult<()> {
         .map_err(|error| CmdError::new("internal", error.to_string()))
 }
 
+#[tauri::command]
+fn terminal_start(
+    app: AppHandle,
+    shared: TauriState<'_, Arc<Shared>>,
+    shell: TauriState<'_, terminal::Terminal>,
+) -> CmdResult<()> {
+    let root = shared.inner().root();
+    shell.start(&app, &root)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn terminal_write(shell: TauriState<'_, terminal::Terminal>, input: String) -> CmdResult<()> {
+    shell.write(&input)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn terminal_stop(shell: TauriState<'_, terminal::Terminal>) -> CmdResult<()> {
+    shell.stop();
+    Ok(())
+}
+
 #[tauri::command(rename_all = "snake_case")]
 fn exit_app(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> CmdResult<()> {
     apps::stop_all(&shared);
@@ -767,6 +791,7 @@ fn main() {
         }))
         .plugin(tauri_plugin_opener::init())
         .manage(Arc::new(Shared::new()))
+        .manage(terminal::Terminal::default())
         .invoke_handler(tauri::generate_handler![
             get_state,
             save_settings,
@@ -776,6 +801,9 @@ fn main() {
             update_mise,
             install_git,
             update_git,
+            terminal_start,
+            terminal_write,
+            terminal_stop,
             set_bin_path,
             remove_bin_entry,
             pick_directory,

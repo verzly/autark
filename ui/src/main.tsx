@@ -16,6 +16,7 @@ const hue = (id: string) => { let h = 0; for (const c of id) h = (h * 31 + c.cha
 const duration = (s: number) => `${Math.floor(s / 60)}m ${String(Math.floor(s % 60)).padStart(2, "0")}s`;
 const calver = (version: string | null) => version ? version.match(/^\d+\.\d+\.\d+/)?.[0] ?? version : "version unknown";
 const AUTARK_TAB = "__autark__";
+const TERMINAL_TAB = "__terminal__";
 // Built-in tools with a real logo; everything else falls back to its first letter.
 const builtinLogo = (name: string) => {
   const lower = name.toLowerCase();
@@ -68,6 +69,12 @@ export default function App() {
   // Settings can reopen the mise screen instead of duplicating the picker.
   const [miseScreen, setMiseScreen] = createSignal(false);
   const [builtinTabs, setBuiltinTabs] = createSignal<string[]>([]);
+  // The terminal is a single shell, so it is a flag instead of an app tab.
+  const [terminalOpen, setTerminalOpen] = createSignal(false);
+  const [termText, setTermText] = createSignal("");
+  const [termLine, setTermLine] = createSignal("");
+  let termOutput: HTMLPreElement | undefined;
+  let termInput: HTMLInputElement | undefined;
   const [shortcutDone, setShortcutDone] = createSignal<string[]>([]);
   const [shortcutBusy, setShortcutBusy] = createSignal<string[]>([]);
   const available = createMemo(() => state().apps.filter(a => `${a.name} ${a.description} ${a.id}`.toLowerCase().includes(search().toLowerCase())));
@@ -77,21 +84,25 @@ export default function App() {
 
   onMount(() => {
     let offState: (() => void) | undefined, offLog: (() => void) | undefined, offFocus: (() => void) | undefined;
+    let offTerm: (() => void) | undefined;
     if (!mockMode()) api.getState().then(s => { setState(s); setActive(s.settings.active_tab ?? AUTARK_TAB); }).catch(e => setRequestError(errText(e)));
     api.onState(s => { setState(s); setRequestError(""); }).then(f => offState = f);
     api.onFocus(id => { if (!id) return; setSettingsOpen(false); setAppSettingsOpen(null); setChooser(false); setActive(id); }).then(f => offFocus = f);
     api.onLog(({ app_id, line }) => setBuffers(prev => ({ ...prev, [app_id]: [...(prev[app_id] ?? []), line].slice(-500) }))).then(f => offLog = f);
+    api.onTerminal(chunk => setTermText(prev => (prev + chunk).slice(-200000))).then(f => offTerm = f);
     const keys = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "t" && !e.altKey && !e.shiftKey && !(e.target instanceof HTMLElement && ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName))) { e.preventDefault(); setAutarkTab(true); setActive(AUTARK_TAB); setChooser(false); return; }
       if (chooser()) chooserKeys(e);
     };
     window.addEventListener("keydown", keys);
     if ("__TAURI_INTERNALS__" in window) import("@tauri-apps/api/app").then(({ getVersion }) => getVersion().then(setVersion)).catch(() => {});
-    onCleanup(() => { offState?.(); offLog?.(); window.removeEventListener("keydown", keys); });
+    onCleanup(() => { offState?.(); offLog?.(); offTerm?.(); window.removeEventListener("keydown", keys); });
   });
   const [version, setVersion] = createSignal("dev");
   createEffect(() => { if (chooser()) queueMicrotask(() => dialogInput?.focus()); });
   createEffect(() => { logs(); if (output && follow()) output.scrollTop = output.scrollHeight; });
+  createEffect(() => { termText(); if (termOutput) termOutput.scrollTop = termOutput.scrollHeight; });
+  createEffect(() => { if (active() === TERMINAL_TAB) queueMicrotask(() => termInput?.focus()); });
   createEffect(() => {
     const app = currentApp();
     if (!app || !working(app.phase)) return;
@@ -191,6 +202,27 @@ export default function App() {
       return next;
     });
   };
+  const openTerminal = () => {
+    setChooser(false); setSettingsOpen(false); setAppSettingsOpen(null);
+    setTerminalOpen(true); setActive(TERMINAL_TAB);
+    if (mockMode()) { if (!termText()) setTermText("PowerShell 5.1 · Autark's tools are on PATH\n"); return; }
+    void api.startTerminal().catch(e => setRequestError(errText(e)));
+  };
+  const closeTerminal = (event: MouseEvent) => {
+    event.stopPropagation();
+    setTerminalOpen(false);
+    if (active() === TERMINAL_TAB) { setAutarkTab(true); setActive(AUTARK_TAB); }
+    if (!mockMode()) void api.stopTerminal().catch(() => {});
+  };
+  const sendTerminal = (event: Event) => {
+    event.preventDefault();
+    const line = termLine();
+    setTermLine("");
+    setTermText(prev => `${prev}$ ${line}\n`);
+    if (mockMode()) { setTermText(prev => `${prev}${line ? `mock: ${line}` : ""}\n`); return; }
+    void api.writeTerminal(line).catch(e => { setRequestError(errText(e)); setTermText(prev => `${prev}${errText(e)}\n`); });
+  };
+
   const builtinName = (id: string | null) => (id ?? "").replace(/\.exe$/i, "");
   const isBuiltin = (id: string | null) => builtinTabs().includes(id ?? "");
   const openBuiltin = (name: string) => {
@@ -219,7 +251,7 @@ export default function App() {
   createEffect(() => {
     if (!state().settings.wizard_complete || !state().mise.available || miseScreen() || settingsOpen() || chooser()) return;
     const id = active();
-    if (id === AUTARK_TAB || isBuiltin(id) || currentApp()) return;
+    if (id === AUTARK_TAB || id === TERMINAL_TAB || isBuiltin(id) || currentApp()) return;
     setAutarkTab(true);
     setActive(AUTARK_TAB);
   });
@@ -409,6 +441,7 @@ export default function App() {
         }
       }}><Icon name="menu" /></button>
       <button class={`add-tab marketplace-tab ${chooser() ? "selected" : ""}`} aria-label="Open marketplace" aria-pressed={chooser()} onClick={() => (chooser() ? hideChooser() : showChooser())}><Icon name="gridPlus" /></button>
+      <button class={`add-tab terminal-launch ${active() === TERMINAL_TAB && !settingsOpen() ? "selected" : ""}`} aria-label="Open terminal" title="Terminal" onClick={() => { if (terminalOpen()) { setActive(TERMINAL_TAB); setChooser(false); setSettingsOpen(false); } else openTerminal(); }}>&gt;_</button>
       <div class="tabs" role="tablist" aria-label="Open apps">
         <For each={openIds()}>{id => {
           const app = () => state().apps.find(a => a.id === id);
@@ -422,6 +455,10 @@ export default function App() {
         <Show when={autarkTab()}><button class={`tab autark-tab ${active() === AUTARK_TAB && !settingsOpen() ? "active" : ""}`} role="tab" aria-selected={active() === AUTARK_TAB && !settingsOpen()} onClick={() => selectTab(AUTARK_TAB)}>
           <span class="autark-tab-mark" aria-hidden="true">a</span><span class="tab-name">Autark</span>
           <span class="tab-close" role="button" aria-label="Close Autark" onClick={e => closeAutarkTab(e)}><Icon name="close" /></span>
+        </button></Show>
+        <Show when={terminalOpen()}><button class={`tab terminal-tab ${active() === TERMINAL_TAB && !settingsOpen() ? "active" : ""}`} role="tab" aria-selected={active() === TERMINAL_TAB && !settingsOpen()} onClick={() => { setActive(TERMINAL_TAB); setChooser(false); setSettingsOpen(false); }}>
+          <span class="badge" style={{ "--hue": 152 }}>&gt;_</span><span class="tab-name">Terminal</span>
+          <span class="tab-close" role="button" aria-label="Close terminal" onClick={e => closeTerminal(e)}><Icon name="close" /></span>
         </button></Show>
       </div>
       <Show when={!autarkTab()}><button class="add-tab" aria-label="New tab" onClick={() => { setAutarkTab(true); setActive(AUTARK_TAB); setChooser(false); setSettingsOpen(false); }}>+</button></Show>
@@ -576,6 +613,13 @@ export default function App() {
           <For each={logEntries()}>{entry => entry.spacer ? <div class="log-spacer" aria-hidden="true" /> : <div class={`log ${lineTone(entry.line)}`}>{entry.line}</div>}</For>
         </div></div>
         <footer class="metadata"><span>{active()?.toLowerCase() === "git.exe" ? state().git.path ?? "not resolved" : state().mise.path ?? "not resolved"}</span><code>{builtinName(active())}</code></footer>
+      </section></Show>
+      <Show when={!chooser() && !settingsOpen() && active() === TERMINAL_TAB}><section class="terminal-view">
+        <pre class="terminal-output" ref={termOutput}>{termText()}</pre>
+        <form class="terminal-prompt" onSubmit={sendTerminal}>
+          <span aria-hidden="true">$</span>
+          <input ref={termInput} class="terminal-input" aria-label="Terminal command" autocomplete="off" spellcheck={false} value={termLine()} onInput={e => setTermLine(e.currentTarget.value)} />
+        </form>
       </section></Show>
       <Show when={!chooser() && !settingsOpen() && active() === AUTARK_TAB}><section class="empty-state"><div class="empty-mark">autark</div>
         <div class="landing-app-list" role="list" aria-label="Installed apps">
