@@ -1,5 +1,5 @@
 export type Phase = "not_installed" | "installing" | "installed" | "starting" | "running" | "stopping" | "updating" | "removing" | "failed";
-export interface Settings { root: string; folder_name: string; force_local_mise: boolean; open_tabs: string[]; active_tab: string | null; tray_enabled: boolean; start_with_windows: boolean; close_to_tray: boolean; experimental_local_apps: boolean }
+export interface Settings { root: string; folder_name: string; force_local_mise: boolean; open_tabs: string[]; active_tab: string | null; tray_enabled: boolean; start_with_windows: boolean; close_to_tray: boolean; experimental_local_apps: boolean; wizard_complete: boolean }
 export interface BinEntry { name: string; path: string; version: string | null; size: number }
 export interface MiseInfo { available: boolean; source: string; path: string | null; version: string | null; local_path: string; bin_path: string; bin_in_path: boolean; bin: BinEntry[]; force_local: boolean }
 export interface AppSetting { key: string; label: string; kind: "text" | "number" | "port" | "boolean" | "path"; default: unknown; help?: string | null }
@@ -52,6 +52,7 @@ export const api = {
   runAction: (app_id: string, action_id: string) => invoke<State>("run_action", { app_id, action_id }),
   openApp: (app_id: string) => invoke<State>("open_app", { app_id }),
   removeApp: (app_id: string, confirm: string) => invoke<State>("remove_app", { app_id, confirm }),
+  resetAutark: (confirm: string) => invoke<State>("reset_autark", { confirm }),
   saveAppSettings: (app_id: string, settings: Record<string, unknown>) => invoke<State>("save_app_settings", { app_id, settings }),
   saveAppPrefs: (app_id: string, prefs: AppState["prefs"]) => invoke<State>("save_app_prefs", { app_id, prefs }),
   createShortcut: (app_id: string) => invoke<State>("create_shortcut", { app_id }),

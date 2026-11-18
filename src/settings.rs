@@ -24,6 +24,8 @@ pub struct Settings {
     pub start_with_windows: bool,
     pub close_to_tray: bool,
     pub experimental_local_apps: bool,
+    /// Whether the first-run wizard has been completed.
+    pub wizard_complete: bool,
 }
 
 impl Default for Settings {
@@ -41,6 +43,7 @@ impl Default for Settings {
             start_with_windows: false,
             close_to_tray: false,
             experimental_local_apps: false,
+            wizard_complete: false,
         }
     }
 }

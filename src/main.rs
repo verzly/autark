@@ -198,6 +198,7 @@ fn save_settings(
     settings.open_tabs = current.open_tabs;
     settings.active_tab = current.active_tab;
     settings.marketplace_last_refresh = current.marketplace_last_refresh;
+    settings.wizard_complete |= current.wizard_complete;
     settings.apply_folder_name(move_folder.unwrap_or(false))?;
     settings.save()?;
     apps::reload_settings(&shared, settings)?;
@@ -205,6 +206,47 @@ fn save_settings(
     apply_startup(&app, &apps::wire(&shared).settings);
     apps::emit_state(&app, &shared);
     Ok(apps::wire(&shared))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn reset_autark(
+    app: AppHandle,
+    shared: TauriState<'_, Arc<Shared>>,
+    confirm: String,
+) -> CmdResult<State> {
+    if confirm != "RESET" {
+        return Err(CmdError::new("confirm_required", "type RESET to confirm"));
+    }
+    let inner = shared.inner().clone();
+    if operation_running(&inner) {
+        return Err(CmdError::new("operation_in_progress", "another operation is running"));
+    }
+    let task_shared = inner.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        apps::stop_all(&task_shared);
+        let mut settings = task_shared.plugin_settings();
+        let root = settings.root_path();
+        if root.exists() {
+            let entries = std::fs::read_dir(&root).map_err(anyhow::Error::from)?;
+            for entry in entries {
+                let path = entry.map_err(anyhow::Error::from)?.path();
+                if path.is_dir() {
+                    std::fs::remove_dir_all(path).map_err(anyhow::Error::from)?;
+                } else {
+                    std::fs::remove_file(path).map_err(anyhow::Error::from)?;
+                }
+            }
+        }
+        settings.open_tabs.clear();
+        settings.active_tab = None;
+        settings.wizard_complete = false;
+        settings.save()?;
+        apps::reload_settings(&task_shared, settings)?;
+        Ok::<(), CmdError>(())
+    })
+    .await
+    .map_err(|e| CmdError::new("internal", e.to_string()))??;
+    Ok(apps::wire(&inner))
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -683,6 +725,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_state,
             save_settings,
+            reset_autark,
             set_mise_path,
             install_mise,
             update_mise,

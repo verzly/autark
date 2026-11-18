@@ -70,6 +70,7 @@ Commands (`invoke`, snake_case args):
 | --- | --- | --- |
 | `get_state` | — | `State` |
 | `save_settings` | `settings`, `move_folder?` | `State` |
+| `reset_autark` | `confirm` | `State`; requires typed word `RESET`, deletes everything inside Autark root, and reopens wizard |
 | `set_mise_path` | `path: string \| null` | `State` |
 | `install_mise` | — | `State` |
 | `update_mise` | — | `State` |
@@ -124,6 +125,7 @@ interface Settings {
   start_with_windows: boolean;
   close_to_tray: boolean;
   experimental_local_apps: boolean;
+  wizard_complete: boolean;
 }
 
 interface AppSetting { key: string; label: string; kind: "text" | "number" | "port" | "boolean" | "path"; default: unknown; help?: string | null }
