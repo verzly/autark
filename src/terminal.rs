@@ -44,6 +44,9 @@ fn selected(requested: &str, shells: &tools::TerminalInfo) -> &'static str {
 
 fn shell_command(root: &Path, shell: &str, shells: &tools::TerminalInfo) -> Result<Command> {
     let lines = banner(root);
+    // The shell is told where to stand, so nothing inherited from Autark's own start folder can win.
+    let title = format!("Autark · {}", root.display());
+    let posix = root.display().to_string().replace('\\', "/");
     match shell {
         "cmd" => {
             let script = lines
@@ -52,9 +55,11 @@ fn shell_command(root: &Path, shell: &str, shells: &tools::TerminalInfo) -> Resu
                 .collect::<Vec<_>>()
                 .join(" & ");
             let mut command = Command::new("cmd.exe");
-            command
-                .arg("/K")
-                .arg(format!("chcp 65001>nul & {script} & echo."));
+            command.arg("/K").arg(format!(
+                "cd /d \"{}\" & title {} & chcp 65001>nul & {script} & echo.",
+                root.display(),
+                title
+            ));
             Ok(command)
         }
         "bash" | "sh" => {
@@ -72,7 +77,9 @@ fn shell_command(root: &Path, shell: &str, shells: &tools::TerminalInfo) -> Resu
             let mut command = Command::new(&exe);
             command.args([
                 "-c",
-                &format!("printf '%s\\n' {quoted}; echo; exec '{exe}' -i"),
+                &format!(
+                    "cd '{posix}'; printf '\\033]0;{title}\\007'; printf '%s\\n' {quoted}; echo; exec '{exe}' -i"
+                ),
             ]);
             Ok(command)
         }
@@ -83,7 +90,12 @@ fn shell_command(root: &Path, shell: &str, shells: &tools::TerminalInfo) -> Resu
                 .collect::<String>()
                 + "Write-Host ''";
             let mut command = Command::new("powershell.exe");
-            command.args(["-NoLogo", "-NoExit", "-Command", &script]);
+            command.args([
+                "-NoLogo",
+                "-NoExit",
+                "-Command",
+                &format!("Set-Location -LiteralPath '{}'; $Host.UI.RawUI.WindowTitle = '{title}'; {script}", root.display()),
+            ]);
             Ok(command)
         }
     }
