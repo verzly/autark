@@ -379,11 +379,12 @@ export default function App() {
                 <Show when={state().mise.source !== "local"}><button class="button quiet-button" disabled={busy()} onClick={() => void run(() => api.installMise())}>Install Autark's own mise</button></Show>
               </div>
               <Show when={state().mise.bin.length} fallback={<p class="marketplace-load">No built-in apps yet. Autark's own tools appear here.</p>}>
-                <div class="marketplace-grid" role="list" aria-label="Built-in apps"><For each={state().mise.bin.filter(entry => `${entry.name} ${entry.version ?? ""}`.toLowerCase().includes(search().toLowerCase()))}>{entry => {
+                <div class="marketplace-grid" role="list" aria-label="Built-in apps"><For each={state().mise.bin.filter(entry => `${entry.name} ${entry.version ?? ""}`.toLowerCase().includes(search().toLowerCase()))}>{(entry, i) => {
                   const title = entry.name.replace(/\.exe$/i, "");
-                  return <article role="listitem" class="market-card">
-                    <div class="market-card-head"><span class="badge large">{title[0]?.toUpperCase()}</span><div><h2>{title}</h2><code>{entry.name}</code></div><span class="local-tag">Built-in</span></div>
-                    <p class="market-description">version {entry.version ?? "version unknown"} · {(entry.size / 1048576).toFixed(1)} MB</p>
+                  return <article role="listitem" class={`market-card ${selected() === i() ? "market-selected" : ""}`} onMouseEnter={() => setSelected(i())}>
+                    <div class="market-card-head"><span class="badge large" style={{ "--hue": hue(entry.name) }}>{title[0]?.toUpperCase()}</span><div><h2>{title}</h2><code>{entry.name}</code></div><span class="local-tag">Built-in</span></div>
+                    <p class="market-description">Ships with Autark, managed in its own bin folder.</p>
+                    <div class="market-versions"><span>Version <b>{entry.version ?? "unknown"}</b></span><span>Size <b>{(entry.size / 1048576).toFixed(1)} MB</b></span></div>
                     <div class="market-actions"><Show when={entry.name.toLowerCase() === "mise.exe" && state().mise.source === "local"}><button class="button" disabled={busy()} onClick={() => void run(() => api.updateMise())}>Update</button></Show>
                       <Show when={!(entry.name.toLowerCase() === "mise.exe" && state().mise.source !== "local")}>
                         <Show when={binRemoveConfirm() !== entry.name}><button class="button market-view-action" onClick={() => setBinRemoveConfirm(entry.name)}>Remove</button></Show>
