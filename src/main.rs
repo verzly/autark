@@ -6,6 +6,7 @@ mod marketplace;
 mod local;
 mod prefs;
 mod settings;
+mod tools;
 
 use apps::{Phase, SetupKind, Shared, State};
 use prefs::Prefs;
@@ -102,6 +103,79 @@ fn get_state(shared: TauriState<'_, Arc<Shared>>) -> State {
 }
 
 #[tauri::command(rename_all = "snake_case")]
+async fn set_mise_path(app: AppHandle, shared: TauriState<'_, Arc<Shared>>, path: Option<String>) -> CmdResult<State> {
+    let inner = shared.inner().clone();
+    let check_path = path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(path) = check_path {
+            let path = std::path::PathBuf::from(path);
+            if !path.is_file() || std::process::Command::new(&path).arg("--version").output().map(|o| !o.status.success()).unwrap_or(true) {
+                return Err(CmdError::new("invalid_argument", "that file does not run as mise"));
+            }
+        }
+        Ok::<(), CmdError>(())
+    }).await.map_err(|e| CmdError::new("internal", e.to_string()))??;
+    {
+        let mut settings = inner.plugin_settings();
+        settings.mise_path = path;
+        settings.save()?;
+        apps::reload_settings(&inner, settings)?;
+    }
+    apps::refresh_mise(&inner);
+    let _ = app;
+    Ok(apps::wire(&inner))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn install_mise(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> CmdResult<State> {
+    let inner = shared.inner().clone();
+    let root = inner.root();
+    tauri::async_runtime::spawn_blocking(move || tools::install_local(&app, "autark", &root)).await.map_err(|e| CmdError::new("internal", e.to_string()))??;
+    apps::refresh_mise(&inner);
+    Ok(apps::wire(&inner))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn update_mise(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> CmdResult<State> {
+    let inner = shared.inner().clone();
+    let settings = inner.plugin_settings();
+    tauri::async_runtime::spawn_blocking(move || tools::self_update(&app, "autark", &settings)).await.map_err(|e| CmdError::new("internal", e.to_string()))??;
+    apps::refresh_mise(&inner);
+    Ok(apps::wire(&inner))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn set_bin_path(shared: TauriState<'_, Arc<Shared>>, enabled: bool) -> CmdResult<State> {
+    let inner = shared.inner().clone();
+    let root = inner.root();
+    let actual = tauri::async_runtime::spawn_blocking(move || tools::set_path_registration(&root, enabled)).await.map_err(|e| CmdError::new("internal", e.to_string()))??;
+    let mut settings = inner.plugin_settings();
+    settings.bin_in_path = actual;
+    settings.save()?;
+    apps::reload_settings(&inner, settings)?;
+    apps::refresh_mise(&inner);
+    Ok(apps::wire(&inner))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn remove_bin_entry(shared: TauriState<'_, Arc<Shared>>, name: String) -> CmdResult<State> {
+    let inner = shared.inner().clone();
+    if operation_running(&inner) { return Err(CmdError::new("operation_in_progress", "another operation is running")); }
+    if name.starts_with('.') || name.contains('/') || name.contains('\\') { return Err(CmdError::new("invalid_argument", "invalid binary name")); }
+    let settings = inner.plugin_settings();
+    let path = std::path::PathBuf::from(&name);
+    let root = settings.root_path();
+    let selected = tools::resolve(&settings, &root);
+    if selected.as_ref().is_some_and(|p| p == &tools::bin_dir(&root).join(&name) || p == &tools::local_mise(&root) && name.eq_ignore_ascii_case("mise.exe")) {
+        return Err(CmdError::new("invalid_argument", "this is the mise Autark runs, update it instead"));
+    }
+    let target = tools::bin_dir(&root).join(path);
+    tauri::async_runtime::spawn_blocking(move || std::fs::remove_file(target)).await.map_err(|e| CmdError::new("internal", e.to_string()))?.map_err(anyhow::Error::from)?;
+    apps::refresh_mise(&inner);
+    Ok(apps::wire(&inner))
+}
+
+#[tauri::command(rename_all = "snake_case")]
 fn save_settings(
     app: AppHandle,
     shared: TauriState<'_, Arc<Shared>>,
@@ -148,11 +222,10 @@ fn pick_directory(target: String) -> Option<String> {
 }
 
 #[tauri::command(rename_all = "snake_case")]
-async fn pick_file(title: String) -> Result<Option<String>, CmdError> {
-    Ok(rfd::FileDialog::new()
-        .set_title(title)
-        .add_filter("App manifest", &["json"])
-        .pick_file()
+async fn pick_file(title: String, kind: Option<String>) -> Result<Option<String>, CmdError> {
+    let dialog = rfd::FileDialog::new().set_title(title);
+    let dialog = if kind.as_deref() == Some("exe") { dialog.add_filter("Executable", &["exe"]) } else { dialog.add_filter("App manifest", &["json"]) };
+    Ok(dialog.pick_file()
         .map(|path| path.to_string_lossy().to_string()))
 }
 
@@ -610,6 +683,11 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_state,
             save_settings,
+            set_mise_path,
+            install_mise,
+            update_mise,
+            set_bin_path,
+            remove_bin_entry,
             pick_directory,
             pick_file,
             add_local_app,

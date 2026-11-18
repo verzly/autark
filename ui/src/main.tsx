@@ -35,7 +35,8 @@ export default function App() {
   const [root, setRoot] = createSignal("");
   const [allConfirm, setAllConfirm] = createSignal(false);
   const [localAppsConfirm, setLocalAppsConfirm] = createSignal(false);
-  const [marketFilter, setMarketFilter] = createSignal<"marketplace" | "local">("marketplace");
+  const [binRemoveConfirm, setBinRemoveConfirm] = createSignal<string | null>(null);
+  const [marketFilter, setMarketFilter] = createSignal<"builtin" | "marketplace" | "local">("marketplace");
   const [clock, setClock] = createSignal(Date.now() / 1000);
   let dialogInput: HTMLInputElement | undefined;
   let output: HTMLDivElement | undefined;
@@ -153,7 +154,7 @@ export default function App() {
       else await run(() => api.saveSettings(settings));
     } catch (e) { setRequestError(errText(e)); }
   };
-  const setGlobalPref = (key: "tray_enabled" | "start_with_windows" | "close_to_tray" | "experimental_local_apps", next: boolean) => {
+  const setGlobalPref = (key: "tray_enabled" | "start_with_windows" | "close_to_tray" | "experimental_local_apps" | "force_local_mise", next: boolean) => {
     const settings = { ...state().settings, [key]: next };
     if (key === "experimental_local_apps" && !next) setMarketFilter("marketplace");
     if (mockMode()) setState(s => ({ ...s, settings }));
@@ -280,6 +281,7 @@ export default function App() {
       </div>
     </header>
     <main class="card">
+      <Show when={!state().mise.available} fallback={<>
       <Show when={settingsOpen()}><section class="settings-view">
         <button class="back-button" onClick={() => { const target = settingsReturn() ?? AUTARK_TAB; setSettingsOpen(false); setActive(target); setChooser(false); setAppSettingsOpen(null); }}>← back to homepage</button>
         <div class="view-heading"><div><span class="eyebrow">AUTARK</span><h1>Settings</h1></div></div>
@@ -297,8 +299,8 @@ export default function App() {
           </section>
         </Show>
         <Show when={settingsTab() === "Experimental"}>
-          <section class="preference-section"><h2>Experimental</h2>
-            <label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.experimental_local_apps} onChange={e => e.currentTarget.checked ? setLocalAppsConfirm(true) : setGlobalPref("experimental_local_apps", false)} /><span><b>Local apps</b><small>Allow apps from manifests you supply.</small><small class="preference-note">Local app manifests can run commands on this machine.</small></span></label>
+           <section class="preference-section"><h2>Experimental</h2>
+             <label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.experimental_local_apps} onChange={e => e.currentTarget.checked ? setLocalAppsConfirm(true) : setGlobalPref("experimental_local_apps", false)} /><span><b>Local apps</b><small>Allow apps from manifests you supply.</small><small class="preference-note">Local app manifests can run commands on this machine.</small></span></label>
             <Show when={localAppsConfirm() && !state().settings.experimental_local_apps}><div class="inline-panel"><p>Local apps run setup commands from a file you supply. Only add manifests you trust.</p><div><button class="button" onClick={() => setLocalAppsConfirm(false)}>Cancel</button><button class="button primary" onClick={enableLocalApps}>Enable local apps</button></div></div></Show>
           </section>
           <p class="settings-muted">Experimental features may change or break.</p>
@@ -329,9 +331,9 @@ export default function App() {
       </section></Show>
       <Show when={chooser()}><section class="marketplace-view" onKeyDown={chooserKeys}>
          <div class="marketplace-heading"><button class="back-button" onClick={hideChooser}>← back to homepage</button><div><span class="eyebrow">MARKETPLACE</span><h1>Add an app</h1></div><div class="marketplace-tools"><input ref={dialogInput} class="search" aria-label="Search marketplace apps" placeholder="Search apps..." value={search()} onInput={e => { setSearch(e.currentTarget.value); setSelected(0); }} /><Show when={marketFilter() === "marketplace"}><button class="button" disabled={state().busy || state().marketplace.refreshing} onClick={refresh}>{state().marketplace.refreshing ? "Refreshing..." : "Reload marketplace"}</button></Show><Show when={marketFilter() === "local" && state().settings.experimental_local_apps}><button class="button" disabled={busy()} onClick={addLocalApp}>Add local app</button></Show><Show when={state().marketplace.last_refresh && marketFilter() === "marketplace"}><small>Last refreshed {new Date(state().marketplace.last_refresh! * 1000).toLocaleString()}</small></Show></div></div>
-         <Show when={state().settings.experimental_local_apps}><div class="market-filters" role="group" aria-label="App source"><button class={`market-filter ${marketFilter() === "marketplace" ? "active" : ""}`} aria-pressed={marketFilter() === "marketplace"} onClick={() => setMarketFilter("marketplace")}>Marketplace</button><button class={`market-filter ${marketFilter() === "local" ? "active" : ""}`} aria-pressed={marketFilter() === "local"} onClick={() => setMarketFilter("local")}>Local</button></div></Show>
+          <div class="market-filters" role="group" aria-label="App source"><button class={`market-filter ${marketFilter() === "builtin" ? "active" : ""}`} aria-pressed={marketFilter() === "builtin"} onClick={() => setMarketFilter("builtin")}>Built-in</button><button class={`market-filter ${marketFilter() === "marketplace" ? "active" : ""}`} aria-pressed={marketFilter() === "marketplace"} onClick={() => setMarketFilter("marketplace")}>Marketplace</button><Show when={state().settings.experimental_local_apps}><button class={`market-filter ${marketFilter() === "local" ? "active" : ""}`} aria-pressed={marketFilter() === "local"} onClick={() => setMarketFilter("local")}>Local</button></Show></div>
 
-         <Show when={marketFilter() !== "local"}>
+          <Show when={marketFilter() === "marketplace"}>
            <Show when={state().marketplace.exists} fallback={<div class="marketplace-load"><p>Marketplace has not been loaded.</p><button class="button primary" disabled={state().marketplace.refreshing} onClick={refresh}>Load marketplace</button></div>}>
              <Show when={!state().marketplace.refreshing} fallback={<div class="marketplace-load">Refreshing marketplace...</div>}>
                <Show when={marketplaceApps().length} fallback={<div class="marketplace-load">No apps match your search.</div>}>
@@ -351,7 +353,7 @@ export default function App() {
              </Show>
            </Show>
          </Show>
-         <Show when={marketFilter() === "local"}>
+          <Show when={marketFilter() === "local"}>
             <Show when={marketplaceApps().length} fallback={<div class="marketplace-load">No local apps yet.</div>}>
              <div class="marketplace-grid" role="list" aria-label="Local apps"><For each={marketplaceApps()}>{(a, i) => {
                const opened = () => openIds().includes(a.id);
@@ -367,8 +369,33 @@ export default function App() {
                </article>;
              }}</For></div>
            </Show>
-         </Show>
-      </section></Show>
+          </Show>
+          <Show when={marketFilter() === "builtin"}>
+            <section class="builtin-content">
+              <div class="mise-panel">
+                <p class="settings-muted">mise: {state().mise.path ?? "not resolved"} · {state().mise.version ?? "version unknown"}{state().mise.source ? ` (${state().mise.source})` : ""}</p>
+                <label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.force_local_mise} onChange={e => setGlobalPref("force_local_mise", e.currentTarget.checked)} /><span><b>Always use Autark's own mise</b></span></label>
+                <label class="preference-toggle"><input type="checkbox" role="switch" checked={state().mise.bin_in_path} onChange={e => void run(() => api.setBinPath(e.currentTarget.checked))} /><span><b>Add Autark's bin folder to PATH</b><small>{state().mise.bin_path}</small></span></label>
+                <Show when={state().mise.source !== "local"}><button class="button quiet-button" disabled={busy()} onClick={() => void run(() => api.installMise())}>Install Autark's own mise</button></Show>
+              </div>
+              <Show when={state().mise.bin.length} fallback={<p class="marketplace-load">No built-in apps yet. Autark's own tools appear here.</p>}>
+                <div class="marketplace-grid" role="list" aria-label="Built-in apps"><For each={state().mise.bin.filter(entry => `${entry.name} ${entry.version ?? ""}`.toLowerCase().includes(search().toLowerCase()))}>{entry => {
+                  const title = entry.name.replace(/\.exe$/i, "");
+                  return <article role="listitem" class="market-card">
+                    <div class="market-card-head"><span class="badge large">{title[0]?.toUpperCase()}</span><div><h2>{title}</h2><code>{entry.name}</code></div><span class="local-tag">Built-in</span></div>
+                    <p class="market-description">version {entry.version ?? "version unknown"} · {(entry.size / 1048576).toFixed(1)} MB</p>
+                    <div class="market-actions"><Show when={entry.name.toLowerCase() === "mise.exe" && state().mise.source === "local"}><button class="button" disabled={busy()} onClick={() => void run(() => api.updateMise())}>Update</button></Show>
+                      <Show when={!(entry.name.toLowerCase() === "mise.exe" && state().mise.source !== "local")}>
+                        <Show when={binRemoveConfirm() !== entry.name}><button class="button market-view-action" onClick={() => setBinRemoveConfirm(entry.name)}>Remove</button></Show>
+                        <Show when={binRemoveConfirm() === entry.name}><div class="confirm-strip"><span>Remove {entry.name} from Autark's bin folder?</span><button class="button" onClick={() => setBinRemoveConfirm(null)}>Cancel</button><button class="button" disabled={busy()} onClick={() => { setBinRemoveConfirm(null); void run(() => api.removeBinEntry(entry.name)); }}>Remove</button></div></Show>
+                      </Show>
+                    </div>
+                  </article>;
+                }}</For></div>
+              </Show>
+            </section>
+          </Show>
+       </section></Show>
       <Show when={!chooser() && !settingsOpen() && active() === AUTARK_TAB}><section class="empty-state"><div class="empty-mark">autark</div>
         <div class="landing-app-list" role="list" aria-label="Installed apps">
           <Show when={state().apps.some(a => a.installed)} fallback={<p class="landing-empty" role="listitem">No apps are installed yet.</p>}>
@@ -435,8 +462,16 @@ export default function App() {
           </section>
         </Show>;
       }}</Show>
+      </>}>
+      <section class="mise-onboarding">
+        <div><span class="eyebrow">AUTARK</span><h1>mise is required</h1><p>Autark runs every app through <a href="https://github.com/jdx/mise" target="_blank" rel="noreferrer">mise</a> and the <code>mise</code> command is not available on this machine.</p></div>
+        <section><h2>I already have mise</h2><p>Point Autark at the existing <code>mise.exe</code>.</p><button class="button" disabled={busy()} onClick={() => void run(async () => { const path = await api.pickFile("Choose mise.exe", "exe"); return path ? api.setMisePath(path) : undefined; })}>Choose mise.exe</button><Show when={state().mise.path}><small class="settings-muted">{state().mise.path}{state().mise.version ? ` · ${state().mise.version}` : ""}</small></Show></section>
+        <section><h2>Install it for Autark</h2><p>Autark downloads mise into its own folder and keeps it there. Nothing is installed machine-wide.</p><button class="button primary" disabled={busy()} onClick={() => void run(() => api.installMise())}>Download mise</button></section>
+        <footer>Local folder: {state().mise.local_path}{state().mise.force_local ? " · Always use Autark's own mise" : ""}</footer>
+      </section>
+      </Show>
     </main>
-    <Show when={requestError() || currentApp()?.last_error || state().marketplace.error}>
+      <Show when={requestError() || currentApp()?.last_error || state().marketplace.error}>
       <div class="toasts">
         <Show when={requestError()}><div class="toast error-banner" role="alert">{requestError()}</div></Show>
         <Show when={currentApp()?.last_error}>{err => <div class="toast error-banner" role="alert">{err().message}</div>}</Show>

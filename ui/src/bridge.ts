@@ -1,5 +1,7 @@
 export type Phase = "not_installed" | "installing" | "installed" | "starting" | "running" | "stopping" | "updating" | "removing" | "failed";
 export interface Settings { root: string; folder_name: string; force_local_mise: boolean; open_tabs: string[]; active_tab: string | null; tray_enabled: boolean; start_with_windows: boolean; close_to_tray: boolean; experimental_local_apps: boolean }
+export interface BinEntry { name: string; path: string; version: string | null; size: number }
+export interface MiseInfo { available: boolean; source: string; path: string | null; version: string | null; local_path: string; bin_path: string; bin_in_path: boolean; bin: BinEntry[]; force_local: boolean }
 export interface AppSetting { key: string; label: string; kind: "text" | "number" | "port" | "boolean" | "path"; default: unknown; help?: string | null }
 export interface AppAction { id: string; label: string; confirm: boolean }
 export interface SettingsLock { key: string; var: string; value: string }
@@ -15,7 +17,7 @@ export interface AppState {
 export interface State {
   settings: Settings; settings_path: string; settings_exists: boolean;
   marketplace: { path: string; url: string; exists: boolean; refreshing: boolean; last_refresh: number | null; error: { code: string; message: string } | null };
-  apps: AppState[]; operations: { app_id: string; kind: string }[]; busy: boolean;
+  apps: AppState[]; operations: { app_id: string; kind: string }[]; busy: boolean; mise: MiseInfo;
 }
 export const mockMode = () => import.meta.env.DEV && !("__TAURI_INTERNALS__" in window);
 const isTauri = () => "__TAURI_INTERNALS__" in window;
@@ -28,7 +30,12 @@ export const api = {
   getState: () => invoke<State>("get_state"),
   saveSettings: (settings: Settings, moveFolder?: boolean) => invoke<State>("save_settings", { settings, ...(moveFolder === undefined ? {} : { move_folder: moveFolder }) }),
   pickDirectory: (target: "root_parent") => invoke<string | null>("pick_directory", { target }),
-  pickFile: (title: string) => invoke<string | null>("pick_file", { title }),
+  pickFile: (title: string, kind?: "json" | "exe") => invoke<string | null>("pick_file", { title, kind }),
+  setMisePath: (path: string | null) => invoke<State>("set_mise_path", { path }),
+  installMise: () => invoke<State>("install_mise"),
+  updateMise: () => invoke<State>("update_mise"),
+  setBinPath: (enabled: boolean) => invoke<State>("set_bin_path", { enabled }),
+  removeBinEntry: (name: string) => invoke<State>("remove_bin_entry", { name }),
   addLocalApp: (path: string) => invoke<State>("add_local_app", { path }),
   replaceLocalApp: (app_id: string, path: string) => invoke<State>("replace_local_app", { app_id, path }),
   setActiveTab: (app_id: string | null) => invoke<State>("set_active_tab", { app_id }),
