@@ -1,6 +1,7 @@
 use std::ffi::OsString;
+use std::fs;
 use std::os::windows::process::CommandExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result};
@@ -32,25 +33,30 @@ fn selected(requested: &str, shells: &tools::TerminalInfo) -> &'static str {
 }
 
 /// PowerShell prints the banner for every shell, so one code path colours all of them.
-fn banner(root: &Path) -> String {
-    let line = |code: u8, text: &str| format!("Write-Host \"$e[38;5;{code}m{text}$e[0m\"; ");
-    "$e=[char]27; ".to_string()
-        + &line(110, &format!("Autark v{}", env!("CARGO_PKG_VERSION")))
-        + &line(245, &format!("Autark terminal · {}", root.display()))
-        + &line(245, "AGPL-3.0 · github.com/verzly/autark")
-        + &line(
+fn banner(root: &Path) -> Vec<String> {
+    let line = |code: u8, text: String| {
+        format!("Write-Host \"$e[38;5;{code}m{text}$e[0m\"")
+    };
+    vec![
+        "$e=[char]27".to_string(),
+        line(110, format!("Autark v{}", env!("CARGO_PKG_VERSION"))),
+        line(245, format!("Autark terminal · {}", root.display())),
+        line(245, "AGPL-3.0 · github.com/verzly/autark".to_string()),
+        line(
             245,
-            "© 2026 rozsazoltan · apps, tools and settings stay in this folder",
-        )
-        + &line(240, "Autark bin and mise shims are on PATH")
-        + "Write-Host ''"
+            "© 2026 rozsazoltan · apps, tools and settings stay in this folder".to_string(),
+        ),
+        line(240, "Autark bin and mise shims are on PATH".to_string()),
+        "Write-Host ''".to_string(),
+    ]
 }
 
-/// Opens PowerShell in the Autark root, prints the banner, then hands over to the chosen shell.
-pub fn open(root: &Path, requested: &str, shells: &tools::TerminalInfo) -> Result<()> {
-    let shell = selected(requested, shells);
-    let mut script = banner(root);
-    let mut interactive = false;
+/// A script file keeps the shell command out of nested cmd quoting.
+fn launcher(root: &Path, shell: &str, shells: &tools::TerminalInfo) -> Result<PathBuf> {
+    let dir = root.join("runtime").join("terminal");
+    fs::create_dir_all(&dir).with_context(|| format!("cannot create {}", dir.display()))?;
+    let path = dir.join("start.ps1");
+    let mut lines = banner(root);
     match shell {
         "bash" | "sh" => {
             let exe = if shell == "bash" {
@@ -59,37 +65,49 @@ pub fn open(root: &Path, requested: &str, shells: &tools::TerminalInfo) -> Resul
                 shells.sh.clone()
             }
             .context("that shell is not available")?;
-            // -i keeps sh interactive even when PowerShell hands it a console it does not trust.
-            script.push_str(&format!("; & '{exe}' -i"));
+            // -i keeps the shell interactive; without it it may exit on the spot.
+            lines.push(format!("& '{exe}' -i"));
         }
-        "cmd" => script.push_str("; cmd.exe"),
-        // PowerShell is the target itself, so the session must survive the banner.
-        _ => interactive = true,
+        "cmd" => lines.push("cmd.exe".to_string()),
+        _ => {}
     }
-    let mut args = vec!["-NoLogo".to_string()];
+    fs::write(&path, lines.join("\r\n") + "\r\n")
+        .with_context(|| format!("cannot write {}", path.display()))?;
+    Ok(path)
+}
+
+/// Opens a console window that prints the banner and then runs the chosen shell.
+pub fn open(root: &Path, requested: &str, shells: &tools::TerminalInfo) -> Result<()> {
+    let shell = selected(requested, shells);
+    let script = launcher(root, shell, shells)?;
+    let interactive = shell == "powershell";
+    // `start` opens the console window with clean handles; Autark itself never needs one.
+    let mut command = Command::new("cmd.exe");
+    command.args(["/C", "start", "", "powershell.exe", "-NoLogo"]);
     if interactive {
-        args.push("-NoExit".to_string());
+        command.arg("-NoExit");
     }
-    args.push("-Command".to_string());
-    args.push(script);
-    // A direct spawn lets the machine's default console host show it, with no argument parsing in between.
-    let mut command = Command::new("powershell.exe");
-    command.args(&args);
+    command.arg("-File").arg(&script);
     tools::environment(&mut command, root);
     command
         .env("PATH", autark_path(root))
         .env("AUTARK_ROOT", root)
         .current_dir(root)
-        .creation_flags(0x0000_0010);
+        // cmd itself stays invisible; `start` gives the shell its own window.
+        .creation_flags(0x0800_0000);
     command.spawn().context("cannot open the terminal")?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{autark_path, banner, selected};
+    use super::{autark_path, launcher, selected};
     use crate::tools::TerminalInfo;
     use std::path::Path;
+
+    fn temp_root() -> std::path::PathBuf {
+        std::env::temp_dir().join("autark-terminal-test")
+    }
 
     #[test]
     fn autark_tools_come_before_the_machine_path() {
@@ -101,11 +119,19 @@ mod tests {
     }
 
     #[test]
-    fn the_banner_is_colored_and_versioned() {
-        let text = banner(Path::new("C:\\Autark"));
-        assert!(text.contains("$e[38;5;110m"));
+    fn the_launcher_prints_a_colored_banner_then_the_shell() {
+        let root = temp_root();
+        let shells = TerminalInfo {
+            bash: Some("C:\\git\\bin\\bash.exe".to_string()),
+            sh: Some("C:\\git\\bin\\sh.exe".to_string()),
+        };
+        let text = std::fs::read_to_string(launcher(&root, "bash", &shells).unwrap()).unwrap();
+        assert!(text.contains("[38;5;110m"));
         assert!(text.contains(env!("CARGO_PKG_VERSION")));
-        assert!(text.contains("C:\\Autark"));
+        assert!(text.trim_end().ends_with("& 'C:\\git\\bin\\bash.exe' -i"));
+        let plain = std::fs::read_to_string(launcher(&root, "powershell", &shells).unwrap()).unwrap();
+        assert!(!plain.contains("cmd.exe"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -114,7 +140,7 @@ mod tests {
         assert_eq!(selected("system", &without), "powershell");
         let with = TerminalInfo {
             bash: Some("C:\\git\\bin\\bash.exe".to_string()),
-            sh: Some("C:\\git\\usr\\bin\\sh.exe".to_string()),
+            sh: Some("C:\\git\\bin\\sh.exe".to_string()),
         };
         assert_eq!(selected("system", &with), "bash");
         assert_eq!(selected("sh", &with), "sh");
