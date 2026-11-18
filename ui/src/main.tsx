@@ -350,7 +350,7 @@ export default function App() {
       <div class="empty-mark" aria-hidden="true">autark</div>
       <h1>Where should Autark keep its files?</h1>
           <p class="settings-muted">Settings, the marketplace clone, runtime tools and every app live in this folder.</p>
-          <button class="path path-edit" title="Change Autark folder" onClick={() => void chooseRoot()}><span>{state().settings.root}</span><Icon name="pencil" /></button>
+          <button class="path path-edit" title="Change Autark folder" onClick={() => void chooseRoot()}><span>{state().settings.root}</span><span class="icon-button"><Icon name="pencil" /></span></button>
           <button class="button primary" onClick={() => setWizardStep(3)}>Next</button>
     </>
   );

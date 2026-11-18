@@ -187,3 +187,10 @@ body.is-loading{overflow:hidden}
 /* folder path: never let the text clip its pencil */
 .path-edit{overflow:visible}
 .path-edit span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* folder path: same pencil chip as the rest of the app, kept right of the path */
+.path-edit{text-decoration:none}
+.path-edit:hover{text-decoration:none}
+.path-edit .icon-button{display:inline-flex;flex:none;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:0;border-radius:5px;background:transparent;color:#8a8a8a;line-height:1;cursor:pointer}
+.path-edit .icon-button:hover{background:#1a1a1a;color:#eee}
+.path-edit .icon-button svg{width:13px;height:13px}
