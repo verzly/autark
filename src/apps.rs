@@ -809,7 +809,7 @@ fn run_step(
         .map(|arg| manifest::expand(arg, root, app_dir, values))
         .collect::<Result<Vec<_>>>()?;
     let mut command = if manifest.setup.tools.is_empty() {
-        Command::new(&program)
+        tools::new_command(&program)
     } else {
         let mut command = mise_command(root, force_local_mise);
         command
@@ -847,7 +847,7 @@ fn sync_source(
             vec!["reset", "--hard", "FETCH_HEAD"],
             vec!["clean", "-fd"],
         ] {
-            let mut command = Command::new("git");
+            let mut command = tools::new_command("git");
             command.arg("-C").arg(&dir).args(&args);
             apply_environment(&mut command, root, app_dir, manifest, values)?;
             run_streaming(app, id, format!("git {}", args.join(" ")), command)?;
@@ -857,7 +857,7 @@ fn sync_source(
             fs::remove_dir_all(&dir).context("cannot clear a partial source checkout")?;
         }
         let target = dir.to_string_lossy().to_string();
-        let mut command = Command::new("git");
+        let mut command = tools::new_command("git");
         command.args([
             "clone",
             "--depth",
@@ -889,7 +889,7 @@ fn read_app_version(
         .map(|arg| manifest::expand(arg, root, app_dir, values).ok())
         .collect::<Option<Vec<_>>>()?;
     let mut command = if manifest.setup.tools.is_empty() {
-        Command::new(&program)
+        tools::new_command(&program)
     } else {
         let mut command = mise_command(root, force_local_mise);
         command
@@ -921,7 +921,7 @@ fn read_app_version(
 
 fn mise_command(root: &Path, force_local: bool) -> Command {
     let settings = Settings { root: root.to_string_lossy().to_string(), force_local_mise: force_local, ..Settings::load_or_default() };
-    Command::new(tools::resolve(&settings, root).unwrap_or_else(|| PathBuf::from("mise")))
+    tools::new_command(tools::resolve(&settings, root).unwrap_or_else(|| PathBuf::from("mise")))
 }
 
 fn mise_available(root: &Path, force_local: bool) -> bool {
@@ -1051,7 +1051,7 @@ fn run_streaming(
     let status = loop {
         if is_cancelled(id) {
             let pid = child.id().to_string();
-            let _ = Command::new("taskkill")
+            let _ = tools::new_command("taskkill")
                 .args(["/PID", &pid, "/T", "/F"])
                 .output();
             let _ = child.kill();
@@ -1131,7 +1131,7 @@ fn kill_child(shared: &Shared, id: &str) {
         .remove(id);
     if let Some(mut child) = child {
         let pid = child.id().to_string();
-        let _ = Command::new("taskkill")
+        let _ = tools::new_command("taskkill")
             .args(["/PID", &pid, "/T", "/F"])
             .output();
         let _ = child.kill();
@@ -1162,7 +1162,7 @@ pub fn run_action(app: &AppHandle, shared: &Arc<Shared>, id: &str, action_id: &s
         let (program, args) = args.split_first()
             .ok_or_else(|| anyhow::anyhow!("invalid_argument: unknown action"))?;
         let mut command = if record.manifest.setup.tools.is_empty() {
-            let mut command = Command::new(program);
+            let mut command = tools::new_command(program);
             command.args(args);
             command
         } else {
@@ -1215,7 +1215,7 @@ fn start_inner(app: &AppHandle, shared: &Arc<Shared>, id: &str) -> Result<()> {
         .map(|arg| manifest::expand(arg, &root, &app_dir, &values))
         .collect::<Result<Vec<_>>>()?;
     let mut command = if manifest.setup.tools.is_empty() {
-        Command::new(&program)
+        tools::new_command(&program)
     } else {
         let mut command = mise_command(&root, force_local_mise);
         command
@@ -1358,7 +1358,7 @@ fn run_stop_command(app: &AppHandle, shared: &Shared, id: &str) {
     let program = &expanded[0];
     let args = &expanded[1..];
     let mut command = if record.manifest.setup.tools.is_empty() {
-        Command::new(program)
+        tools::new_command(program)
     } else {
         let mut command = mise_command(&root, force_local_mise);
         command

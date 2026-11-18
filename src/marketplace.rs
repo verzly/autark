@@ -1,9 +1,9 @@
 use crate::{manifest::{self, Manifest, MarketplaceIndex}, settings::MARKETPLACE_URL};
 use anyhow::{bail, Context, Result};
+use crate::tools;
 use std::{
     fs,
     path::{Path, PathBuf},
-    process::Command,
 };
 
 pub fn dir(root: &Path) -> PathBuf {
@@ -93,7 +93,7 @@ fn path_arg(path: &Path) -> String {
 }
 
 fn git(args: &[&str]) -> Result<()> {
-    let output = Command::new("git")
+    let output = tools::new_command("git")
         .args(args)
         .output()
         .context("git is not available on PATH")?;
