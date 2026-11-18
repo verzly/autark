@@ -59,7 +59,8 @@ pub fn open(root: &Path, requested: &str, shells: &tools::TerminalInfo) -> Resul
                 shells.sh.clone()
             }
             .context("that shell is not available")?;
-            script.push_str(&format!("; & '{exe}'"));
+            // -i keeps sh interactive even when PowerShell hands it a console it does not trust.
+            script.push_str(&format!("; & '{exe}' -i"));
         }
         "cmd" => script.push_str("; cmd.exe"),
         // PowerShell is the target itself, so the session must survive the banner.

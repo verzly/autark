@@ -421,7 +421,9 @@ pub fn probe_terminal(root: &Path) -> TerminalInfo {
     };
     TerminalInfo {
         bash: from_git(&["bin", "bash.exe"]).or_else(|| on_path("bash")),
-        sh: from_git(&["usr", "bin", "sh.exe"]).or_else(|| on_path("sh")),
+        sh: from_git(&["bin", "sh.exe"])
+            .or_else(|| from_git(&["usr", "bin", "sh.exe"]))
+            .or_else(|| on_path("sh")),
     }
 }
 
