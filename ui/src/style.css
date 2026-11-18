@@ -68,3 +68,16 @@ p{font-size:12.5px;line-height:1.55;margin:0;color:#a2a2a2}
 .preference-section{gap:9px}
 .preference-section p{max-width:64ch}
 .mise-onboarding .empty-mark{align-self:center;padding:2px 0 20px}
+
+/* Blocking mise screen: centered column with OpenCode-style rhythm */
+.mise-onboarding{display:flex;flex:1;flex-direction:column;align-items:center;gap:26px;width:100%;max-width:520px;margin:0 auto;padding:44px 0 32px;text-align:center}
+.mise-onboarding>div{display:flex;flex-direction:column;align-items:center;gap:10px}
+.mise-onboarding section{display:flex;flex-direction:column;align-items:center;gap:9px;width:100%;max-width:420px;padding-top:22px}
+.mise-onboarding section p{max-width:44ch}
+.mise-onboarding footer{max-width:420px;overflow-wrap:anywhere;color:#7e7e7e;font-size:11px;line-height:1.6}
+
+/* Links: neutral OpenCode-style tone, never the browser default blue/purple */
+a,a:visited{color:#cfcfcf;text-decoration:underline;text-decoration-color:#444;text-underline-offset:2px}
+a:hover,a:visited:hover{color:#fff;text-decoration-color:#8a8a8a}
+.links button,.about button,.metadata button,.market-links button,.output-head button,.group-heading button,.path{color:#cfcfcf;text-decoration-color:#444}
+.links button:hover,.about button:hover,.metadata button:hover,.market-links button:hover,.output-head button:hover,.group-heading button:hover,.path:hover{color:#fff;text-decoration-color:#8a8a8a}
