@@ -347,10 +347,10 @@ export default function App() {
   );
   const folderPane = () => (
     <>
+      <div class="empty-mark" aria-hidden="true">autark</div>
       <h1>Where should Autark keep its files?</h1>
           <p class="settings-muted">Settings, the marketplace clone, runtime tools and every app live in this folder.</p>
-          <button class="path" onClick={() => void chooseRoot()}>{state().settings.root}</button>
-          <button class="button" disabled={state().busy} onClick={() => void chooseRoot()}>Choose folder</button>
+          <div class="path-row"><button class="path" onClick={() => void chooseRoot()}>{state().settings.root}</button><button class="icon-button" aria-label="Change Autark folder" title="Change Autark folder" onClick={() => void chooseRoot()}><Icon name="pencil" /></button></div>
           <button class="button primary" onClick={() => { if (!state().mise.available) { setWizardStep(3); return; } if (mockMode()) setState(s => ({ ...s, settings: { ...s.settings, wizard_complete: true } })); else void run(() => api.saveSettings({ ...state().settings, wizard_complete: true }, false)); }}>Next</button>
     </>
   );
