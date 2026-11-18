@@ -3,6 +3,7 @@ import type { AppSetting, AppState, Phase, State } from "./bridge";
 import { api, mockMode } from "./bridge";
 import { previewLogs, previewState, previewVariants } from "./mock";
 import miseLogo from "./mise.png";
+import gitLogo from "./git.svg";
 
 type InlineAction = "install" | "reinstall" | "remove" | `action:${string}` | null;
 const working = (p: Phase) => ["installing", "starting", "stopping", "updating", "removing"].includes(p);
@@ -15,6 +16,11 @@ const hue = (id: string) => { let h = 0; for (const c of id) h = (h * 31 + c.cha
 const duration = (s: number) => `${Math.floor(s / 60)}m ${String(Math.floor(s % 60)).padStart(2, "0")}s`;
 const calver = (version: string | null) => version ? version.match(/^\d+\.\d+\.\d+/)?.[0] ?? version : "version unknown";
 const AUTARK_TAB = "__autark__";
+// Built-in tools with a real logo; everything else falls back to its first letter.
+const builtinLogo = (name: string) => {
+  const lower = name.toLowerCase();
+  return lower === "mise.exe" ? miseLogo : lower === "git.exe" ? gitLogo : null;
+};
 
 export default function App() {
   const [state, setState] = createSignal<State>(previewState);
@@ -412,7 +418,7 @@ export default function App() {
             <span class="tab-close" role="button" aria-label={`Close ${app()?.name ?? id}`} onClick={e => closeTab(id, e)}><Icon name="close" /></span>
           </button>;
         }}</For>
-        <For each={builtinTabs()}>{name => <button class={`tab ${active() === name && !settingsOpen() ? "active" : ""}`} role="tab" aria-selected={active() === name && !settingsOpen()} onClick={() => openBuiltin(name)}><span class="badge" style={{ "--hue": hue(name) }}><Show when={name.toLowerCase() === "mise.exe"} fallback={builtinName(name)[0]?.toUpperCase()}>{<img src={miseLogo} alt="" />}</Show></span><span class="tab-name">{builtinName(name)}</span><span class="tab-close" role="button" aria-label={`Close ${builtinName(name)}`} onClick={e => closeBuiltin(name, e)}><Icon name="close" /></span></button>}</For>
+        <For each={builtinTabs()}>{name => <button class={`tab ${active() === name && !settingsOpen() ? "active" : ""}`} role="tab" aria-selected={active() === name && !settingsOpen()} onClick={() => openBuiltin(name)}><span class="badge" style={{ "--hue": hue(name) }}><Show when={builtinLogo(name)} fallback={builtinName(name)[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><span class="tab-name">{builtinName(name)}</span><span class="tab-close" role="button" aria-label={`Close ${builtinName(name)}`} onClick={e => closeBuiltin(name, e)}><Icon name="close" /></span></button>}</For>
         <Show when={autarkTab()}><button class={`tab autark-tab ${active() === AUTARK_TAB && !settingsOpen() ? "active" : ""}`} role="tab" aria-selected={active() === AUTARK_TAB && !settingsOpen()} onClick={() => selectTab(AUTARK_TAB)}>
           <span class="autark-tab-mark" aria-hidden="true">a</span><span class="tab-name">Autark</span>
           <span class="tab-close" role="button" aria-label="Close Autark" onClick={e => closeAutarkTab(e)}><Icon name="close" /></span>
@@ -543,7 +549,7 @@ export default function App() {
                   const tag = isGit ? (git.installed ? "By Autark" : git.external?.from_mise ? "By mise" : git.external ? "By your machine" : "Not installed") : systemMise ? "Not installed" : "By Autark";
                   const external = isGit ? git.external?.path ?? null : state().mise.path;
                   return <article role="listitem" class={`market-card ${selected() === i() ? "market-selected" : ""}`} onMouseEnter={() => setSelected(i())}>
-                    <div class="market-card-head"><span class="badge large" style={{ "--hue": hue(entry.name) }}><Show when={entry.name.toLowerCase() === "mise.exe"} fallback={title[0]?.toUpperCase()}>{<img src={miseLogo} alt="" />}</Show></span><div><h2>{title}</h2><code>{entry.name}</code></div><span class="local-tag">{tag}</span></div>
+                    <div class="market-card-head"><span class="badge large" style={{ "--hue": hue(entry.name) }}><Show when={builtinLogo(entry.name)} fallback={title[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><div><h2>{title}</h2><code>{entry.name}</code></div><span class="local-tag">{tag}</span></div>
                     <p class="market-description">{isGit ? "Installed once by Autark's mise, next to the rest of its runtime." : systemMise ? "Autark runs every app through this mise." : "Managed in Autark's own bin folder."}</p>
                     <Show when={isGit ? git.installed : !systemMise}><div class="market-versions"><span>Version <b>{entry.version ?? "unknown"}</b></span><span>By <b>{isGit ? "Autark" : state().mise.source}</b></span></div>
                       <div class="market-links"><span>{isGit ? git.path : state().mise.bin_path}</span></div></Show>
@@ -564,7 +570,7 @@ export default function App() {
           </Show>
        </section></Show>
       <Show when={!chooser() && !settingsOpen() && isBuiltin(active())}><section class="app-view">
-        <div class="app-header"><div class="app-title"><span class="badge large"><Show when={active()?.toLowerCase() === "mise.exe"} fallback={builtinName(active())[0]?.toUpperCase()}>{<img src={miseLogo} alt="" />}</Show></span><div><h1>{builtinName(active())}</h1><div class="version-line">version {active()?.toLowerCase() === "git.exe" ? state().git.version ?? "unknown" : state().mise.version ?? "unknown"} · {active()?.toLowerCase() === "git.exe" ? (state().git.installed ? "By Autark" : state().git.external?.from_mise ? "By mise" : state().git.external ? "By your machine" : "Not installed") : (state().mise.source === "local" ? "By Autark" : "By your machine")}</div></div></div></div>
+        <div class="app-header"><div class="app-title"><span class="badge large"><Show when={builtinLogo(active() ?? "")} fallback={builtinName(active())[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><div><h1>{builtinName(active())}</h1><div class="version-line">version {active()?.toLowerCase() === "git.exe" ? state().git.version ?? "unknown" : state().mise.version ?? "unknown"} · {active()?.toLowerCase() === "git.exe" ? (state().git.installed ? "By Autark" : state().git.external?.from_mise ? "By mise" : state().git.external ? "By your machine" : "Not installed") : (state().mise.source === "local" ? "By Autark" : "By your machine")}</div></div></div></div>
         <div class="actions"><button class="button" onClick={() => { setMarketFilter("builtin"); showChooser(); }}>Back to built-in apps</button><Show when={active()?.toLowerCase() !== "git.exe"}><Show when={localInstalled()}><button class="button primary" disabled={busy()} onClick={() => void run(() => api.updateMise())}>Update</button></Show><button class="button" disabled={busy()} onClick={() => setMiseScreen(true)}>Change mise.exe</button><Show when={localInstalled()}><button class="button danger" disabled={busy()} onClick={() => void run(() => api.removeBinEntry("mise.exe"))}>Remove</button></Show></Show><Show when={active()?.toLowerCase() === "git.exe"}><Show when={state().git.installed} fallback={<button class="button primary" disabled={busy()} onClick={() => void run(() => api.installGit())}>Install</button>}><button class="button primary" disabled={busy()} onClick={() => void run(() => api.updateGit())}>Update</button></Show></Show></div>
         <div class="output-wrap"><div class="output" ref={output} onScroll={() => output && setFollow(output.scrollHeight - output.scrollTop - output.clientHeight < 24)}>
           <For each={logEntries()}>{entry => entry.spacer ? <div class="log-spacer" aria-hidden="true" /> : <div class={`log ${lineTone(entry.line)}`}>{entry.line}</div>}</For>
