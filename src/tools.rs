@@ -213,20 +213,22 @@ pub fn self_update(app: &AppHandle, id: &str, root: &Path) -> Result<()> {
     apps::run_tool_streaming(app, id, "updating mise".to_string(), command)
 }
 
-pub fn git_dir(root: &Path) -> PathBuf {
-    root.join("runtime").join("git")
+/// Autark's mise global config. git lives here, so every mise run of Autark sees it.
+pub fn global_config(root: &Path) -> PathBuf {
+    root.join("runtime").join("mise-config").join("config.toml")
 }
 
-/// git is installed by Autark's own mise, so its recipe lives next to the other runtime tools.
-const GIT_MISE_TOML: &str = r##"# Managed by Autark. git is installed once, by Autark's own mise.
-[tools."git"]
-version = "latest"
-asset_pattern = "PortableGit-*-64-bit.7z.exe"
-format = "raw"
-bin_path = "cmd"
+fn git_postinstall(root: &Path) -> PathBuf {
+    global_config(root).with_file_name("postinstall-git.ps1")
+}
 
-postinstall = '''
-$ErrorActionPreference = 'Stop'
+fn git_config(root: &Path) -> String {
+    GIT_MISE_TOML.replace("@@POSTINSTALL@@", &git_postinstall(root).display().to_string())
+}
+
+/// git is a global tool of Autark's own mise, so its recipe is the global config file.
+/// The extraction step runs through PowerShell, so mise never has to parse it in cmd.
+const GIT_POSTINSTALL_PS: &str = r##"$ErrorActionPreference = 'Stop'
 
 $root = $env:MISE_TOOL_INSTALL_PATH
 $stage = Join-Path $root '.portablegit-stage'
@@ -298,8 +300,16 @@ if ($LASTEXITCODE -ne 0) { throw "Git verification failed" }
 & $gpg --version
 if ($LASTEXITCODE -ne 0) { throw "GPG verification failed" }
 
-Remove-Item -LiteralPath $stage -Recurse -Force
-'''
+Remove-Item -LiteralPath $stage -Recurse -Force"##;
+
+const GIT_MISE_TOML: &str = r##"# Managed by Autark. git is installed once, by Autark's own mise.
+[tools."git"]
+version = "latest"
+asset_pattern = "PortableGit-*-64-bit.7z.exe"
+format = "raw"
+bin_path = "cmd"
+
+postinstall = '''powershell -NoProfile -ExecutionPolicy Bypass -File "@@POSTINSTALL@@"'''
 
 [env]
 _.path = { path = [
@@ -390,12 +400,11 @@ pub fn probe_git(settings: &Settings) -> GitInfo {
 }
 
 fn git_command(settings: &Settings, root: &Path) -> Command {
-    let dir = git_dir(root);
     let mut command = Command::new(resolve(settings, root).unwrap_or_else(|| PathBuf::from("mise")));
-    command.arg("--cd").arg(&dir);
+    // The global config is written by Autark, so mise does not need to ask about trusting it.
+    command.env("MISE_TRUSTED_CONFIG_PATHS", root.join("runtime").join("mise-config"));
     environment(&mut command, root);
-    // The recipe file is written by Autark, so mise does not need to ask about trusting it.
-    command.env("MISE_TRUSTED_CONFIG_PATHS", &dir);
+    command.current_dir(root);
     command
 }
 
@@ -403,14 +412,13 @@ pub fn install_git(app: &AppHandle, id: &str, settings: &Settings, root: &Path) 
     if resolve(settings, root).is_none() {
         bail!("invalid_argument: mise is required before git can be installed");
     }
-    let dir = git_dir(root);
-    fs::create_dir_all(&dir)?;
     for sub in ["mise-data", "mise-config", "mise-cache", "mise-state", "tmp"] {
         fs::create_dir_all(root.join("runtime").join(sub))?;
     }
-    fs::write(dir.join("mise.toml"), GIT_MISE_TOML).context("cannot write git mise.toml")?;
+    fs::write(global_config(root), git_config(root)).context("cannot write mise global config")?;
+    fs::write(git_postinstall(root), GIT_POSTINSTALL_PS).context("cannot write git postinstall")?;
     let mut command = git_command(settings, root);
-    command.arg("install");
+    command.args(["install", "git"]);
     apps::run_tool_streaming(app, id, "installing git".to_string(), command)?;
     if own_git(root).is_none() {
         bail!("internal: git did not land in Autark's mise installs");
