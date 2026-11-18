@@ -1,5 +1,5 @@
 export type Phase = "not_installed" | "installing" | "installed" | "starting" | "running" | "stopping" | "updating" | "removing" | "failed";
-export interface Settings { root: string; folder_name: string; force_local_mise: boolean; open_tabs: string[]; active_tab: string | null; tray_enabled: boolean; start_with_windows: boolean; close_to_tray: boolean; experimental_local_apps: boolean; wizard_complete: boolean }
+export interface Settings { root: string; folder_name: string; force_local_mise: boolean; animations: boolean; open_tabs: string[]; active_tab: string | null; tray_enabled: boolean; start_with_windows: boolean; close_to_tray: boolean; experimental_local_apps: boolean; wizard_complete: boolean }
 export interface BinEntry { name: string; path: string; version: string | null; size: number }
 export interface DetectedMise { path: string; version: string | null }
 export interface MiseInfo { available: boolean; source: string; path: string | null; version: string | null; local_path: string; bin_path: string; bin_in_path: boolean; bin: BinEntry[]; detected: DetectedMise[]; force_local: boolean }

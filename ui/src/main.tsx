@@ -20,7 +20,7 @@ export default function App() {
   const [state, setState] = createSignal<State>(previewState);
   const [active, setActive] = createSignal<string | null>(previewState.settings.active_tab ?? AUTARK_TAB);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
-  const [settingsTab, setSettingsTab] = createSignal<"General" | "Apps" | "Experimental" | "About">("General");
+  const [settingsTab, setSettingsTab] = createSignal<"General" | "Apps" | "Display" | "Experimental" | "About">("General");
   const [settingsReturn, setSettingsReturn] = createSignal<string | null>(null);
   const [appSettingsOpen, setAppSettingsOpen] = createSignal<string | null>(null);
   const [chooser, setChooser] = createSignal(false);
@@ -239,7 +239,7 @@ export default function App() {
     if (mockMode()) setState(s => ({ ...s, settings: { ...s.settings, wizard_complete: true } }));
     else void run(() => api.saveSettings({ ...state().settings, wizard_complete: true }, false));
   };
-  const setGlobalPref = (key: "tray_enabled" | "start_with_windows" | "close_to_tray" | "experimental_local_apps" | "force_local_mise", next: boolean) => {
+  const setGlobalPref = (key: "tray_enabled" | "start_with_windows" | "close_to_tray" | "experimental_local_apps" | "force_local_mise" | "animations", next: boolean) => {
     const settings = { ...state().settings, [key]: next };
     if (key === "experimental_local_apps" && !next) setMarketFilter("marketplace");
     if (mockMode()) setState(s => ({ ...s, settings }));
@@ -329,7 +329,7 @@ export default function App() {
     });
   };
 
-  return <div class="app">
+  return <div class={`app ${state().settings.animations ? "" : "no-animation"}`}>
     <header class="chrome" data-tauri-drag-region>
       <Show when={state().mise.available && state().settings.wizard_complete && !miseScreen()}>
       <button class={`gear ${settingsOpen() ? "selected" : ""}`} aria-label="Settings" aria-pressed={settingsOpen()} onClick={() => {
@@ -374,7 +374,7 @@ export default function App() {
         <button class="back-button" onClick={() => { const target = settingsReturn() ?? AUTARK_TAB; setSettingsOpen(false); setActive(target); setChooser(false); setAppSettingsOpen(null); }}>← back to homepage</button>
         <div class="view-heading"><div><span class="eyebrow">AUTARK</span><h1>Settings</h1></div></div>
         <nav class="settings-tabs" role="tablist" aria-label="Settings sections">
-          <For each={["General", "Apps", "Experimental", "About"] as const}>{tab => <button class={`settings-tab ${settingsTab() === tab ? "active" : ""}`} role="tab" aria-selected={settingsTab() === tab} onClick={() => setSettingsTab(tab)}>{tab}</button>}</For>
+          <For each={["General", "Apps", "Display", "Experimental", "About"] as const}>{tab => <button class={`settings-tab ${settingsTab() === tab ? "active" : ""}`} role="tab" aria-selected={settingsTab() === tab} onClick={() => setSettingsTab(tab)}>{tab}</button>}</For>
         </nav>
         <div class="settings-content">
         <Show when={settingsTab() === "General"}>
@@ -389,6 +389,14 @@ export default function App() {
             <section class="setting-row"><label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.tray_enabled} onChange={e => setGlobalPref("tray_enabled", e.currentTarget.checked)} /><span><b>Tray icon</b><small>Keep Autark in the notification area.</small></span></label></section>
             <section class="setting-row"><label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.start_with_windows} disabled={!state().settings.tray_enabled} onChange={e => setGlobalPref("start_with_windows", e.currentTarget.checked)} /><span><b>Start with Windows</b><small>Starts hidden in the tray when you sign in.</small><Show when={!state().settings.tray_enabled}><small class="preference-note">Needs the tray icon.</small></Show></span></label></section>
             <section class="setting-row"><label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.close_to_tray} disabled={!state().settings.tray_enabled} onChange={e => setGlobalPref("close_to_tray", e.currentTarget.checked)} /><span><b>Close to tray</b><small>The X button hides the window instead of quitting.</small><Show when={!state().settings.tray_enabled}><small class="preference-note">Needs the tray icon.</small></Show></span></label></section>
+          </section>
+        </Show>
+        <Show when={settingsTab() === "Display"}>
+          <section class="preference-section"><h2>Animations</h2><p>Turn the animated wordmark off to keep Autark as light as possible.</p>
+            <div class="market-filters">
+              <button class={`market-filter ${!state().settings.animations ? "active" : ""}`} aria-pressed={!state().settings.animations} onClick={() => setGlobalPref("animations", false)}>Performance</button>
+              <button class={`market-filter ${state().settings.animations ? "active" : ""}`} aria-pressed={state().settings.animations} onClick={() => setGlobalPref("animations", true)}>Optimized</button>
+            </div>
           </section>
         </Show>
         <Show when={settingsTab() === "Experimental"}>
