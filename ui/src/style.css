@@ -171,3 +171,10 @@ body.is-loading{overflow:hidden}
 .mise-onboarding>*{max-width:660px}
 .intro-copy{display:flex;flex-direction:column;gap:12px;width:100%;text-align:left}
 .intro-copy p{margin:0;color:#b0b0b0;font-size:13px;line-height:1.6}
+
+/* folder step: the path and its edit pencil share one row */
+.path-row{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;min-width:0}
+.path-row .path{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.path-row .icon-button{display:inline-flex;flex:none;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:0;border-radius:5px;background:transparent;color:#8a8a8a;cursor:pointer}
+.path-row .icon-button:hover{background:#1a1a1a;color:#eee}
+.path-row .icon-button svg{width:13px;height:13px}
