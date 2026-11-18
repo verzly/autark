@@ -112,3 +112,8 @@ a:hover,a:visited:hover{color:#fff;text-decoration-color:#8a8a8a}
 .mise-detected-row:hover{background:#1d1d1d;color:#fff}
 .mise-detected-row.selected{background:#222;color:#fff}
 .mise-detected-row small{flex:none;color:#8a8a8a;font-size:10px}
+
+/* mise screen: grid tracks hug their content and stay centred inside the column */
+.mise-onboarding{grid-template-columns:repeat(auto-fit,minmax(210px,auto));justify-content:center}
+.mise-detected-row span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+.mise-detected-row small{text-align:right}
