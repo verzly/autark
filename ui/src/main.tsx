@@ -115,6 +115,7 @@ export default function App() {
   };
   // Picking a working mise moves on, so the step is not a dead end.
   const [misePicking, setMisePicking] = createSignal(false);
+  const [misePickTarget, setMisePickTarget] = createSignal<string | null>(null);
   const [pickPercent, setPickPercent] = createSignal(0);
   createEffect(() => {
     if (!misePicking()) return;
@@ -124,6 +125,7 @@ export default function App() {
   });
   const pickMise = async (path: string) => {
     setMisePicking(true);
+    setMisePickTarget(path);
     try {
       const next = await api.setMisePath(path);
       if (!next.mise.available || next.settings.wizard_complete) return next;
@@ -592,6 +594,7 @@ export default function App() {
       <Show when={miseInstalling() || misePicking()}>
         <div class="mise-loading" role="status" aria-live="polite">
           <div class="empty-mark" aria-hidden="true">autark</div>
+          <small class="mise-progress">{miseInstalling() ? "Installing Autark's mise" : `Using ${misePickTarget() ?? "the selected mise.exe"}`}</small>
           <div class="mise-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={loadingPercent()}><span style={{ width: `${loadingPercent()}%` }} /></div>
           <small class="settings-muted">{loadingPercent()}%</small>
         </div>
