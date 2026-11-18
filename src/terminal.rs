@@ -1,6 +1,6 @@
 use std::ffi::OsString;
 use std::os::windows::process::CommandExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 use anyhow::{Context, Result};
@@ -17,19 +17,6 @@ fn autark_path(root: &Path) -> OsString {
         &std::env::var_os("PATH").unwrap_or_default(),
     ));
     std::env::join_paths(dirs).unwrap_or_default()
-}
-
-/// Windows Terminal, so the shell gets a real terminal instead of a bare console.
-/// `wt --version` pops a message box, so the exe is looked up on PATH instead.
-fn windows_terminal() -> Option<PathBuf> {
-    let mut dirs: Vec<PathBuf> =
-        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
-    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-        dirs.push(PathBuf::from(local).join("Microsoft").join("WindowsApps"));
-    }
-    dirs.into_iter()
-        .map(|dir| dir.join("wt.exe"))
-        .find(|path| path.exists())
 }
 
 /// `system` is Autark's own default: bash when git brought one, PowerShell otherwise.
@@ -84,28 +71,14 @@ pub fn open(root: &Path, requested: &str, shells: &tools::TerminalInfo) -> Resul
     }
     args.push("-Command".to_string());
     args.push(script);
-    let mut command = match windows_terminal() {
-        Some(wt) => {
-            let mut command = Command::new(wt);
-            command
-                .arg("-d")
-                .arg(root)
-                .arg("powershell.exe")
-                .args(&args);
-            command
-        }
-        None => {
-            let mut command = Command::new("powershell.exe");
-            command.args(&args);
-            command
-        }
-    };
+    // A direct spawn lets the machine's default console host show it, with no argument parsing in between.
+    let mut command = Command::new("powershell.exe");
+    command.args(&args);
     tools::environment(&mut command, root);
     command
         .env("PATH", autark_path(root))
         .env("AUTARK_ROOT", root)
         .current_dir(root)
-        // Without Windows Terminal the shell still needs its own console window.
         .creation_flags(0x0000_0010);
     command.spawn().context("cannot open the terminal")?;
     Ok(())
