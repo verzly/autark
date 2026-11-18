@@ -47,3 +47,10 @@
 .settings-view,.app-settings-page{padding-bottom:34px}
 .toasts{position:fixed;left:auto;right:22px;bottom:18px;display:flex;flex-direction:column;align-items:flex-end;gap:8px;z-index:60;max-width:min(420px,calc(100vw - 44px));pointer-events:none}
 .toast{pointer-events:auto;box-shadow:0 8px 24px rgba(0,0,0,.55)}
+
+.market-filters{grid-column:1/-1;display:flex;align-items:center;gap:6px;margin:0 0 12px}
+.market-filter{border:0;background:transparent;color:#8a8a8a;padding:5px 11px;border-radius:7px;font:inherit;font-size:12px;cursor:pointer}
+.market-filter:hover:not(:disabled){background:#1a1a1a;color:#ddd}
+.market-filter.active{background:#232323;color:#eee}
+.market-filter:disabled{opacity:.4;cursor:default}
+.local-tag{background:#242424;color:#b9b9b9;font-size:11px;padding:2px 8px;border-radius:999px}

@@ -9,6 +9,7 @@ apps that are described by the marketplace (see `docs/marketplace-v1.md`). Autar
 <exe folder>/launcher-root.json      pointer: { "root": "<absolute path>" }
 <root>/launcher-settings.json        Autark settings (root, folder name, open tabs)
 <root>/marketplace/                  git clone of verzly/autark-marketplace
+<root>/local-apps/<key>/             user-supplied app.json and optional icon
 <root>/runtime/mise-data|mise-config|mise-cache|mise-state|tmp|bin
 <root>/apps/<id>/app.json            manifest snapshot copied at install time
 <root>/apps/<id>/installed.json      { "version": "recipe", "app_version": "real", "installed_at": 0 }
@@ -44,6 +45,7 @@ sources). Manifest `env` entries are applied last. `root` is configurable and li
 ## crates
 
 - `settings.rs` — root pointer, `launcher-settings.json`, folder rename rules.
+- `local.rs` — user-supplied local app manifests.
 - `manifest.rs` — marketplace index + `app.json` parsing, validation, template expansion.
 - `marketplace.rs` — clone/fetch/reset of the marketplace repo, catalogue scan, version compare.
 - `apps.rs` — per-app record (installed version, settings, phase, child process), install/update/start/
@@ -62,6 +64,9 @@ Commands (`invoke`, snake_case args):
 | `get_state` | — | `State` |
 | `save_settings` | `settings`, `move_folder?` | `State` |
 | `pick_directory` | `target: "root_parent"` | `string \| null` |
+| `pick_file` | `title` | `string \| null` |
+| `add_local_app` | `path` | `State` |
+| `replace_local_app` | `app_id`, `path` | `State` |
 | `set_active_tab` | `app_id: string \| null` | `State` |
 | `close_tab` | `app_id` | `State` |
 | `open_app_tab` | `app_id` | `State` |
@@ -103,12 +108,13 @@ interface Settings {
   tray_enabled: boolean;
   start_with_windows: boolean;
   close_to_tray: boolean;
+  experimental_local_apps: boolean;
 }
 
 interface AppSetting { key: string; label: string; kind: "text" | "number" | "port" | "boolean" | "path"; default: unknown; help?: string | null }
 
 interface AppState {
-  id: string; name: string; description: string;
+  id: string; name: string; description: string; local: boolean;
   version_installed: string | null;   // recipe version recorded at install
   version_app: string | null;         // real app version read by setup.version_check
   version_latest: string | null;      // latest recipe version from the marketplace
@@ -158,6 +164,7 @@ interface State {
   the Install action.
 - Marketplace refresh is manual. Without a marketplace clone, `apps` is empty and the UI offers "Load
   marketplace" instead of a crash.
+- Local apps are never updated from the marketplace. Duplicate ids receive `-2`, `-3`, and later suffixes.
 - The `+` chooser lists installed apps first, then marketplace apps; a marketplace app that is not installed
   gets a tab with the Install action.
 - Closing hides to tray only when `close_to_tray` and `tray_enabled` are both true; otherwise it stops every child and exits.

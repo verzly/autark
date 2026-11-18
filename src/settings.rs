@@ -21,6 +21,7 @@ pub struct Settings {
     pub tray_enabled: bool,
     pub start_with_windows: bool,
     pub close_to_tray: bool,
+    pub experimental_local_apps: bool,
 }
 
 impl Default for Settings {
@@ -35,6 +36,7 @@ impl Default for Settings {
             tray_enabled: false,
             start_with_windows: false,
             close_to_tray: false,
+            experimental_local_apps: false,
         }
     }
 }

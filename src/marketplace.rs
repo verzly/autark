@@ -11,8 +11,14 @@ pub fn dir(root: &Path) -> PathBuf {
 }
 
 pub struct ScanResult {
-    pub manifests: Vec<Manifest>,
+    pub manifests: Vec<ScannedApp>,
     pub warnings: Vec<String>,
+}
+
+pub struct ScannedApp {
+    pub dir: PathBuf,
+    pub manifest: Manifest,
+    pub local: bool,
 }
 
 pub fn scan(root: &Path) -> Result<ScanResult> {
@@ -33,8 +39,19 @@ pub fn scan(root: &Path) -> Result<ScanResult> {
     for id in &index.apps {
         let app_dir = dir.join("apps").join(id);
         match Manifest::load(&app_dir) {
-            Ok(manifest) => manifests.push(manifest),
+            Ok(manifest) => manifests.push(ScannedApp { dir: app_dir, manifest, local: false }),
             Err(error) => warnings.push(format!("{id}: {error:#}")),
+        }
+    }
+    let local_dir = crate::local::dir(root);
+    if let Ok(entries) = fs::read_dir(&local_dir) {
+        for entry in entries.flatten().filter(|entry| entry.path().is_dir()) {
+            let app_dir = entry.path();
+            let id = entry.file_name().to_string_lossy().to_string();
+            match Manifest::load(&app_dir) {
+                Ok(manifest) => manifests.push(ScannedApp { dir: app_dir, manifest, local: true }),
+                Err(error) => warnings.push(format!("{id}: {error:#}")),
+            }
         }
     }
     Ok(ScanResult {
