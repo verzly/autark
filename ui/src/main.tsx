@@ -84,7 +84,6 @@ export default function App() {
     });
   };
   const run = async (fn: () => Promise<State | void>) => {
-    if (mockMode()) return;
     setBusy(true); setRequestError("");
     try { const next = await fn(); if (next) { setState(next); setActive(next.settings.active_tab ?? (active() === null ? null : AUTARK_TAB)); } }
     catch (e) { setRequestError(errText(e)); }
@@ -155,6 +154,7 @@ export default function App() {
   };
   const setGlobalPref = (key: "tray_enabled" | "start_with_windows" | "close_to_tray" | "experimental_local_apps", next: boolean) => {
     const settings = { ...state().settings, [key]: next };
+    if (key === "experimental_local_apps" && !next) setMarketFilter("marketplace");
     if (mockMode()) setState(s => ({ ...s, settings }));
     else void run(() => api.saveSettings(settings, false));
   };
@@ -306,9 +306,9 @@ export default function App() {
       </section></Show>
       <Show when={chooser()}><section class="marketplace-view" onKeyDown={chooserKeys}>
          <div class="marketplace-heading"><button class="back-button" onClick={hideChooser}>← back to homepage</button><div><span class="eyebrow">MARKETPLACE</span><h1>Add an app</h1></div><div class="marketplace-tools"><input ref={dialogInput} class="search" aria-label="Search marketplace apps" placeholder="Search apps..." value={search()} onInput={e => { setSearch(e.currentTarget.value); setSelected(0); }} /><Show when={marketFilter() === "marketplace"}><button class="button" disabled={state().busy || state().marketplace.refreshing} onClick={refresh}>{state().marketplace.refreshing ? "Refreshing..." : "Reload marketplace"}</button></Show><Show when={marketFilter() === "local" && state().settings.experimental_local_apps}><button class="button" disabled={busy()} onClick={addLocalApp}>Add local app</button></Show><Show when={state().marketplace.last_refresh && marketFilter() === "marketplace"}><small>Last refreshed {new Date(state().marketplace.last_refresh! * 1000).toLocaleString()}</small></Show></div></div>
-         <div class="market-filters" role="group" aria-label="App source"><button class={`market-filter ${marketFilter() === "marketplace" ? "active" : ""}`} aria-pressed={marketFilter() === "marketplace"} onClick={() => setMarketFilter("marketplace")}>Marketplace</button><button class={`market-filter ${marketFilter() === "local" ? "active" : ""}`} aria-pressed={marketFilter() === "local"} disabled={!state().settings.experimental_local_apps} onClick={() => setMarketFilter("local")}>Local</button><Show when={!state().settings.experimental_local_apps}><small class="quiet">Enable local apps in Experimental settings.</small></Show></div>
+         <Show when={state().settings.experimental_local_apps}><div class="market-filters" role="group" aria-label="App source"><button class={`market-filter ${marketFilter() === "marketplace" ? "active" : ""}`} aria-pressed={marketFilter() === "marketplace"} onClick={() => setMarketFilter("marketplace")}>Marketplace</button><button class={`market-filter ${marketFilter() === "local" ? "active" : ""}`} aria-pressed={marketFilter() === "local"} onClick={() => setMarketFilter("local")}>Local</button></div></Show>
 
-         <Show when={marketFilter() === "marketplace"}>
+         <Show when={marketFilter() !== "local"}>
            <Show when={state().marketplace.exists} fallback={<div class="marketplace-load"><p>Marketplace has not been loaded.</p><button class="button primary" disabled={state().marketplace.refreshing} onClick={refresh}>Load marketplace</button></div>}>
              <Show when={!state().marketplace.refreshing} fallback={<div class="marketplace-load">Refreshing marketplace...</div>}>
                <Show when={marketplaceApps().length} fallback={<div class="marketplace-load">No apps match your search.</div>}>
@@ -320,7 +320,7 @@ export default function App() {
                      <div class="market-requirements"><Show when={a.requirements.disk_gb != null}><span>{a.requirements.disk_gb} GB disk</span></Show><Show when={a.requirements.webview2}><span>WebView2</span></Show></div>
                      <div class="market-links"><Show when={a.license}><span>{a.license}</span></Show><Show when={a.homepage}><button onClick={() => openUrl(a.homepage!)}>Homepage ↗</button></Show></div>
                       <Show when={a.installed} fallback={<div class="market-actions"><button class="button market-view-action" disabled={working(a.phase)} onClick={() => openApp(a.id)}>View</button><button class="button primary market-action" disabled={working(a.phase)} onClick={() => installMarketplaceApp(a)}>Install</button></div>}>
-                        <div class="market-actions"><Show when={a.local}><button class="button market-view-action" disabled={busy} onClick={() => replaceLocalApp(a)}>Edit</button></Show><button class={`button market-action ${opened() ? "opened-action" : "primary"}`} disabled={!opened() && working(a.phase)} onClick={() => opened() ? openApp(a.id) : activateMarketplaceApp(a)}>{opened() ? "Opened" : "Open"}</button></div>
+                        <div class="market-actions"><Show when={a.local}><button class="button market-view-action" disabled={busy()} onClick={() => replaceLocalApp(a)}>Edit</button></Show><button class={`button market-action ${opened() ? "opened-action" : "primary"}`} disabled={!opened() && working(a.phase)} onClick={() => opened() ? openApp(a.id) : activateMarketplaceApp(a)}>{opened() ? "Opened" : "Open"}</button></div>
                      </Show>
                    </article>;
                  }}</For></div>
@@ -329,7 +329,7 @@ export default function App() {
            </Show>
          </Show>
          <Show when={marketFilter() === "local"}>
-           <Show when={marketplaceApps().length} fallback={<div class="marketplace-load">No local apps yet. Add one from a manifest file.</div>}>
+            <Show when={marketplaceApps().length} fallback={<div class="marketplace-load">No local apps yet.</div>}>
              <div class="marketplace-grid" role="list" aria-label="Local apps"><For each={marketplaceApps()}>{(a, i) => {
                const opened = () => openIds().includes(a.id);
                return <article role="listitem" class={`market-card ${opened() ? "market-opened" : ""} ${selected() === i() ? "market-selected" : ""}`} onMouseEnter={() => setSelected(i())}>
@@ -369,7 +369,7 @@ export default function App() {
             <div class="links"><Show when={a().homepage}><button onClick={() => openUrl(a().homepage!)}>Homepage ↗</button></Show><Show when={a().license}><span>{a().license}</span></Show></div></div>
           <div class="status-line"><span class={`dot ${p()}`} /><Show when={working(p())}><span class="progress"><i /></span></Show><span class="phase-label">{a().step ? `(${a().step?.index}/${a().step?.total}) ${a().step?.name}` : p().replace("_", " ")}</span><Show when={working(p()) && elapsed() != null}><span class="elapsed">run {duration(elapsed()!)}</span></Show></div>
           <div class="actions">
-            <button class="button primary" disabled={busyApp() || (a().installed && !a().update_available)} onClick={() => setPanel("install")}>{a().installed ? "Update" : "Install"}</button>
+             <Show when={!a().local}><button class="button primary" disabled={busyApp() || (a().installed && !a().update_available)} onClick={() => setPanel("install")}>{a().installed ? "Update" : "Install"}</button></Show>
             <button class="button" disabled={!canStart()} onClick={() => action("start", a())}>Start</button>
             <button class="button" disabled={!canStop()} onClick={() => action("stop", a())}>Stop</button>
             <button class="button" disabled={busyApp() || !a().url} onClick={() => action("open", a())}>Open</button>
