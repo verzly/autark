@@ -382,7 +382,7 @@ export default function App() {
         <section class="setting-row"><div><h2>mise</h2><p>{state().mise.path ?? "not resolved"}{state().mise.version ? ` · ${state().mise.version}` : ""}</p></div><button class="button" disabled={state().busy} onClick={() => { setMiseScreen(true); setSettingsOpen(false); setActive(null); setChooser(false); }}>Change</button></section>
         <section class="preference-section"><h2>Reset Autark</h2><p>Deletes the marketplace clone, runtime tools and every installed app in the Autark folder, then starts the wizard again.</p>
           <Show when={!resetConfirm()}><button class="button" disabled={state().busy} onClick={() => { setResetText(""); setResetConfirm(true); }}>Reset Autark</button></Show>
-          <Show when={resetConfirm()}><div class="inline-panel remove-panel"><p class="danger-note">This deletes every user setting, preference and file inside the Autark folder.</p><label>Type RESET<input value={resetText()} onInput={e => setResetText(e.currentTarget.value)} /></label><div><button class="button" onClick={() => setResetConfirm(false)}>Cancel</button><button class="button primary" disabled={state().busy || resetText() !== "RESET"} onClick={() => { setResetConfirm(false); if (mockMode()) setState(s => ({ ...s, settings: { ...s.settings, wizard_complete: false } })); else { setResetting(true); void run(() => api.resetAutark("RESET")); } }}>Confirm</button></div></div></Show>
+          <Show when={resetConfirm()}><div class="inline-panel remove-panel"><p class="danger-note">This deletes every user setting, preference and file inside the Autark folder.</p><label>Type RESET<input value={resetText()} onInput={e => setResetText(e.currentTarget.value)} /></label><div><button class="button" onClick={() => setResetConfirm(false)}>Cancel</button><button class="button primary" disabled={state().busy || resetText() !== "RESET"} onClick={() => { setResetConfirm(false); setWizardStep(1); if (mockMode()) { setState(s => ({ ...s, settings: { ...s.settings, wizard_complete: false } })); } else { setResetting(true); void run(() => api.resetAutark("RESET")); } }}>Confirm</button></div></div></Show>
         </section>
          <section class="setting-row"><div><h2>Settings file</h2><p>Portable launcher preferences.</p><button class="path" onClick={() => reveal("settings")}>{state().settings_path}</button></div></section>
           <section class="preference-section window-preferences"><h2>Window</h2>
@@ -574,7 +574,8 @@ export default function App() {
       </>}>
       <section class="mise-onboarding">
         <Show when={!state().settings.wizard_complete} fallback={<>
-        <Show when={wizardStep() === 1 && !miseScreen()} fallback={<>
+        <Show when={wizardStep() === 1} fallback={<>
+        <Show when={wizardStep() === 2 && !miseScreen()} fallback={<>
         <div class="empty-mark" aria-hidden="true">autark</div>
         <div><h1>Connect mise</h1><p>Autark runs every app through <button class="inline-link" onClick={() => openUrl("https://github.com/jdx/mise")}>mise</button> and the <code>mise</code> command is not available on this machine.</p></div>
         <section><h2>I already have mise</h2><p>Point Autark at the existing <code>mise.exe</code>.</p><Show when={state().mise.detected.length}><div class="mise-detected" role="list" aria-label="Detected mise"><For each={state().mise.detected}>{entry => <button class={`mise-detected-row ${state().mise.path === entry.path ? "selected" : ""}`} role="listitem" title={entry.path} disabled={busy()} onClick={() => void run(() => pickMise(entry.path))}><span title={entry.path}>{entry.path}</span><small>{calver(entry.version)}</small></button>}</For></div></Show><button class="button" disabled={busy()} onClick={() => void run(async () => { const path = await api.pickFile("Choose mise.exe", "exe"); return path ? api.setMisePath(path) : undefined; })}>Choose another mise.exe</button></section>
@@ -584,7 +585,12 @@ export default function App() {
           <p class="settings-muted">Settings, the marketplace clone, runtime tools and every app live in this folder.</p>
           <button class="path" onClick={() => void chooseRoot()}>{state().settings.root}</button>
           <button class="button" disabled={state().busy} onClick={() => void chooseRoot()}>Choose folder</button>
-          <button class="button primary" onClick={() => { if (!state().mise.available) { setWizardStep(2); return; } if (mockMode()) setState(s => ({ ...s, settings: { ...s.settings, wizard_complete: true } })); else void run(() => api.saveSettings({ ...state().settings, wizard_complete: true }, false)); }}>Next</button>
+          <button class="button primary" onClick={() => { if (!state().mise.available) { setWizardStep(3); return; } if (mockMode()) setState(s => ({ ...s, settings: { ...s.settings, wizard_complete: true } })); else void run(() => api.saveSettings({ ...state().settings, wizard_complete: true }, false)); }}>Next</button>
+        </Show>
+        </>}>
+          <div class="empty-mark" aria-hidden="true">autark</div>
+          <div><h1>Apps stay in their own folder</h1><p>Autark installs apps from a marketplace, each one into its own folder with its own tools. Nothing is installed machine-wide, and every app runs from a tab here.</p></div>
+          <button class="button primary" onClick={() => setWizardStep(2)}>Next</button>
         </Show>
         </>}>
           <div class="empty-mark" aria-hidden="true">autark</div>
