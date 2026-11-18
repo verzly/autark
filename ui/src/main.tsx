@@ -91,6 +91,7 @@ export default function App() {
     onCleanup(() => window.clearInterval(id));
   });
   const logs = () => buffers()[active() ?? ""] ?? [];
+  const miseLogs = () => buffers()["mise.exe"] ?? [];
   const logEntries = () => {
     const lines = logs();
     return lines.flatMap((line, index) => {
@@ -528,7 +529,7 @@ export default function App() {
         <Show when={wizardStep() === 1} fallback={<>
         <div><h1>Connect mise</h1><p>Autark runs every app through <button class="inline-link" onClick={() => openUrl("https://github.com/jdx/mise")}>mise</button> and the <code>mise</code> command is not available on this machine.</p></div>
         <section><h2>I already have mise</h2><p>Point Autark at the existing <code>mise.exe</code>.</p><Show when={state().mise.detected.length}><div class="mise-detected" role="list" aria-label="Detected mise"><For each={state().mise.detected}>{entry => <button class={`mise-detected-row ${state().mise.path === entry.path ? "selected" : ""}`} role="listitem" title={entry.path} disabled={busy()} onClick={() => void run(() => api.setMisePath(entry.path))}><span>{entry.path}</span><small>{calver(entry.version)}</small></button>}</For></div></Show><Show when={state().mise.path}><small class="settings-muted">{state().mise.path}{state().mise.version ? ` · ${state().mise.version}` : ""}</small></Show><button class="button" disabled={busy()} onClick={() => void run(async () => { const path = await api.pickFile("Choose mise.exe", "exe"); return path ? api.setMisePath(path) : undefined; })}>Choose mise.exe</button></section>
-        <section><h2>Install it for Autark</h2><p>Autark downloads mise into its own folder and keeps it there. Nothing is installed machine-wide.</p><button class="button primary" disabled={busy()} onClick={() => void run(() => api.installMise())}>Download mise</button></section>
+        <section><h2>Install it for Autark</h2><p>Autark downloads mise into its own folder and keeps it there. Nothing is installed machine-wide.</p><Show when={miseLogs().length}><small class="mise-progress" title={miseLogs()[miseLogs().length - 1]}>{miseLogs()[miseLogs().length - 1]}</small></Show><button class="button primary" disabled={busy()} onClick={() => void run(() => api.installMise())}>Download mise</button></section>
         <footer><span>Local folder: {state().mise.local_path}{state().mise.force_local ? " · Always use Autark's own mise" : ""}</span><button class="icon-button" aria-label="Change Autark folder" title="Change Autark folder" onClick={() => void chooseRoot()}><Icon name="pencil" /></button></footer>
         <div class="actions"><button class="button" onClick={() => setWizardStep(1)}>Back</button><button class="button primary" disabled={state().busy} onClick={finishWizard}>Finish</button></div>
         </>}>
@@ -542,7 +543,7 @@ export default function App() {
           <div class="empty-mark" aria-hidden="true">autark</div>
           <div><h1>mise is required</h1><p>Autark runs every app through <button class="inline-link" onClick={() => openUrl("https://github.com/jdx/mise")}>mise</button> and the <code>mise</code> command is not available on this machine.</p></div>
           <section><h2>I already have mise</h2><p>Point Autark at the existing <code>mise.exe</code>.</p><Show when={state().mise.detected.length}><div class="mise-detected" role="list" aria-label="Detected mise"><For each={state().mise.detected}>{entry => <button class={`mise-detected-row ${state().mise.path === entry.path ? "selected" : ""}`} role="listitem" title={entry.path} disabled={busy()} onClick={() => void run(() => api.setMisePath(entry.path))}><span>{entry.path}</span><small>{calver(entry.version)}</small></button>}</For></div></Show><Show when={state().mise.path}><small class="settings-muted">{state().mise.path}{state().mise.version ? ` · ${state().mise.version}` : ""}</small></Show><button class="button" disabled={busy()} onClick={() => void run(async () => { const path = await api.pickFile("Choose mise.exe", "exe"); return path ? api.setMisePath(path) : undefined; })}>Choose mise.exe</button></section>
-          <section><h2>Install it for Autark</h2><p>Autark downloads mise into its own folder and keeps it there. Nothing is installed machine-wide.</p><button class="button primary" disabled={busy()} onClick={() => void run(() => api.installMise())}>Download mise</button></section>
+          <section><h2>Install it for Autark</h2><p>Autark downloads mise into its own folder and keeps it there. Nothing is installed machine-wide.</p><Show when={miseLogs().length}><small class="mise-progress" title={miseLogs()[miseLogs().length - 1]}>{miseLogs()[miseLogs().length - 1]}</small></Show><button class="button primary" disabled={busy()} onClick={() => void run(() => api.installMise())}>Download mise</button></section>
           <footer><span>Local folder: {state().mise.local_path}{state().mise.force_local ? " · Always use Autark's own mise" : ""}</span><button class="icon-button" aria-label="Change Autark folder" title="Change Autark folder" onClick={() => void chooseRoot()}><Icon name="pencil" /></button></footer>
         </Show>
       </section>

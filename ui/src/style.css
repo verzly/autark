@@ -117,3 +117,6 @@ a:hover,a:visited:hover{color:#fff;text-decoration-color:#8a8a8a}
 .mise-onboarding{grid-template-columns:repeat(auto-fit,minmax(210px,auto));justify-content:center}
 .mise-detected-row span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
 .mise-detected-row small{text-align:right}
+
+/* mise step: the last download line, kept on one line */
+.mise-progress{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:10.5px var(--mono);color:#8a8a8a}
