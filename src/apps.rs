@@ -4,6 +4,7 @@ use crate::{
     marketplace,
     local,
     settings::{self, Settings},
+    tools::{self, MiseInfo},
 };
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -315,6 +316,7 @@ pub struct State {
     pub apps: Vec<AppState>,
     pub operations: Vec<Operation>,
     pub busy: bool,
+    pub mise: MiseInfo,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -327,6 +329,7 @@ pub struct Core {
     pub settings: Settings,
     pub records: Vec<AppRecord>,
     pub marketplace: MarketplaceInfo,
+    pub mise: MiseInfo,
 }
 
 pub struct Shared {
@@ -341,6 +344,7 @@ impl Shared {
         let root = settings.root_path();
         let mut core = Core {
             settings: settings.clone(),
+            mise: tools::probe(&settings),
             records: Vec::new(),
             marketplace: MarketplaceInfo {
                 path: marketplace::dir(&root).to_string_lossy().to_string(),
@@ -488,6 +492,7 @@ pub fn wire(shared: &Shared) -> State {
         apps: core.records.iter().map(AppRecord::wire).collect(),
         operations,
         busy,
+        mise: core.mise.clone(),
     }
 }
 
@@ -671,6 +676,7 @@ pub fn setup(app: &AppHandle, shared: &Shared, id: &str, kind: SetupKind) -> Res
     ] {
         fs::create_dir_all(runtime.join(sub))?;
     }
+    fs::create_dir_all(tools::bin_dir(&root))?;
     for sub in [
         "app",
         "user-data/roaming",
@@ -910,37 +916,13 @@ fn read_app_version(
 }
 
 fn mise_command(root: &Path, force_local: bool) -> Command {
-    let local = root.join("runtime").join("bin").join("mise.exe");
-    let program = if force_local {
-        if local.exists() {
-            local
-        } else {
-            PathBuf::from("mise")
-        }
-    } else if let Some(binary) = std::env::var_os("MISE_BIN") {
-        PathBuf::from(binary)
-    } else if local.exists() {
-        local
-    } else {
-        PathBuf::from("mise")
-    };
-    Command::new(program)
+    let settings = Settings { root: root.to_string_lossy().to_string(), force_local_mise: force_local, ..Settings::load_or_default() };
+    Command::new(tools::resolve(&settings, root).unwrap_or_else(|| PathBuf::from("mise")))
 }
 
 fn mise_available(root: &Path, force_local: bool) -> bool {
-    let mut command = mise_command(root, force_local);
-    command.arg("--version");
-    let runtime = root.join("runtime");
-    command
-        .env("MISE_DATA_DIR", runtime.join("mise-data"))
-        .env("MISE_CONFIG_DIR", runtime.join("mise-config"))
-        .env("MISE_CACHE_DIR", runtime.join("mise-cache"))
-        .env("MISE_STATE_DIR", runtime.join("mise-state"))
-        .env("MISE_TMP_DIR", runtime.join("tmp"));
-    command
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+    let settings = Settings { root: root.to_string_lossy().to_string(), force_local_mise: force_local, ..Settings::load_or_default() };
+    tools::probe(&settings).available
 }
 
 fn ensure_mise(app: &AppHandle, id: &str, root: &Path, force_local: bool) -> Result<()> {
@@ -951,32 +933,16 @@ fn ensure_mise(app: &AppHandle, id: &str, root: &Path, force_local: bool) -> Res
         bail!("invalid_argument: MISE_BIN does not point to a working mise");
     }
     log(app, id, "mise was not found, downloading a local copy");
-    let bin_dir = root.join("runtime").join("bin");
-    fs::create_dir_all(&bin_dir)?;
-    let target = bin_dir.join("mise.exe");
-    let target_arg = target.to_string_lossy().replace('\'', "''");
-    let script = format!(
-        "$ErrorActionPreference = 'Stop'\n\
-         $ProgressPreference = 'SilentlyContinue'\n\
-         $headers = @{{ 'User-Agent' = 'autark' }}\n\
-         $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/jdx/mise/releases/latest' -Headers $headers\n\
-         $asset = $release.assets | Where-Object {{ $_.name -like '*windows-x64.exe' }} | Select-Object -First 1\n\
-         if (-not $asset) {{ throw 'no windows-x64 asset in the latest mise release' }}\n\
-         Invoke-WebRequest -Uri $asset.browser_download_url -OutFile '{target_arg}' -Headers $headers\n"
-    );
-    let mut command = Command::new("powershell");
-    command.args([
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        &script,
-    ]);
-    run_streaming(app, id, "downloading mise".to_string(), command)?;
-    if !mise_available(root, true) {
-        bail!("internal: the downloaded mise binary does not run");
-    }
-    Ok(())
+    tools::install_local(app, id, root)
+}
+
+pub fn run_tool_streaming(app: &AppHandle, id: &str, label: String, command: Command) -> Result<()> {
+    run_streaming(app, id, label, command)
+}
+
+pub fn refresh_mise(shared: &Arc<Shared>) {
+    let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
+    core.mise = tools::probe(&core.settings);
 }
 
 fn apply_environment(
@@ -1680,9 +1646,11 @@ pub fn update_all(app: &AppHandle, shared: &Arc<Shared>) -> Result<()> {
 }
 
 pub fn reload_settings(shared: &Shared, settings: Settings) -> Result<()> {
-    let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
-    core.settings = settings;
-    load_catalogue(&mut core);
+    {
+        let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
+        core.settings = settings;
+        load_catalogue(&mut core);
+    }
     Ok(())
 }
 

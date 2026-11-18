@@ -11,6 +11,7 @@ apps that are described by the marketplace (see `docs/marketplace-v1.md`). Autar
 <root>/marketplace/                  git clone of verzly/autark-marketplace
 <root>/local-apps/<key>/             user-supplied app.json and optional icon
 <root>/runtime/mise-data|mise-config|mise-cache|mise-state|tmp|bin
+<root>/bin/                         Autark-owned portable binaries, including mise.exe
 <root>/apps/<id>/app.json            manifest snapshot copied at install time
 <root>/apps/<id>/installed.json      { "version": "recipe", "app_version": "real", "installed_at": 0 }
 <root>/apps/<id>/settings.json       per-app user settings
@@ -23,6 +24,12 @@ apps that are described by the marketplace (see `docs/marketplace-v1.md`). Autar
 
 `launcher-root.json` lives next to the exe when that folder is writable, otherwise in
 `%LOCALAPPDATA%/Autark/`. Everything else moves with `root`.
+
+Autark owns binaries in `<root>/bin`; it does not install tools machine-wide. Mise resolution prefers
+`<root>/bin/mise.exe`, then legacy `<root>/runtime/bin/mise.exe`, then an existing `Settings.mise_path`,
+`MISE_BIN`, and `mise` on PATH. `force_local_mise` prevents fallback when no local binary exists.
+`Settings.bin_in_path` records the requested registration; `State.mise.bin_in_path` reports actual HKCU PATH state.
+`State.mise` includes availability, source, path, version, local/bin paths, built-in binary entries, and force-local state.
 
 When an app runs, its environment is scoped like this:
 
@@ -63,6 +70,12 @@ Commands (`invoke`, snake_case args):
 | --- | --- | --- |
 | `get_state` | — | `State` |
 | `save_settings` | `settings`, `move_folder?` | `State` |
+| `reset_autark` | `confirm` | `State`; requires typed word `RESET`, deletes everything inside Autark root, and reopens wizard |
+| `set_mise_path` | `path: string \| null` | `State` |
+| `install_mise` | — | `State` |
+| `update_mise` | — | `State` |
+| `set_bin_path` | `enabled: bool` | `State` |
+| `remove_bin_entry` | `name` | `State` |
 | `pick_directory` | `target: "root_parent"` | `string \| null` |
 | `pick_file` | `title` | `string \| null` |
 | `add_local_app` | `path` | `State` |
@@ -104,12 +117,15 @@ interface Settings {
   root: string;
   folder_name: string;
   force_local_mise: boolean;
+  mise_path: string | null;
+  bin_in_path: boolean;
   open_tabs: string[];          // app ids, tab strip order
   active_tab: string | null;
   tray_enabled: boolean;
   start_with_windows: boolean;
   close_to_tray: boolean;
   experimental_local_apps: boolean;
+  wizard_complete: boolean;
 }
 
 interface AppSetting { key: string; label: string; kind: "text" | "number" | "port" | "boolean" | "path"; default: unknown; help?: string | null }
@@ -153,6 +169,7 @@ interface State {
   apps: AppState[];              // catalogue order, includes not-installed apps
   operation: { app_id: string; kind: string } | null;
   busy: boolean;                 // any operation running, including update_all
+  mise: { available: boolean; source: string; path: string | null; version: string | null; local_path: string; bin_path: string; bin_in_path: boolean; bin: { name: string; path: string; version: string | null; size: number }[]; force_local: boolean };
 }
 ```
 
@@ -171,7 +188,7 @@ interface State {
 - The `+` chooser lists installed apps first, then marketplace apps; a marketplace app that is not installed
   gets a tab with the Install action.
 - Closing hides to tray only when `close_to_tray` and `tray_enabled` are both true; otherwise it stops every child and exits.
-- Tray can show/focus Autark or stop all children and quit. `start_with_windows` adds an HKCU Run entry only when tray is enabled; this is Autark's only registry write.
+- Tray can show/focus Autark or stop all children and quit. `start_with_windows` adds an HKCU Run entry only when tray is enabled. Optional PATH registration adds only `<root>/bin` to the HKCU user PATH; these are Autark's only registry writes.
 - CLI accepts `--app <id>`, `--start`, and `--background`. Shortcuts launch Autark with these flags from per-app preferences.
 
 ## UI contract

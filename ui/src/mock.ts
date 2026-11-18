@@ -1,8 +1,9 @@
 import type { State } from "./bridge";
 const common = { settings: {}, settings_schema: [], settings_locked: [], prefs: { auto_start: false, shortcut_autostart: false, shortcut_background: false }, actions: [], can_start: true, homepage: "https://github.com/verzly/autark", license: "MIT", icon_path: null, icon_data: null, version_app: null, requirements: { disk_gb: 2, webview2: true }, last_error: null, step: null, started_at: null, elapsed_secs: null, local: false };
 export const previewState: State = {
-  settings: { root: "D:\\Portable\\Autark", folder_name: "Autark", force_local_mise: true, open_tabs: ["unsloth-studio", "cognee"], active_tab: "unsloth-studio", tray_enabled: false, start_with_windows: false, close_to_tray: false, experimental_local_apps: false },
+  settings: { root: "D:\\Portable\\Autark", folder_name: "Autark", force_local_mise: true, animations: true, open_tabs: ["unsloth-studio", "cognee"], active_tab: "unsloth-studio", tray_enabled: false, start_with_windows: false, close_to_tray: false, experimental_local_apps: false, wizard_complete: true },
   settings_path: "D:\\Portable\\Autark\\launcher-settings.json", settings_exists: true,
+  mise: { available: true, source: "local", path: "C:\\Portable\\Autark\\bin\\mise.exe", version: "2026.11.1", local_path: "C:\\Portable\\Autark\\bin\\mise.exe", bin_path: "C:\\Portable\\Autark\\bin", bin_in_path: false, bin: [{ name: "mise.exe", path: "C:\\Portable\\Autark\\bin\\mise.exe", version: "2026.11.1", size: 41231360 }], detected: [{ path: "C:\\Program Files\\mise\\mise.exe", version: "2026.11.2" }], force_local: false },
   marketplace: { path: "D:\\Portable\\Autark\\marketplace", url: "https://github.com/verzly/autark-marketplace", exists: true, refreshing: false, last_refresh: 1794931200, error: null },
   busy: false, operations: [],
   apps: [

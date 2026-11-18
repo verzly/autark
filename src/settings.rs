@@ -15,6 +15,8 @@ pub struct Settings {
     pub root: String,
     pub folder_name: String,
     pub force_local_mise: bool,
+    pub mise_path: Option<String>,
+    pub bin_in_path: bool,
     pub open_tabs: Vec<String>,
     pub active_tab: Option<String>,
     pub marketplace_last_refresh: Option<u64>,
@@ -22,6 +24,15 @@ pub struct Settings {
     pub start_with_windows: bool,
     pub close_to_tray: bool,
     pub experimental_local_apps: bool,
+    /// Whether the first-run wizard has been completed.
+    pub wizard_complete: bool,
+    /// Whether interface animations run. Off means a cheaper, static UI.
+    #[serde(default = "default_animations")]
+    pub animations: bool,
+}
+
+fn default_animations() -> bool {
+    true
 }
 
 impl Default for Settings {
@@ -30,6 +41,8 @@ impl Default for Settings {
             root: default_root().to_string_lossy().to_string(),
             folder_name: DEFAULT_FOLDER_NAME.to_string(),
             force_local_mise: false,
+            mise_path: None,
+            bin_in_path: false,
             open_tabs: Vec::new(),
             active_tab: None,
             marketplace_last_refresh: None,
@@ -37,6 +50,8 @@ impl Default for Settings {
             start_with_windows: false,
             close_to_tray: false,
             experimental_local_apps: false,
+            wizard_complete: false,
+            animations: true,
         }
     }
 }
@@ -54,12 +69,34 @@ impl Settings {
         PathBuf::from(self.root.trim())
     }
 
+    /// A folder picked in the dialog is the parent: Autark keeps its files in `<picked>\<folder name>`.
+    /// Returns the new `root` and `folder_name`; picking a folder already named that way keeps it as is.
+    pub fn adopt_picked_folder(picked: &str, folder_name: &str) -> (String, String) {
+        let trimmed = folder_name.trim();
+        let name = if trimmed.is_empty() {
+            DEFAULT_FOLDER_NAME
+        } else {
+            trimmed
+        };
+        let picked = PathBuf::from(picked.trim());
+        let already_named = picked
+            .file_name()
+            .and_then(|part| part.to_str())
+            .is_some_and(|part| part.eq_ignore_ascii_case(name));
+        let root = if already_named {
+            picked
+        } else {
+            picked.join(name)
+        };
+        (root.to_string_lossy().to_string(), name.to_string())
+    }
+
     pub fn save(&self) -> Result<()> {
         let root = self.root_path();
         fs::create_dir_all(&root)
             .with_context(|| format!("cannot create root folder {}", root.display()))?;
         let text = serde_json::to_string_pretty(self)?;
-        fs::write(settings_path(), text).context("cannot write launcher-settings.json")?;
+        fs::write(root.join("launcher-settings.json"), text).context("cannot write launcher-settings.json")?;
         write_pointer(&root)?;
         Ok(())
     }
@@ -161,4 +198,22 @@ pub fn write_pointer(root: &Path) -> Result<()> {
         "root": root.to_string_lossy(),
     }))?;
     fs::write(path, text).context("cannot write launcher-root.json")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Settings;
+
+    #[test]
+    fn a_picked_folder_becomes_the_parent_of_the_root() {
+        let (root, name) = Settings::adopt_picked_folder(r"D:\program", "Autark");
+        assert_eq!(root, r"D:\program\Autark");
+        assert_eq!(name, "Autark");
+    }
+
+    #[test]
+    fn a_picked_folder_already_named_autark_is_the_root() {
+        let (root, _) = Settings::adopt_picked_folder(r"D:\program\autark", "");
+        assert_eq!(root, r"D:\program\autark");
+    }
 }

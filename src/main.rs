@@ -6,6 +6,7 @@ mod marketplace;
 mod local;
 mod prefs;
 mod settings;
+mod tools;
 
 use apps::{Phase, SetupKind, Shared, State};
 use prefs::Prefs;
@@ -102,7 +103,83 @@ fn get_state(shared: TauriState<'_, Arc<Shared>>) -> State {
 }
 
 #[tauri::command(rename_all = "snake_case")]
-fn save_settings(
+async fn set_mise_path(app: AppHandle, shared: TauriState<'_, Arc<Shared>>, path: Option<String>) -> CmdResult<State> {
+    let inner = shared.inner().clone();
+    let check_path = path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(path) = check_path {
+            let path = std::path::PathBuf::from(path);
+            if !path.is_file() || std::process::Command::new(&path).arg("--version").output().map(|o| !o.status.success()).unwrap_or(true) {
+                return Err(CmdError::new("invalid_argument", "that file does not run as mise"));
+            }
+        }
+        Ok::<(), CmdError>(())
+    }).await.map_err(|e| CmdError::new("internal", e.to_string()))??;
+    {
+        let mut settings = inner.plugin_settings();
+        settings.mise_path = path;
+        settings.save()?;
+        apps::reload_settings(&inner, settings)?;
+    }
+    apps::refresh_mise(&inner);
+    let _ = app;
+    Ok(apps::wire(&inner))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn install_mise(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> CmdResult<State> {
+    let inner = shared.inner().clone();
+    let root = inner.root();
+    tauri::async_runtime::spawn_blocking(move || tools::install_local(&app, "mise.exe", &root)).await.map_err(|e| CmdError::new("internal", e.to_string()))??;
+    apps::refresh_mise(&inner);
+    Ok(apps::wire(&inner))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn update_mise(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> CmdResult<State> {
+    let inner = shared.inner().clone();
+    let root = inner.root();
+    tauri::async_runtime::spawn_blocking(move || tools::self_update(&app, "mise.exe", &root)).await.map_err(|e| CmdError::new("internal", e.to_string()))??;
+    apps::refresh_mise(&inner);
+    Ok(apps::wire(&inner))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn set_bin_path(shared: TauriState<'_, Arc<Shared>>, enabled: bool) -> CmdResult<State> {
+    let inner = shared.inner().clone();
+    let root = inner.root();
+    let actual = tauri::async_runtime::spawn_blocking(move || tools::set_path_registration(&root, enabled)).await.map_err(|e| CmdError::new("internal", e.to_string()))??;
+    let mut settings = inner.plugin_settings();
+    settings.bin_in_path = actual;
+    settings.save()?;
+    apps::reload_settings(&inner, settings)?;
+    apps::refresh_mise(&inner);
+    Ok(apps::wire(&inner))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn remove_bin_entry(shared: TauriState<'_, Arc<Shared>>, name: String) -> CmdResult<State> {
+    let inner = shared.inner().clone();
+    if operation_running(&inner) { return Err(CmdError::new("operation_in_progress", "another operation is running")); }
+    if name.starts_with('.') || name.contains('/') || name.contains('\\') { return Err(CmdError::new("invalid_argument", "invalid binary name")); }
+    let mut settings = inner.plugin_settings();
+    let path = std::path::PathBuf::from(&name);
+    let root = settings.root_path();
+    let target = tools::bin_dir(&root).join(path);
+    let removed = target.clone();
+    tauri::async_runtime::spawn_blocking(move || std::fs::remove_file(target)).await.map_err(|e| CmdError::new("internal", e.to_string()))?.map_err(anyhow::Error::from)?;
+    // A removed copy must not stay selected, otherwise mise looks broken.
+    if settings.mise_path.as_deref().map(std::path::Path::new) == Some(removed.as_path()) {
+        settings.mise_path = None;
+        settings.save()?;
+        apps::reload_settings(&inner, settings)?;
+    }
+    apps::refresh_mise(&inner);
+    Ok(apps::wire(&inner))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn save_settings(
     app: AppHandle,
     shared: TauriState<'_, Arc<Shared>>,
     mut settings: Settings,
@@ -120,17 +197,77 @@ fn save_settings(
             "finish the running operation first",
         ));
     }
-    let current = apps::wire(&shared).settings;
-    settings.open_tabs = current.open_tabs;
-    settings.active_tab = current.active_tab;
+    let inner = shared.inner().clone();
+    let current = apps::wire(&inner).settings;
+    settings.open_tabs = current.open_tabs.clone();
+    settings.active_tab = current.active_tab.clone();
     settings.marketplace_last_refresh = current.marketplace_last_refresh;
-    settings.apply_folder_name(move_folder.unwrap_or(false))?;
-    settings.save()?;
-    apps::reload_settings(&shared, settings)?;
-    reconcile_tray(&app, &apps::wire(&shared).settings);
-    apply_startup(&app, &apps::wire(&shared).settings);
-    apps::emit_state(&app, &shared);
-    Ok(apps::wire(&shared))
+    settings.wizard_complete |= current.wizard_complete;
+    // The folder dialog returns the parent, so a new root means <picked>\<folder name>.
+    let picked = settings.root_path();
+    if picked != current.root_path() {
+        let (root, folder_name) =
+            Settings::adopt_picked_folder(&settings.root, &settings.folder_name);
+        settings.root = root;
+        settings.folder_name = folder_name;
+    }
+    let mise_changed = settings.mise_path != current.mise_path
+        || settings.force_local_mise != current.force_local_mise
+        || settings.bin_in_path != current.bin_in_path;
+    let task_shared = inner.clone();
+    tauri::async_runtime::spawn_blocking(move || -> CmdResult<()> {
+        settings.apply_folder_name(move_folder.unwrap_or(false))?;
+        settings.save()?;
+        apps::reload_settings(&task_shared, settings)?;
+        if mise_changed {
+            apps::refresh_mise(&task_shared);
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| CmdError::new("internal", e.to_string()))??;
+    let state = apps::wire(&inner);
+    reconcile_tray(&app, &state.settings);
+    apply_startup(&app, &state.settings);
+    apps::emit_state(&app, &inner);
+    Ok(state)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn reset_autark(
+    _app: AppHandle,
+    shared: TauriState<'_, Arc<Shared>>,
+    confirm: String,
+) -> CmdResult<State> {
+    if confirm != "RESET" {
+        return Err(CmdError::new("confirm_required", "type RESET to confirm"));
+    }
+    let inner = shared.inner().clone();
+    if operation_running(&inner) {
+        return Err(CmdError::new("operation_in_progress", "another operation is running"));
+    }
+    let task_shared = inner.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        apps::stop_all(&task_shared);
+        let settings = task_shared.plugin_settings();
+        let root = settings.root_path();
+        let had_path = settings.bin_in_path;
+        // A reset forgets the folder as well: the next run starts from the wizard intro.
+        if root.exists() {
+            let _ = std::fs::remove_dir_all(&root);
+        }
+        let fresh = Settings::default();
+        fresh.save()?;
+        if had_path {
+            let _ = tools::set_path_registration(&root, false);
+        }
+        apps::reload_settings(&task_shared, fresh)?;
+        apps::refresh_mise(&task_shared);
+        Ok::<(), CmdError>(())
+    })
+    .await
+    .map_err(|e| CmdError::new("internal", e.to_string()))??;
+    Ok(apps::wire(&inner))
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -148,11 +285,10 @@ fn pick_directory(target: String) -> Option<String> {
 }
 
 #[tauri::command(rename_all = "snake_case")]
-async fn pick_file(title: String) -> Result<Option<String>, CmdError> {
-    Ok(rfd::FileDialog::new()
-        .set_title(title)
-        .add_filter("App manifest", &["json"])
-        .pick_file()
+async fn pick_file(title: String, kind: Option<String>) -> Result<Option<String>, CmdError> {
+    let dialog = rfd::FileDialog::new().set_title(title);
+    let dialog = if kind.as_deref() == Some("exe") { dialog.add_filter("Executable", &["exe"]) } else { dialog.add_filter("App manifest", &["json"]) };
+    Ok(dialog.pick_file()
         .map(|path| path.to_string_lossy().to_string()))
 }
 
@@ -531,12 +667,16 @@ fn reveal_path(
     shared: TauriState<'_, Arc<Shared>>,
     target: String,
     app_id: Option<String>,
+    path: Option<String>,
 ) -> CmdResult<()> {
     let root = shared.root();
     let path = match target.as_str() {
         "root" => root.clone(),
         "marketplace" => marketplace::dir(&root),
         "settings" => settings::settings_path(),
+        "file" => std::path::PathBuf::from(
+            path.ok_or_else(|| CmdError::new("invalid_argument", "path is required"))?,
+        ),
         "app" => {
             let id = app_id
                 .clone()
@@ -551,7 +691,7 @@ fn reveal_path(
         }
     };
     let mut command = std::process::Command::new("explorer");
-    if target == "settings" && path.exists() {
+    if (target == "settings" || target == "file") && path.exists() {
         command.arg(format!("/select,{}", path.display()));
     } else {
         command.arg(&path);
@@ -610,6 +750,12 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_state,
             save_settings,
+            reset_autark,
+            set_mise_path,
+            install_mise,
+            update_mise,
+            set_bin_path,
+            remove_bin_entry,
             pick_directory,
             pick_file,
             add_local_app,

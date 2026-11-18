@@ -58,3 +58,143 @@
 .market-filter:disabled{opacity:.4;cursor:default}
 .local-tag{background:#242424;color:#b9b9b9;font-size:11px;padding:2px 8px;border-radius:999px}
 .settings-view{min-height:100%}.settings-content{flex:1 1 auto}
+.builtin-content{display:flex;flex-direction:column;gap:16px}.mise-panel{display:flex;flex-direction:column;align-items:flex-start;gap:11px;padding-bottom:4px}.mise-panel p{margin:0;overflow-wrap:anywhere;font:11px var(--mono);color:#858585}.mise-panel .preference-toggle small{overflow-wrap:anywhere}.market-card .local-tag{background:#242424;color:#b9b9b9;font-size:11px;padding:2px 8px;border-radius:999px}.market-card .market-actions{align-items:center;flex-wrap:wrap}.market-card .confirm-strip{flex-wrap:wrap}.marketplace-load{color:#929292;font-size:12px;line-height:1.5}
+.links button,.about button,.metadata button,.market-links button,.output-head button,.group-heading button,.path{color:#8fb2da;text-decoration-color:#3f5570}.links button:hover,.about button:hover,.metadata button:hover,.market-links button:hover,.output-head button:hover,.group-heading button:hover,.path:hover{color:#cfe1f6;text-decoration-color:#6d8cb5}
+
+/* Typography: calmer headings, muted body copy, tighter rhythm */
+h1{font-size:22px;font-weight:600;letter-spacing:-.02em;line-height:1.25;margin:0}
+h2{font-size:13px;font-weight:600;line-height:1.35;margin:0;color:#e6e6e6}
+p{font-size:12.5px;line-height:1.55;margin:0;color:#a2a2a2}
+.preference-section{gap:9px}
+.preference-section p{max-width:64ch}
+.mise-onboarding .empty-mark{align-self:center;padding:2px 0 20px}
+
+/* Blocking mise screen: centered column with OpenCode-style rhythm */
+.mise-onboarding{display:flex;flex:1;flex-direction:column;align-items:center;gap:26px;width:100%;max-width:520px;margin:0 auto;padding:44px 0 32px;text-align:center}
+.mise-onboarding>div{display:flex;flex-direction:column;align-items:center;gap:10px}
+.mise-onboarding section{display:flex;flex-direction:column;align-items:center;gap:9px;width:100%;max-width:420px;padding-top:22px}
+.mise-onboarding section p{max-width:44ch}
+.mise-onboarding footer{max-width:420px;overflow-wrap:anywhere;color:#7e7e7e;font-size:11px;line-height:1.6}
+
+/* Links: neutral OpenCode-style tone, never the browser default blue/purple */
+a,a:visited{color:#cfcfcf;text-decoration:underline;text-decoration-color:#444;text-underline-offset:2px}
+a:hover,a:visited:hover{color:#fff;text-decoration-color:#8a8a8a}
+.links button,.about button,.metadata button,.market-links button,.output-head button,.group-heading button,.path{color:#cfcfcf;text-decoration-color:#444}
+.links button:hover,.about button:hover,.metadata button:hover,.market-links button:hover,.output-head button:hover,.group-heading button:hover,.path:hover{color:#fff;text-decoration-color:#8a8a8a}
+
+/* Inline links inside copy: a button, because the webview does not hand off anchors */
+.inline-link{padding:0;border:0;background:none;font:inherit;color:#cfcfcf;text-decoration:underline;text-decoration-color:#444;text-underline-offset:2px;cursor:pointer}
+.inline-link:hover{color:#fff;text-decoration-color:#8a8a8a}
+
+/* mise choices: two columns when the window allows, one when narrow */
+.mise-onboarding{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:20px;align-content:start;justify-items:center}
+.mise-onboarding>*{grid-column:1/-1;max-width:520px}
+.mise-onboarding>section{grid-column:auto;width:100%;max-width:none;padding:18px 16px 6px;border-radius:10px;background:#141414}
+/* mise choices: no block backgrounds, rows aligned to the top */
+.mise-onboarding{align-items:start}
+.mise-onboarding>section{grid-column:auto;width:100%;max-width:none;align-self:start;padding:0;background:none;border-radius:0}
+/* mise choices: room above and below the row, buttons pinned to its bottom */
+.mise-onboarding{align-items:stretch;grid-auto-rows:min-content}
+.mise-onboarding>section{display:flex;flex-direction:column;align-items:center;gap:10px;margin:26px 0}
+.mise-onboarding>section .button{margin-top:auto}
+.mise-onboarding footer .icon-button{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:0;border-radius:5px;background:transparent;color:#8a8a8a;cursor:pointer;vertical-align:-6px}
+.mise-onboarding footer .icon-button:hover{background:#1a1a1a;color:#eee}
+.mise-onboarding footer .icon-button svg{width:13px;height:13px}
+/* mise choices: both cells match the tallest, so their buttons share one row */
+.mise-onboarding>section{align-self:stretch}
+/* footer: pencil and path share one line box, centres aligned */
+.mise-onboarding footer{display:flex;align-items:center;justify-content:center;gap:7px;flex-wrap:wrap}
+.mise-onboarding footer .icon-button{vertical-align:0;align-self:center;line-height:1;flex:none}
+
+/* mise step: detected mise.exe entries, one click each */
+.mise-detected{display:flex;flex-direction:column;gap:4px;width:100%}
+.mise-detected-row{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;padding:7px 9px;border:0;border-radius:7px;background:#151515;color:#cfcfcf;font:11px var(--mono);text-align:left;cursor:pointer}
+.mise-detected-row:hover{background:#1d1d1d;color:#fff}
+.mise-detected-row.selected{background:#222;color:#fff}
+.mise-detected-row small{flex:none;color:#8a8a8a;font-size:10px}
+
+/* mise screen: grid tracks hug their content and stay centred inside the column */
+.mise-onboarding{grid-template-columns:repeat(auto-fit,minmax(210px,auto));justify-content:center}
+.mise-detected-row span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+.mise-detected-row small{text-align:right}
+
+/* mise step: the last download line, kept on one line */
+.mise-progress{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:10.5px var(--mono);color:#8a8a8a}
+
+/* mise step: real download progress, and the picked option marked */
+.mise-bar{width:100%;height:5px;border-radius:999px;background:#242424;overflow:hidden}
+.mise-bar span{display:block;height:100%;border-radius:999px;background:#bfbfbf;transition:width .2s}
+
+/* mise step: the local record carries its own remove button */
+.mise-detected-row .mise-pick{display:flex;flex:1;min-width:0;align-items:center;justify-content:space-between;gap:10px;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.mise-detected-row .icon-button{display:inline-flex;flex:none;align-items:center;justify-content:center;width:20px;height:20px;padding:0;border:0;border-radius:4px;background:transparent;color:#8a8a8a;cursor:pointer}
+.mise-detected-row .icon-button:hover{background:#262626;color:#fff}
+.mise-detected-row .icon-button svg{width:12px;height:12px}
+
+/* autark wordmark: slow sheen, like the opencode wordmark */
+.empty-mark{background:linear-gradient(90deg,#242424 0%,#242424 40%,#8a8a8a 47%,#e8e8e8 50%,#8a8a8a 53%,#242424 60%,#242424 100%);background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:empty-mark-sheen 7s linear infinite}
+@keyframes empty-mark-sheen{0%{background-position:0% 0}28.6%{background-position:100% 0}100%{background-position:100% 0}}
+@media (prefers-reduced-motion:reduce){.empty-mark{animation:none;background:none;color:#242424;-webkit-text-fill-color:currentColor}}
+
+/* mise step: full-card loading screen while a pick or download settles */
+.mise-loading{position:fixed;inset:0;z-index:80;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:24px;background:var(--card);text-align:center}
+.mise-loading .mise-bar{width:min(260px,100%)}
+
+/* Display settings: Performance turns the wordmark animation off */
+.no-animation .empty-mark{animation:none;background:none;color:#242424;-webkit-text-fill-color:currentColor}
+
+/* built-in card: a machine mise cannot be managed here */
+.market-unavailable{margin:0;color:#d4685f;font-size:10.5px;line-height:1.4}
+
+/* danger copy inside a confirmation panel */
+.danger-note{margin:0;color:#d4685f;font-size:11px;line-height:1.45}
+
+/* confirmation panels stack their parts instead of running them together */
+.inline-panel.remove-panel{display:flex;flex-direction:column;align-items:stretch;gap:10px}
+
+/* note tones: red danger, yellow warning, blue info */
+.danger-note{color:#d4685f}
+.warning-note{margin:0;color:#d8b25f;font-size:11px;line-height:1.45}
+.info-note{margin:0;color:#8fb2da;font-size:11px;line-height:1.45}
+
+/* loading screens lock the page behind them */
+body.is-loading{overflow:hidden}
+
+/* wizard intro: left aligned cards, no borders */
+.intro-list{display:flex;flex-direction:column;gap:9px;width:100%;text-align:left}
+.intro-card{padding:12px 14px;border-radius:9px;background:#151515}
+.intro-card h2{margin:0 0 4px}
+.intro-card p{margin:0;color:#a2a2a2;font-size:12px;line-height:1.5}
+
+/* wizard intro: wide, quiet prose instead of stacked cards */
+.mise-onboarding{max-width:660px;padding:34px 0 28px}
+.mise-onboarding>*{max-width:660px}
+.intro-copy{display:flex;flex-direction:column;gap:12px;width:100%;text-align:left}
+.intro-copy p{margin:0;color:#b0b0b0;font-size:13px;line-height:1.6}
+
+/* folder step: the path and its edit pencil share one row */
+.path-row{display:flex;flex-wrap:nowrap;align-items:center;justify-content:center;gap:7px;width:100%;min-width:0}
+.path-row .path{flex:1 1 auto;width:auto;max-width:100%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.path-row .icon-button{display:inline-flex;flex:none;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:0;border-radius:5px;background:transparent;color:#8a8a8a;cursor:pointer}
+.path-row .icon-button:hover{background:#1a1a1a;color:#eee}
+.path-row .icon-button svg{width:13px;height:13px}
+
+/* folder path: text and pencil in one button, so they never wrap apart */
+.path-edit{display:inline-flex;align-items:center;gap:7px;max-width:100%;white-space:nowrap}
+.path-edit svg{flex:none;width:13px;height:13px;color:#8a8a8a}
+.path-edit:hover svg{color:#eee}
+
+/* folder path: never let the text clip its pencil */
+.path-edit{overflow:visible}
+.path-edit span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* folder path: same pencil chip as the rest of the app, kept right of the path */
+.path-edit{text-decoration:none}
+.path-edit:hover{text-decoration:none}
+.path-edit .icon-button{display:inline-flex;flex:none;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:0;border-radius:5px;background:transparent;color:#8a8a8a;line-height:1;cursor:pointer}
+.path-edit .icon-button:hover{background:#1a1a1a;color:#eee}
+.path-edit .icon-button svg{width:13px;height:13px}
+
+/* built-in mise: the external mise is a link, not a path row */
+.market-unavailable .inline-link{font-family:var(--mono);font-size:10.5px;color:#d4685f;text-decoration-color:rgba(212,104,95,.45);overflow-wrap:anywhere;text-align:left}
+.market-unavailable .inline-link:hover{color:#f08a80;text-decoration-color:#f08a80}

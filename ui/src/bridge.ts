@@ -1,5 +1,8 @@
 export type Phase = "not_installed" | "installing" | "installed" | "starting" | "running" | "stopping" | "updating" | "removing" | "failed";
-export interface Settings { root: string; folder_name: string; force_local_mise: boolean; open_tabs: string[]; active_tab: string | null; tray_enabled: boolean; start_with_windows: boolean; close_to_tray: boolean; experimental_local_apps: boolean }
+export interface Settings { root: string; folder_name: string; force_local_mise: boolean; animations: boolean; open_tabs: string[]; active_tab: string | null; tray_enabled: boolean; start_with_windows: boolean; close_to_tray: boolean; experimental_local_apps: boolean; wizard_complete: boolean }
+export interface BinEntry { name: string; path: string; version: string | null; size: number }
+export interface DetectedMise { path: string; version: string | null }
+export interface MiseInfo { available: boolean; source: string; path: string | null; version: string | null; local_path: string; bin_path: string; bin_in_path: boolean; bin: BinEntry[]; detected: DetectedMise[]; force_local: boolean }
 export interface AppSetting { key: string; label: string; kind: "text" | "number" | "port" | "boolean" | "path"; default: unknown; help?: string | null }
 export interface AppAction { id: string; label: string; confirm: boolean }
 export interface SettingsLock { key: string; var: string; value: string }
@@ -15,7 +18,7 @@ export interface AppState {
 export interface State {
   settings: Settings; settings_path: string; settings_exists: boolean;
   marketplace: { path: string; url: string; exists: boolean; refreshing: boolean; last_refresh: number | null; error: { code: string; message: string } | null };
-  apps: AppState[]; operations: { app_id: string; kind: string }[]; busy: boolean;
+  apps: AppState[]; operations: { app_id: string; kind: string }[]; busy: boolean; mise: MiseInfo;
 }
 export const mockMode = () => import.meta.env.DEV && !("__TAURI_INTERNALS__" in window);
 const isTauri = () => "__TAURI_INTERNALS__" in window;
@@ -28,7 +31,12 @@ export const api = {
   getState: () => invoke<State>("get_state"),
   saveSettings: (settings: Settings, moveFolder?: boolean) => invoke<State>("save_settings", { settings, ...(moveFolder === undefined ? {} : { move_folder: moveFolder }) }),
   pickDirectory: (target: "root_parent") => invoke<string | null>("pick_directory", { target }),
-  pickFile: (title: string) => invoke<string | null>("pick_file", { title }),
+  pickFile: (title: string, kind?: "json" | "exe") => invoke<string | null>("pick_file", { title, kind }),
+  setMisePath: (path: string | null) => invoke<State>("set_mise_path", { path }),
+  installMise: () => invoke<State>("install_mise"),
+  updateMise: () => invoke<State>("update_mise"),
+  setBinPath: (enabled: boolean) => invoke<State>("set_bin_path", { enabled }),
+  removeBinEntry: (name: string) => invoke<State>("remove_bin_entry", { name }),
   addLocalApp: (path: string) => invoke<State>("add_local_app", { path }),
   replaceLocalApp: (app_id: string, path: string) => invoke<State>("replace_local_app", { app_id, path }),
   setActiveTab: (app_id: string | null) => invoke<State>("set_active_tab", { app_id }),
@@ -45,11 +53,13 @@ export const api = {
   runAction: (app_id: string, action_id: string) => invoke<State>("run_action", { app_id, action_id }),
   openApp: (app_id: string) => invoke<State>("open_app", { app_id }),
   removeApp: (app_id: string, confirm: string) => invoke<State>("remove_app", { app_id, confirm }),
+  resetAutark: (confirm: string) => invoke<State>("reset_autark", { confirm }),
   saveAppSettings: (app_id: string, settings: Record<string, unknown>) => invoke<State>("save_app_settings", { app_id, settings }),
   saveAppPrefs: (app_id: string, prefs: AppState["prefs"]) => invoke<State>("save_app_prefs", { app_id, prefs }),
   createShortcut: (app_id: string) => invoke<State>("create_shortcut", { app_id }),
   cancelOperation: (app_id: string) => invoke<State>("cancel_operation", { app_id }),
   revealPath: (target: "root" | "marketplace" | "app" | "settings", app_id?: string) => invoke<void>("reveal_path", { target, ...(app_id ? { app_id } : {}) }),
+  revealFile: (path: string) => invoke<void>("reveal_path", { target: "file", path }),
   openUrl: (url: string) => invoke<void>("open_url", { url }),
   exitApp: () => invoke<void>("exit_app"),
   onFocus: async (fn: (app_id: string | null) => void) => {
