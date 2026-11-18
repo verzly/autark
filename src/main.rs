@@ -130,7 +130,7 @@ async fn set_mise_path(app: AppHandle, shared: TauriState<'_, Arc<Shared>>, path
 async fn install_mise(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> CmdResult<State> {
     let inner = shared.inner().clone();
     let root = inner.root();
-    tauri::async_runtime::spawn_blocking(move || tools::install_local(&app, "autark", &root)).await.map_err(|e| CmdError::new("internal", e.to_string()))??;
+    tauri::async_runtime::spawn_blocking(move || tools::install_local(&app, "mise.exe", &root)).await.map_err(|e| CmdError::new("internal", e.to_string()))??;
     apps::refresh_mise(&inner);
     Ok(apps::wire(&inner))
 }
@@ -139,7 +139,7 @@ async fn install_mise(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> Cm
 async fn update_mise(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> CmdResult<State> {
     let inner = shared.inner().clone();
     let settings = inner.plugin_settings();
-    tauri::async_runtime::spawn_blocking(move || tools::self_update(&app, "autark", &settings)).await.map_err(|e| CmdError::new("internal", e.to_string()))??;
+    tauri::async_runtime::spawn_blocking(move || tools::self_update(&app, "mise.exe", &settings)).await.map_err(|e| CmdError::new("internal", e.to_string()))??;
     apps::refresh_mise(&inner);
     Ok(apps::wire(&inner))
 }

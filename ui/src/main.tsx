@@ -54,6 +54,7 @@ export default function App() {
   const currentApp = createMemo(() => state().apps.find(a => a.id === active()) ?? null);
   const openIds = () => state().settings.open_tabs;
   const [autarkTab, setAutarkTab] = createSignal(true);
+  const [builtinTabs, setBuiltinTabs] = createSignal<string[]>([]);
   const [shortcutDone, setShortcutDone] = createSignal<string[]>([]);
   const [shortcutBusy, setShortcutBusy] = createSignal<string[]>([]);
   const available = createMemo(() => state().apps.filter(a => `${a.name} ${a.description} ${a.id}`.toLowerCase().includes(search().toLowerCase())));
@@ -132,6 +133,20 @@ export default function App() {
       if (next.settings.open_tabs.length === 0) { setAutarkTab(true); setActive(AUTARK_TAB); }
       return next;
     });
+  };
+  const builtinName = (id: string | null) => (id ?? "").replace(/\.exe$/i, "");
+  const isBuiltin = (id: string | null) => builtinTabs().includes(id ?? "");
+  const openBuiltin = (name: string) => {
+    if (!builtinTabs().includes(name)) setBuiltinTabs(tabs => [...tabs, name]);
+    setActive(name); setAutarkTab(false); setChooser(false); setSettingsOpen(false); setAppSettingsOpen(null);
+  };
+  const closeBuiltin = (name: string, event: MouseEvent) => {
+    event.stopPropagation();
+    setBuiltinTabs(tabs => tabs.filter(x => x !== name));
+    if (active() !== name) return;
+    const last = openIds()[openIds().length - 1];
+    if (last) { setActive(last); if (!mockMode()) void run(() => api.setActiveTab(last)); }
+    else { setAutarkTab(true); setActive(AUTARK_TAB); }
   };
   const closeAutarkTab = (event: MouseEvent) => {
     event.stopPropagation();
@@ -278,6 +293,7 @@ export default function App() {
             <span class="tab-close" role="button" aria-label={`Close ${app()?.name ?? id}`} onClick={e => closeTab(id, e)}><Icon name="close" /></span>
           </button>;
         }}</For>
+        <For each={builtinTabs()}>{name => <button class={`tab ${active() === name && !settingsOpen() ? "active" : ""}`} role="tab" aria-selected={active() === name && !settingsOpen()} onClick={() => openBuiltin(name)}><span class="badge" style={{ "--hue": hue(name) }}><Show when={name.toLowerCase() === "mise.exe"} fallback={builtinName(name)[0]?.toUpperCase()}>{<img src={miseLogo} alt="" />}</Show></span><span class="tab-name">{builtinName(name)}</span><span class="tab-close" role="button" aria-label={`Close ${builtinName(name)}`} onClick={e => closeBuiltin(name, e)}><Icon name="close" /></span></button>}</For>
         <Show when={autarkTab()}><button class={`tab autark-tab ${active() === AUTARK_TAB && !settingsOpen() ? "active" : ""}`} role="tab" aria-selected={active() === AUTARK_TAB && !settingsOpen()} onClick={() => selectTab(AUTARK_TAB)}>
           <span class="autark-tab-mark" aria-hidden="true">a</span><span class="tab-name">Autark</span>
           <span class="tab-close" role="button" aria-label="Close Autark" onClick={e => closeAutarkTab(e)}><Icon name="close" /></span>
@@ -395,7 +411,7 @@ export default function App() {
                     <p class="market-description">{systemMise ? "Autark runs every app through this mise." : "Managed in Autark's own bin folder."}</p>
                     <div class="market-versions"><span>Version <b>{entry.version ?? "unknown"}</b></span><span>Size <b>{entry.size ? `${(entry.size / 1048576).toFixed(1)} MB` : state().mise.source}</b></span></div>
                     <div class="market-links"><span>{systemMise ? (entry.path || "not detected") : state().mise.bin_path}</span></div>
-                    <div class="market-actions"><Show when={entry.name.toLowerCase() === "mise.exe"}><button class="button primary market-action" disabled={busy()} onClick={() => void run(() => state().mise.source === "local" ? api.updateMise() : api.installMise())}>{state().mise.source === "local" ? "Update" : "Install"}</button></Show>
+                    <div class="market-actions"><Show when={entry.name.toLowerCase() === "mise.exe"}><button class="button primary market-action" disabled={busy()} onClick={() => { openBuiltin(entry.name); void run(() => state().mise.source === "local" ? api.updateMise() : api.installMise()); }}>{state().mise.source === "local" ? "Update" : "Install"}</button></Show>
                       <Show when={!systemMise}>
                         <Show when={binRemoveConfirm() !== entry.name}><button class="button market-view-action" onClick={() => setBinRemoveConfirm(entry.name)}>Remove</button></Show>
                         <Show when={binRemoveConfirm() === entry.name}><div class="confirm-strip"><span>Remove {entry.name} from Autark's bin folder?</span><button class="button" onClick={() => setBinRemoveConfirm(null)}>Cancel</button><button class="button" disabled={busy()} onClick={() => { setBinRemoveConfirm(null); void run(() => api.removeBinEntry(entry.name)); }}>Remove</button></div></Show>
@@ -407,6 +423,14 @@ export default function App() {
             </section>
           </Show>
        </section></Show>
+      <Show when={!chooser() && !settingsOpen() && isBuiltin(active())}><section class="app-view">
+        <div class="app-header"><div class="app-title"><span class="badge large"><Show when={active()?.toLowerCase() === "mise.exe"} fallback={builtinName(active())[0]?.toUpperCase()}>{<img src={miseLogo} alt="" />}</Show></span><div><h1>{builtinName(active())}</h1><div class="version-line">version {state().mise.version ?? "unknown"} · {state().mise.source === "local" ? "By Autark" : "By your machine"}</div></div></div></div>
+        <div class="actions"><button class="button primary" disabled={busy()} onClick={() => void run(() => state().mise.source === "local" ? api.updateMise() : api.installMise())}>{state().mise.source === "local" ? "Update" : "Install"}</button></div>
+        <div class="output-wrap"><div class="output" ref={output} onScroll={() => output && setFollow(output.scrollHeight - output.scrollTop - output.clientHeight < 24)}>
+          <For each={logEntries()}>{entry => entry.spacer ? <div class="log-spacer" aria-hidden="true" /> : <div class={`log ${lineTone(entry.line)}`}>{entry.line}</div>}</For>
+        </div></div>
+        <footer class="metadata"><span>{state().mise.path ?? "not resolved"}</span><code>{builtinName(active())}</code></footer>
+      </section></Show>
       <Show when={!chooser() && !settingsOpen() && active() === AUTARK_TAB}><section class="empty-state"><div class="empty-mark">autark</div>
         <div class="landing-app-list" role="list" aria-label="Installed apps">
           <Show when={state().apps.some(a => a.installed)} fallback={<p class="landing-empty" role="listitem">No apps are installed yet.</p>}>
