@@ -126,6 +126,7 @@ interface AppState {
   prefs: { auto_start: boolean; shortcut_autostart: boolean; shortcut_background: boolean };
   settings_schema: AppSetting[];
   actions: { id: string; label: string; confirm: boolean }[];
+  can_start: boolean; // false when the manifest declares no launch.run, so Start/Stop are hidden
   url: string | null;            // running app URL, else null
   homepage: string | null;
   license: string | null;

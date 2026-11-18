@@ -6,7 +6,7 @@ export interface SettingsLock { key: string; var: string; value: string }
 export interface AppPrefs { auto_start: boolean; shortcut_autostart: boolean; shortcut_background: boolean }
 export interface AppState {
   id: string; name: string; description: string; version_installed: string | null; version_app: string | null; version_latest: string | null;
-    update_available: boolean; installed: boolean; local: boolean; phase: Phase; settings: Record<string, unknown>; settings_schema: AppSetting[]; settings_locked: SettingsLock[]; prefs: AppPrefs; actions: AppAction[];
+    update_available: boolean; installed: boolean; local: boolean; phase: Phase; settings: Record<string, unknown>; settings_schema: AppSetting[]; settings_locked: SettingsLock[]; prefs: AppPrefs; actions: AppAction[]; can_start: boolean;
    url: string | null; homepage: string | null; license: string | null; icon_path: string | null; icon_data: string | null;
   requirements: { disk_gb: number | null; webview2: boolean };
   last_error: { code: string; message: string } | null; step: { index: number; total: number; name: string } | null;
