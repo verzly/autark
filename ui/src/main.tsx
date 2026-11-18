@@ -272,6 +272,7 @@ export default function App() {
 
   return <div class="app">
     <header class="chrome" data-tauri-drag-region>
+      <Show when={state().mise.available}>
       <button class={`gear ${settingsOpen() ? "selected" : ""}`} aria-label="Settings" aria-pressed={settingsOpen()} onClick={() => {
         if (!settingsOpen()) {
           setSettingsReturn(active());
@@ -300,6 +301,7 @@ export default function App() {
         </button></Show>
       </div>
       <Show when={!autarkTab()}><button class="add-tab" aria-label="New tab" onClick={() => { setAutarkTab(true); setActive(AUTARK_TAB); setChooser(false); setSettingsOpen(false); }}>+</button></Show>
+      </Show>
       <div class="chrome-space" data-tauri-drag-region />
       <div class="window-controls">
         <button aria-label="Minimize" onClick={() => void windowAction("minimize")}><Icon name="min" /></button>
@@ -499,7 +501,8 @@ export default function App() {
       }}</Show>
       </>}>
       <section class="mise-onboarding">
-        <div><span class="eyebrow">AUTARK</span><h1>mise is required</h1><p>Autark runs every app through <a href="https://github.com/jdx/mise" target="_blank" rel="noreferrer">mise</a> and the <code>mise</code> command is not available on this machine.</p></div>
+        <div class="empty-mark" aria-hidden="true">autark</div>
+        <div><h1>mise is required</h1><p>Autark runs every app through <a href="https://github.com/jdx/mise" target="_blank" rel="noreferrer">mise</a> and the <code>mise</code> command is not available on this machine.</p></div>
         <section><h2>I already have mise</h2><p>Point Autark at the existing <code>mise.exe</code>.</p><button class="button" disabled={busy()} onClick={() => void run(async () => { const path = await api.pickFile("Choose mise.exe", "exe"); return path ? api.setMisePath(path) : undefined; })}>Choose mise.exe</button><Show when={state().mise.path}><small class="settings-muted">{state().mise.path}{state().mise.version ? ` · ${state().mise.version}` : ""}</small></Show></section>
         <section><h2>Install it for Autark</h2><p>Autark downloads mise into its own folder and keeps it there. Nothing is installed machine-wide.</p><button class="button primary" disabled={busy()} onClick={() => void run(() => api.installMise())}>Download mise</button></section>
         <footer>Local folder: {state().mise.local_path}{state().mise.force_local ? " · Always use Autark's own mise" : ""}</footer>

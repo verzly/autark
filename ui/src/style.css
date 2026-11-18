@@ -59,3 +59,12 @@
 .local-tag{background:#242424;color:#b9b9b9;font-size:11px;padding:2px 8px;border-radius:999px}
 .settings-view{min-height:100%}.settings-content{flex:1 1 auto}
 .builtin-content{display:flex;flex-direction:column;gap:16px}.mise-panel{display:flex;flex-direction:column;align-items:flex-start;gap:11px;padding-bottom:4px}.mise-panel p{margin:0;overflow-wrap:anywhere;font:11px var(--mono);color:#858585}.mise-panel .preference-toggle small{overflow-wrap:anywhere}.market-card .local-tag{background:#242424;color:#b9b9b9;font-size:11px;padding:2px 8px;border-radius:999px}.market-card .market-actions{align-items:center;flex-wrap:wrap}.market-card .confirm-strip{flex-wrap:wrap}.marketplace-load{color:#929292;font-size:12px;line-height:1.5}
+.links button,.about button,.metadata button,.market-links button,.output-head button,.group-heading button,.path{color:#8fb2da;text-decoration-color:#3f5570}.links button:hover,.about button:hover,.metadata button:hover,.market-links button:hover,.output-head button:hover,.group-heading button:hover,.path:hover{color:#cfe1f6;text-decoration-color:#6d8cb5}
+
+/* Typography: calmer headings, muted body copy, tighter rhythm */
+h1{font-size:22px;font-weight:600;letter-spacing:-.02em;line-height:1.25;margin:0}
+h2{font-size:13px;font-weight:600;line-height:1.35;margin:0;color:#e6e6e6}
+p{font-size:12.5px;line-height:1.55;margin:0;color:#a2a2a2}
+.preference-section{gap:9px}
+.preference-section p{max-width:64ch}
+.mise-onboarding .empty-mark{align-self:center;padding:2px 0 20px}
