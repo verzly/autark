@@ -111,6 +111,8 @@ pub struct AppState {
     pub settings_schema: Vec<AppSetting>,
     /// Settings the machine environment owns, with the value that wins.
     pub settings_locked: Vec<SettingsLock>,
+    /// Buttons the manifest declares for this app.
+    pub actions: Vec<AppAction>,
     pub url: Option<String>,
     pub homepage: Option<String>,
     pub license: Option<String>,
@@ -128,6 +130,13 @@ pub struct SettingsLock {
     pub key: String,
     pub var: String,
     pub value: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct AppAction {
+    pub id: String,
+    pub label: String,
+    pub confirm: bool,
 }
 
 /// Settings the machine environment owns: any listed variable already set wins.
@@ -237,6 +246,11 @@ impl AppRecord {
             prefs: self.prefs.clone(),
             settings_schema: self.manifest.settings.clone(),
             settings_locked: settings_locks(&self.manifest),
+            actions: self.manifest.actions.iter().map(|action| AppAction {
+                id: action.id.clone(),
+                label: action.label.clone(),
+                confirm: action.confirm,
+            }).collect(),
             url: self.url.clone(),
             homepage: self.manifest.homepage.clone(),
             license: self.manifest.license.clone(),
@@ -1155,6 +1169,51 @@ pub fn start(app: &AppHandle, shared: &Arc<Shared>, id: &str) -> Result<()> {
     reserve(shared, id, "start")?;
     let result = start_inner(app, shared, id);
     release(shared, id);
+    result
+}
+
+pub fn run_action(app: &AppHandle, shared: &Arc<Shared>, id: &str, action_id: &str) -> Result<()> {
+    let record = find_record(shared, id)?;
+    let action = record.manifest.actions.iter().find(|action| action.id == action_id)
+        .cloned().ok_or_else(|| anyhow::anyhow!("invalid_argument: unknown action"))?;
+    reserve(shared, id, "action")?;
+    let result = (|| {
+        let settings = shared.plugin_settings();
+        let root = settings.root_path();
+        let app_dir = manifest::app_dir(&root, id);
+        let values = record.settings.clone();
+        let args = action.run.iter()
+            .map(|arg| manifest::expand(arg, &root, &app_dir, &values))
+            .collect::<Result<Vec<_>>>()?;
+        let (program, args) = args.split_first()
+            .ok_or_else(|| anyhow::anyhow!("invalid_argument: unknown action"))?;
+        let mut command = if record.manifest.setup.tools.is_empty() {
+            let mut command = Command::new(program);
+            command.args(args);
+            command
+        } else {
+            let mut command = mise_command(&root, settings.force_local_mise);
+            command.arg("--cd").arg(&app_dir).arg("exec").arg("--").arg(program).args(args);
+            command
+        };
+        apply_environment(&mut command, &root, &app_dir, &record.manifest, &values)?;
+        command.current_dir(&app_dir);
+        let mut label = program.clone();
+        if !args.is_empty() {
+            label.push(' ');
+            label.push_str(&args.join(" "));
+        }
+        run_streaming(app, id, label, command)?;
+        if let Some(url) = action.url {
+            let url = manifest::expand(&url, &root, &app_dir, &values)?;
+            if let Err(error) = tauri_plugin_opener::open_url(&url, None::<&str>) {
+                log(app, id, format!("could not open action URL: {error}"));
+            }
+        }
+        Ok(())
+    })();
+    release(shared, id);
+    emit_state(app, shared);
     result
 }
 

@@ -76,6 +76,7 @@ Commands (`invoke`, snake_case args):
 | `update_app` | `app_id`, `approve_effects: bool` | `State` |
 | `update_all` | `approve_effects: bool` | `State` |
 | `start_app` | `app_id` | `State` |
+| `run_action` | `app_id`, `action_id` | `State` |
 | `stop_app` | `app_id` | `State` |
 | `open_app` | `app_id` | `State` |
 | `remove_app` | `app_id`, `confirm: string` | `State` |
@@ -124,6 +125,7 @@ interface AppState {
   settings: Record<string, unknown>;
   prefs: { auto_start: boolean; shortcut_autostart: boolean; shortcut_background: boolean };
   settings_schema: AppSetting[];
+  actions: { id: string; label: string; confirm: boolean }[];
   url: string | null;            // running app URL, else null
   homepage: string | null;
   license: string | null;

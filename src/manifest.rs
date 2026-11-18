@@ -71,6 +71,19 @@ pub struct Step {
     pub when_setting: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Action {
+    pub id: String,
+    pub label: String,
+    pub run: Vec<String>,
+    /// Opened in the browser after the command succeeds.
+    #[serde(default)]
+    pub url: Option<String>,
+    /// Ask the user before running it.
+    #[serde(default)]
+    pub confirm: bool,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Setup {
@@ -103,6 +116,8 @@ pub struct Manifest {
     pub settings: Vec<AppSetting>,
     pub setup: Setup,
     pub launch: Launch,
+    #[serde(default)]
+    pub actions: Vec<Action>,
     pub env: BTreeMap<String, String>,
     /// Env names that win over the manifest when the parent already sets them.
     #[serde(default)]
@@ -124,6 +139,7 @@ impl Default for Manifest {
             settings: Vec::new(),
             setup: Setup::default(),
             launch: Launch::default(),
+            actions: Vec::new(),
             env: BTreeMap::new(),
             env_keep_parent: Vec::new(),
         }
@@ -201,6 +217,33 @@ impl Manifest {
         }
         for arg in &self.launch.run {
             self.check_template(arg, "launch.run")?;
+        }
+        let mut action_ids = std::collections::BTreeSet::new();
+        for action in &self.actions {
+            if action.id.is_empty() {
+                bail!("invalid_argument: action id is empty");
+            }
+            if !is_app_id(&action.id) {
+                bail!("invalid_argument: action id `{}` is not [a-z0-9-]+", action.id);
+            }
+            if !action_ids.insert(action.id.clone()) {
+                bail!("invalid_argument: duplicate action `{}`", action.id);
+            }
+            if action.label.trim().is_empty() {
+                bail!("invalid_argument: action `{}` has no label", action.id);
+            }
+            if action.run.is_empty() || action.run[0].trim().is_empty() {
+                bail!("invalid_argument: action `{}` has no program", action.id);
+            }
+            for arg in &action.run {
+                self.check_template(arg, "action.run")?;
+            }
+            if let Some(url) = &action.url {
+                self.check_template(url, "action.url")?;
+                if !url.starts_with("http://") && !url.starts_with("https://") {
+                    bail!("invalid_argument: action url must be http or https");
+                }
+            }
         }
         if let Some(check) = &self.setup.installed_check {
             self.check_template(check, "setup.installed_check")?;
@@ -563,5 +606,20 @@ mod tests {
         assert_eq!(portable_path("C:\\autark\\apps\\demo\\huggingface", app), "{app}/huggingface");
         assert_eq!(portable_path("c:/AUTARK/apps/demo", app), "{app}");
         assert_eq!(portable_path("D:\\Models", app), "D:/Models");
+    }
+
+    #[test]
+    fn actions_validate_ids_and_urls() {
+        let duplicate = r#"{"schema":1,"id":"demo","name":"Demo","description":"d","version":"1",
+            "launch":{"run":["demo.exe"]},"actions":[
+            {"id":"refresh","label":"Refresh","run":["demo.exe"]},
+            {"id":"refresh","label":"Again","run":["demo.exe"]}]}"#;
+        let manifest: Manifest = serde_json::from_str(duplicate).unwrap();
+        assert!(manifest.validate("demo").is_err());
+        let valid = r#"{"schema":1,"id":"demo","name":"Demo","description":"d","version":"1",
+            "launch":{"run":["demo.exe"]},"actions":[
+            {"id":"refresh","label":"Refresh","run":["demo.exe"],"url":"https://example.com"}]}"#;
+        let manifest: Manifest = serde_json::from_str(valid).unwrap();
+        assert!(manifest.validate("demo").is_ok());
     }
 }
