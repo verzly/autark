@@ -47,7 +47,6 @@ fn banner(root: &Path) -> Vec<String> {
             "© 2026 rozsazoltan · apps, tools and settings stay in this folder".to_string(),
         ),
         line(240, "Autark bin and mise shims are on PATH".to_string()),
-        "Write-Host ''".to_string(),
     ]
 }
 
@@ -68,8 +67,12 @@ fn launcher(root: &Path, shell: &str, shells: &tools::TerminalInfo) -> Result<Pa
             // -i keeps the shell interactive; without it it may exit on the spot.
             lines.push(format!("& '{exe}' -i"));
         }
-        "cmd" => lines.push("cmd.exe".to_string()),
-        _ => {}
+        "cmd" => {
+            lines.push("Write-Host ''".to_string());
+            lines.push("cmd.exe".to_string());
+        }
+        // bash and sh already leave a blank line before their prompt.
+        _ => lines.push("Write-Host ''".to_string()),
     }
     // Windows PowerShell reads a .ps1 without a BOM as ANSI, which mangles · and ©.
     fs::write(&path, format!("\u{feff}{}\r\n", lines.join("\r\n")))
@@ -131,8 +134,10 @@ mod tests {
         assert!(text.contains("[38;5;110m"));
         assert!(text.contains(env!("CARGO_PKG_VERSION")));
         assert!(text.trim_end().ends_with("& 'C:\\git\\bin\\bash.exe' -i"));
+        assert!(!text.contains("Write-Host ''"));
         let plain = std::fs::read_to_string(launcher(&root, "powershell", &shells).unwrap()).unwrap();
         assert!(!plain.contains("cmd.exe"));
+        assert!(plain.trim_end().ends_with("Write-Host ''"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
