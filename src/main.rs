@@ -665,10 +665,10 @@ fn apply_startup(_app: &AppHandle, settings: &Settings) {
     if settings.start_with_windows && settings.tray_enabled {
         if let Ok(exe) = std::env::current_exe() {
             let value = format!("\"{}\" --background", exe.display());
-            let _ = command.args(["add", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "Autark", "/t", "REG_SZ", "/d", &value, "/f"]).status();
+            let _ = command.args(["add", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "Autark", "/t", "REG_SZ", "/d", &value, "/f"]).output();
         }
     } else {
-        let _ = command.args(["delete", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "Autark", "/f"]).status();
+        let _ = command.args(["delete", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "Autark", "/f"]).output();
     }
 }
 
