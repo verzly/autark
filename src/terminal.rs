@@ -71,7 +71,8 @@ fn launcher(root: &Path, shell: &str, shells: &tools::TerminalInfo) -> Result<Pa
         "cmd" => lines.push("cmd.exe".to_string()),
         _ => {}
     }
-    fs::write(&path, lines.join("\r\n") + "\r\n")
+    // Windows PowerShell reads a .ps1 without a BOM as ANSI, which mangles · and ©.
+    fs::write(&path, format!("\u{feff}{}\r\n", lines.join("\r\n")))
         .with_context(|| format!("cannot write {}", path.display()))?;
     Ok(path)
 }
@@ -126,6 +127,7 @@ mod tests {
             sh: Some("C:\\git\\bin\\sh.exe".to_string()),
         };
         let text = std::fs::read_to_string(launcher(&root, "bash", &shells).unwrap()).unwrap();
+        assert!(text.starts_with("\u{feff}"));
         assert!(text.contains("[38;5;110m"));
         assert!(text.contains(env!("CARGO_PKG_VERSION")));
         assert!(text.trim_end().ends_with("& 'C:\\git\\bin\\bash.exe' -i"));
