@@ -6,6 +6,7 @@ mod marketplace;
 mod local;
 mod prefs;
 mod settings;
+mod terminal;
 mod tools;
 
 use apps::{Phase, SetupKind, Shared, State};
@@ -109,7 +110,7 @@ async fn set_mise_path(app: AppHandle, shared: TauriState<'_, Arc<Shared>>, path
     tauri::async_runtime::spawn_blocking(move || {
         if let Some(path) = check_path {
             let path = std::path::PathBuf::from(path);
-            if !path.is_file() || std::process::Command::new(&path).arg("--version").output().map(|o| !o.status.success()).unwrap_or(true) {
+            if !path.is_file() || tools::new_command(&path).arg("--version").output().map(|o| !o.status.success()).unwrap_or(true) {
                 return Err(CmdError::new("invalid_argument", "that file does not run as mise"));
             }
         }
@@ -621,7 +622,7 @@ fn create_shortcut(app: AppHandle, shared: TauriState<'_, Arc<Shared>>, app_id: 
         ps_quote(&record.manifest.name), ps_quote(&exe.to_string_lossy()), ps_quote(&args),
         ps_quote(&if shortcut_icon.exists() { shortcut_icon.to_string_lossy().to_string() } else { exe.to_string_lossy().to_string() })
     );
-    let output = std::process::Command::new("powershell").args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script]).output()
+    let output = tools::new_command("powershell").args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script]).output()
         .map_err(|e| CmdError::new("invalid_argument", e.to_string()))?;
     if !output.status.success() { return Err(CmdError::new("invalid_argument", String::from_utf8_lossy(&output.stderr).to_string())); }
     let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -660,14 +661,14 @@ fn reconcile_tray(app: &AppHandle, settings: &Settings) {
 }
 
 fn apply_startup(_app: &AppHandle, settings: &Settings) {
-    let mut command = std::process::Command::new("reg");
+    let mut command = tools::new_command("reg");
     if settings.start_with_windows && settings.tray_enabled {
         if let Ok(exe) = std::env::current_exe() {
             let value = format!("\"{}\" --background", exe.display());
-            let _ = command.args(["add", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "Autark", "/t", "REG_SZ", "/d", &value, "/f"]).status();
+            let _ = command.args(["add", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "Autark", "/t", "REG_SZ", "/d", &value, "/f"]).output();
         }
     } else {
-        let _ = command.args(["delete", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "Autark", "/f"]).status();
+        let _ = command.args(["delete", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "Autark", "/f"]).output();
     }
 }
 
@@ -710,7 +711,7 @@ fn reveal_path(
             ))
         }
     };
-    let mut command = std::process::Command::new("explorer");
+    let mut command = tools::new_command("explorer");
     if (target == "settings" || target == "file") && path.exists() {
         command.arg(format!("/select,{}", path.display()));
     } else {
@@ -732,6 +733,21 @@ fn open_url(url: String) -> CmdResult<()> {
     }
     tauri_plugin_opener::open_url(url, None::<&str>)
         .map_err(|error| CmdError::new("internal", error.to_string()))
+}
+
+#[tauri::command]
+fn open_terminal(shared: TauriState<'_, Arc<Shared>>) -> CmdResult<String> {
+    let inner = shared.inner().clone();
+    let root = inner.root();
+    let shell = inner.plugin_settings().terminal;
+    let shells = inner
+        .core
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .terminal
+        .clone();
+    terminal::open(&root, &shell, &shells)?;
+    Ok(format!("Terminal opened in {}", root.display()))
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -776,6 +792,7 @@ fn main() {
             update_mise,
             install_git,
             update_git,
+            open_terminal,
             set_bin_path,
             remove_bin_entry,
             pick_directory,

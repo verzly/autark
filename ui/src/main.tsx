@@ -35,7 +35,10 @@ export default function App() {
   const [selected, setSelected] = createSignal(0);
   const [panel, setPanel] = createSignal<InlineAction>(null);
   const [removeText, setRemoveText] = createSignal("");
-  const [requestError, setRequestError] = createSignal("");
+  const [requestError, setRequestError] = createSignal("")
+  const [terminalNotice, setTerminalNotice] = createSignal("")
+  // The shell picker hangs off the terminal button, opened with a right click.
+  const [terminalMenu, setTerminalMenu] = createSignal<{ x: number; y: number } | null>(null);;
   const [busy, setBusy] = createSignal(false);
   const [buffers, setBuffers] = createSignal<Record<string, string[]>>(mockMode() ? { "unsloth-studio": previewLogs } : {});
   const [follow, setFollow] = createSignal(true);
@@ -254,7 +257,19 @@ export default function App() {
       else await run(() => api.saveSettings({ ...state().settings, root: picked }, false));
     } catch (e) { setRequestError(errText(e)); }
   };
-  const setGlobalPref = (key: "tray_enabled" | "start_with_windows" | "close_to_tray" | "experimental_local_apps" | "force_local_mise" | "animations", next: boolean) => {
+  createEffect(() => {
+    if (!terminalMenu()) return;
+    const close = () => setTerminalMenu(null);
+    const escape = (e: KeyboardEvent) => { if (e.key === "Escape") setTerminalMenu(null); };
+    const timer = setTimeout(() => window.addEventListener("mousedown", close), 0);
+    window.addEventListener("keydown", escape);
+    onCleanup(() => { clearTimeout(timer); window.removeEventListener("mousedown", close); window.removeEventListener("keydown", escape); });
+  });
+  const setTerminal = (terminal: string) => {
+    const settings = { ...state().settings, terminal };
+    if (mockMode()) { setState(s => ({ ...s, settings })); return; }
+    void run(() => api.saveSettings(settings));
+  };  const setGlobalPref = (key: "tray_enabled" | "start_with_windows" | "close_to_tray" | "experimental_local_apps" | "force_local_mise" | "animations", next: boolean) => {
     const settings = { ...state().settings, [key]: next };
     if (key === "experimental_local_apps" && !next) setMarketFilter("marketplace");
     if (mockMode()) setState(s => ({ ...s, settings }));
@@ -309,6 +324,16 @@ export default function App() {
     }
     catch (e) { setRequestError(errText(e)); }
   };
+  // A click must say something happened; the shell itself opens in its own window.
+  const openTerminal = () => {
+    if (mockMode()) { setTerminalNotice("Terminal opened in the preview folder."); return; }
+    void api.openTerminal().then(message => setTerminalNotice(message)).catch(e => setRequestError(errText(e)));
+  };
+  createEffect(() => {
+    if (!terminalNotice()) return;
+    const timer = setTimeout(() => setTerminalNotice(""), 6000);
+    onCleanup(() => clearTimeout(timer));
+  });
   const openUrl = (url: string) => { if (!mockMode()) void api.openUrl(url).catch(e => setRequestError(errText(e))); };
   const revealFile = (path: string) => { if (!mockMode()) void api.revealFile(path).catch(e => setRequestError(errText(e))); };
   const reveal = (target: "root" | "marketplace" | "app" | "settings", id?: string) => { if (!mockMode()) void api.revealPath(target, id).catch(e => setRequestError(errText(e))); };
@@ -409,6 +434,11 @@ export default function App() {
         }
       }}><Icon name="menu" /></button>
       <button class={`add-tab marketplace-tab ${chooser() ? "selected" : ""}`} aria-label="Open marketplace" aria-pressed={chooser()} onClick={() => (chooser() ? hideChooser() : showChooser())}><Icon name="gridPlus" /></button>
+      <button class="add-tab terminal-launch" aria-label="Open terminal" title="Open the Autark terminal (right click to pick the shell)" onClick={openTerminal} onContextMenu={e => {
+        e.preventDefault();
+        const rect = e.currentTarget.getBoundingClientRect();
+        setTerminalMenu(terminalMenu() ? null : { x: rect.left, y: rect.bottom + 6 });
+      }}>&gt;_</button>
       <div class="tabs" role="tablist" aria-label="Open apps">
         <For each={openIds()}>{id => {
           const app = () => state().apps.find(a => a.id === id);
@@ -433,6 +463,26 @@ export default function App() {
         <button class="close-window" aria-label="Close" onClick={() => void windowAction("close")}><Icon name="close" /></button>
       </div>
     </header>
+    <Show when={terminalMenu()}>{menu => {
+      const pick = (value: string, label: string) => {
+        const missing = () => (value === "sh" && !state().terminal.sh) || (value === "bash" && !state().terminal.bash);
+        return <button role="menuitemradio" aria-checked={state().settings.terminal === value} disabled={missing()} onMouseDown={e => e.stopPropagation()} onClick={() => { setTerminalMenu(null); setTerminal(value); }}>
+          <span class="terminal-menu-check">{state().settings.terminal === value ? "\u2713" : ""}</span>
+          <span>{label}</span>
+          <Show when={missing()}><small>not found</small></Show>
+        </button>;
+      };
+
+      return <div class="terminal-menu" role="menu" aria-label="Terminal shell" style={{ left: `${menu().x}px`, top: `${menu().y}px` }} onMouseDown={e => e.stopPropagation()}>
+        <span class="terminal-menu-head">Terminal</span>
+        {pick("system", "System default")}
+        {pick("powershell", "PowerShell")}
+        {pick("cmd", "cmd")}
+        {pick("sh", "sh")}
+        {pick("bash", "bash")}
+        <small class="terminal-menu-note">System default uses bash when git is installed.</small>
+      </div>;
+    }}</Show>
     <main class="card">
       <Show when={!state().settings.wizard_complete || !state().mise.available || miseScreen()} fallback={<>
       <Show when={settingsOpen()}><section class="settings-view">
@@ -445,6 +495,14 @@ export default function App() {
         <Show when={settingsTab() === "General"}>
         <section class="setting-row"><div><h2>Root folder</h2><p>Apps and managed tools live here.</p><button class="path" onClick={() => reveal("root")}>{state().settings.root}</button></div><button class="button" disabled={state().busy} onClick={() => void changeRoot()}>Change</button></section>
         <section class="setting-row"><div><h2>mise</h2><p>{state().mise.path ?? "not resolved"}{state().mise.version ? ` · ${state().mise.version}` : ""}</p></div><button class="button" disabled={state().busy} onClick={() => { setMiseScreen(true); setSettingsOpen(false); setActive(null); setChooser(false); }}>Change</button></section>
+        <section class="preference-section"><h2>Terminal</h2><p>The &gt;_ button opens this shell in the Autark folder. System default uses bash when git is available.</p>
+          <div class="market-filters" role="group" aria-label="Terminal shell">
+            <For each={[["system", "System default"], ["powershell", "PowerShell"], ["cmd", "cmd"], ["sh", "sh"], ["bash", "bash"]] as const}>{([value, label]) => {
+              const missing = () => (value === "sh" && !state().terminal.sh) || (value === "bash" && !state().terminal.bash);
+              return <button class={`market-filter ${state().settings.terminal === value ? "active" : ""}`} aria-pressed={state().settings.terminal === value} disabled={missing()} title={missing() ? `${label} was not found on this machine` : `Open ${label}`} onClick={() => setTerminal(value)}>{label}</button>;
+            }}</For>
+          </div>
+        </section>
         <section class="preference-section"><h2>Reset Autark</h2><p>Deletes the marketplace clone, runtime tools and every installed app in the Autark folder, then starts the wizard again.</p>
           <Show when={!resetConfirm()}><button class="button" disabled={state().busy} onClick={() => { setResetText(""); setResetConfirm(true); }}>Reset Autark</button></Show>
           <Show when={resetConfirm()}><div class="inline-panel remove-panel"><p class="danger-note">This deletes every user setting, preference and file inside the Autark folder.</p><label>Type RESET<input value={resetText()} onInput={e => setResetText(e.currentTarget.value)} /></label><div><button class="button" onClick={() => setResetConfirm(false)}>Cancel</button><button class="button primary" disabled={state().busy || resetText() !== "RESET"} onClick={() => { setResetConfirm(false); setWizardStep(1); const after = () => { setMiseScreen(false); setSettingsOpen(false); setChooser(false); setAppSettingsOpen(null); setActive(null); setBuffers({}); }; if (mockMode()) { setState(s => ({ ...s, settings: { ...s.settings, wizard_complete: false } })); after(); } else { setResetting(true); void run(() => api.resetAutark("RESET")).then(after); } }}>Confirm</button></div></div></Show>
@@ -658,6 +716,7 @@ export default function App() {
       <Show when={requestError() || currentApp()?.last_error || state().marketplace.error}>
       <div class="toasts">
         <Show when={requestError()}><div class="toast error-banner" role="alert">{requestError()}</div></Show>
+        <Show when={terminalNotice()}><div class="toast notice-banner" role="status">{terminalNotice()}</div></Show>
         <Show when={currentApp()?.last_error}>{err => <div class="toast error-banner" role="alert">{err().message}</div>}</Show>
         <Show when={state().marketplace.error}>{err => <div class="toast error-banner" role="alert">{err().message}</div>}</Show>
       </div>

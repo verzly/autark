@@ -2,11 +2,20 @@ use crate::{apps, settings::Settings};
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use std::{
-    env, fs,
+    env, ffi::OsStr, fs,
+    os::windows::process::CommandExt,
     path::{Path, PathBuf},
     process::Command,
 };
 use tauri::AppHandle;
+
+/// Console apps Autark starts must stay invisible; only the terminal button asks for a console.
+pub(crate) fn new_command(program: impl AsRef<OsStr>) -> Command {
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut command = Command::new(program);
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
+}
 
 #[derive(Clone, Debug, Serialize)]
 pub struct BinEntry {
@@ -62,7 +71,7 @@ pub fn resolve(settings: &Settings, root: &Path) -> Option<PathBuf> {
 
 /// Every copy of `name` on PATH, so the setup steps can offer them as one click.
 fn where_tool(name: &str) -> Vec<PathBuf> {
-    let output = match Command::new("where").arg(name).output() {
+    let output = match new_command("where").arg(name).output() {
         Ok(output) if output.status.success() => output,
         _ => return Vec::new(),
     };
@@ -85,7 +94,7 @@ fn where_mise() -> Option<PathBuf> {
     where_tool("mise").into_iter().next()
 }
 
-fn environment(command: &mut Command, root: &Path) {
+pub(crate) fn environment(command: &mut Command, root: &Path) {
     let runtime = root.join("runtime");
     command.env("MISE_DATA_DIR", runtime.join("mise-data"))
         .env("MISE_CONFIG_DIR", runtime.join("mise-config"))
@@ -95,7 +104,7 @@ fn environment(command: &mut Command, root: &Path) {
 }
 
 fn run_version(path: &Path, root: &Path) -> Option<String> {
-    let mut command = Command::new(path);
+    let mut command = new_command(path);
     command.arg("--version");
     environment(&mut command, root);
     let output = command.output().ok()?;
@@ -104,7 +113,7 @@ fn run_version(path: &Path, root: &Path) -> Option<String> {
 }
 
 fn user_path() -> Vec<String> {
-    let output = Command::new("powershell")
+    let output = new_command("powershell")
         .args([
             "-NoProfile",
             "-Command",
@@ -157,7 +166,7 @@ pub fn probe(settings: &Settings) -> MiseInfo {
         }
     }
     let listing = format!("Get-ChildItem '{}' -File | ForEach-Object {{ \"$($_.Name)|$([string]$_.VersionInfo.ProductVersion)|$($_.Length)\" }}", bin_path.to_string_lossy().replace('\'', "''"));
-    if let Ok(output) = Command::new("powershell").args(["-NoProfile", "-Command", &listing]).output() {
+    if let Ok(output) = new_command("powershell").args(["-NoProfile", "-Command", &listing]).output() {
         for line in String::from_utf8_lossy(&output.stdout).lines() {
             let mut parts = line.splitn(3, '|');
             if let (Some(name), Some(ver), _) = (parts.next(), parts.next(), parts.next()) {
@@ -195,7 +204,7 @@ pub fn install_local(app: &AppHandle, id: &str, root: &Path) -> Result<()> {
     fs::create_dir_all(bin_dir(root))?;
     let target_arg = target.to_string_lossy().replace('\'', "''");
     let script = format!("$ErrorActionPreference='Stop'; $headers=@{{'User-Agent'='autark'}}; $release=Invoke-RestMethod -Uri 'https://api.github.com/repos/jdx/mise/releases/latest' -Headers $headers; $asset=$release.assets | Where-Object {{ $_.name -like '*windows-x64.exe' }} | Select-Object -First 1; if (-not $asset) {{ throw 'no windows-x64 asset in the latest mise release' }}; $total=[long]$asset.size; $request=[System.Net.HttpWebRequest]::Create($asset.browser_download_url); $request.UserAgent='autark'; $response=$request.GetResponse(); $input=$response.GetResponseStream(); $output=[System.IO.File]::Create('{target_arg}'); $buffer=New-Object byte[] 1048576; $done=[long]0; $last=-1; while (($read=$input.Read($buffer,0,$buffer.Length)) -gt 0) {{ $output.Write($buffer,0,$read); $done+=$read; if ($total -gt 0) {{ $pct=[math]::Floor($done*100/$total); if ($pct -ne $last) {{ $last=$pct; Write-Output ('mise download ' + $pct + '%') }} }} }}; $output.Close(); $input.Close(); $response.Close(); Write-Output 'mise download 100%'");
-    let mut command = Command::new("powershell");
+    let mut command = new_command("powershell");
     command.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script]);
     apps::run_tool_streaming(app, id, "downloading mise".to_string(), command)?;
     if run_version(&target, root).is_none() { bail!("internal: the downloaded mise binary does not run"); }
@@ -207,7 +216,7 @@ pub fn self_update(app: &AppHandle, id: &str, root: &Path) -> Result<()> {
     if !path.is_file() {
         bail!("invalid_argument: Autark's own mise is not installed");
     }
-    let mut command = Command::new(path);
+    let mut command = new_command(path);
     command.arg("self-update");
     environment(&mut command, root);
     apps::run_tool_streaming(app, id, "updating mise".to_string(), command)
@@ -321,6 +330,13 @@ _.path = { path = [
 git = "github:git-for-windows/git"
 "##;
 
+/// The shells the terminal button can open. bash and sh are only usable when an exe exists.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct TerminalInfo {
+    pub bash: Option<String>,
+    pub sh: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct GitExternal {
     pub path: String,
@@ -373,7 +389,7 @@ fn external_git(root: &Path) -> Option<GitExternal> {
         if key.starts_with(&ours) {
             continue;
         }
-        let version = Command::new(&candidate)
+        let version = new_command(&candidate)
             .arg("--version")
             .output()
             .ok()
@@ -388,6 +404,29 @@ fn external_git(root: &Path) -> Option<GitExternal> {
     None
 }
 
+pub fn probe_terminal(root: &Path) -> TerminalInfo {
+    // git ships its own bash and sh, so a built-in git is enough on its own.
+    let git = own_git(root).and_then(|(exe, _)| exe.parent().and_then(|bin| bin.parent()).map(Path::to_path_buf));
+    let from_git = |relative: &[&str]| {
+        git.as_ref()
+            .map(|dir| relative.iter().fold(dir.clone(), |path, part| path.join(part)))
+            .filter(|path| path.is_file())
+            .map(|path| path.display().to_string())
+    };
+    let on_path = |name: &str| {
+        where_tool(name)
+            .into_iter()
+            .next()
+            .map(|path| path.display().to_string())
+    };
+    TerminalInfo {
+        bash: from_git(&["bin", "bash.exe"]).or_else(|| on_path("bash")),
+        sh: from_git(&["bin", "sh.exe"])
+            .or_else(|| from_git(&["usr", "bin", "sh.exe"]))
+            .or_else(|| on_path("sh")),
+    }
+}
+
 pub fn probe_git(settings: &Settings) -> GitInfo {
     let root = settings.root_path();
     let own = own_git(&root);
@@ -400,7 +439,7 @@ pub fn probe_git(settings: &Settings) -> GitInfo {
 }
 
 fn git_command(settings: &Settings, root: &Path) -> Command {
-    let mut command = Command::new(resolve(settings, root).unwrap_or_else(|| PathBuf::from("mise")));
+    let mut command = new_command(resolve(settings, root).unwrap_or_else(|| PathBuf::from("mise")));
     // The global config is written by Autark, so mise does not need to ask about trusting it.
     command.env("MISE_TRUSTED_CONFIG_PATHS", root.join("runtime").join("mise-config"));
     environment(&mut command, root);
@@ -444,7 +483,7 @@ pub fn set_path_registration(root: &Path, enabled: bool) -> Result<bool> {
         format!("$parts = @($parts | Where-Object {{ $_.Trim().Trim('\"') -ine '{quoted}' }})")
     };
     let script = format!("$old=[Environment]::GetEnvironmentVariable('Path','User'); $parts=@($old -split ';' | Where-Object {{ $_ -ne '' }}); {action}; [Environment]::SetEnvironmentVariable('Path',($parts -join ';'),'User')");
-    let output = Command::new("powershell").args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script]).output()?;
+    let output = new_command("powershell").args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script]).output()?;
     if !output.status.success() { bail!("{}", String::from_utf8_lossy(&output.stderr)); }
     Ok(registry_has_path(&bin_dir(root)))
 }

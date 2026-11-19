@@ -29,10 +29,17 @@ pub struct Settings {
     /// Whether interface animations run. Off means a cheaper, static UI.
     #[serde(default = "default_animations")]
     pub animations: bool,
+    /// Which shell the terminal button opens: system, powershell, cmd, sh or bash.
+    #[serde(default = "default_terminal")]
+    pub terminal: String,
 }
 
 fn default_animations() -> bool {
     true
+}
+
+fn default_terminal() -> String {
+    "system".to_string()
 }
 
 impl Default for Settings {
@@ -52,6 +59,7 @@ impl Default for Settings {
             experimental_local_apps: false,
             wizard_complete: false,
             animations: true,
+            terminal: default_terminal(),
         }
     }
 }
