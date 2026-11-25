@@ -308,7 +308,11 @@ fn pick_directory(target: String) -> Option<String> {
 #[tauri::command(rename_all = "snake_case")]
 async fn pick_file(title: String, kind: Option<String>) -> Result<Option<String>, CmdError> {
     let dialog = rfd::FileDialog::new().set_title(title);
-    let dialog = if kind.as_deref() == Some("exe") { dialog.add_filter("Executable", &["exe"]) } else { dialog.add_filter("App manifest", &["json"]) };
+    let dialog = match kind.as_deref() {
+        Some("any") => dialog,
+        Some("exe") => dialog.add_filter("Executable", &["exe"]),
+        _ => dialog.add_filter("App manifest", &["json"]),
+    };
     Ok(dialog.pick_file()
         .map(|path| path.to_string_lossy().to_string()))
 }
@@ -375,6 +379,24 @@ async fn refresh_marketplace(
         tauri::async_runtime::spawn_blocking(move || apps::refresh_marketplace(&handle, &task))
             .await
             .map_err(|error| CmdError::new("internal", error.to_string()))?;
+    joined?;
+    Ok(apps::wire(&inner))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn set_marketplace_source(
+    app: AppHandle,
+    shared: TauriState<'_, Arc<Shared>>,
+    source: String,
+) -> CmdResult<State> {
+    let inner = shared.inner().clone();
+    let task = inner.clone();
+    let handle = app.clone();
+    let joined = tauri::async_runtime::spawn_blocking(move || {
+        apps::set_marketplace_source(&handle, &task, &source)
+    })
+    .await
+    .map_err(|error| CmdError::new("internal", error.to_string()))?;
     joined?;
     Ok(apps::wire(&inner))
 }
@@ -468,6 +490,35 @@ async fn reinstall_app(
         return Err(CmdError::new("invalid_argument", "the app is not installed"));
     }
     apps::reserve(&inner, &app_id, "reinstall")?;
+    let task = inner.clone();
+    let handle = app.clone();
+    let id = app_id.clone();
+    let joined = tauri::async_runtime::spawn_blocking(move || {
+        apps::install(&handle, &task, &id, SetupKind::Update)
+    })
+    .await
+    .map_err(|error| CmdError::new("internal", error.to_string()));
+    apps::release(&inner, &app_id);
+    joined??;
+    Ok(apps::wire(&inner))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn restore_app(
+    app: AppHandle,
+    shared: TauriState<'_, Arc<Shared>>,
+    app_id: String,
+    approve_effects: bool,
+) -> CmdResult<State> {
+    if !approve_effects {
+        return Err(CmdError::new(
+            "approval_required",
+            "confirm the stable reinstall before it changes anything",
+        ));
+    }
+    let inner = shared.inner().clone();
+    apps::restore_guard(&inner, &app_id)?;
+    apps::reserve(&inner, &app_id, "update")?;
     let task = inner.clone();
     let handle = app.clone();
     let id = app_id.clone();
@@ -803,10 +854,12 @@ fn main() {
             open_app_tab,
             close_tab,
             refresh_marketplace,
+            set_marketplace_source,
             check_updates,
             install_app,
             update_app,
             reinstall_app,
+            restore_app,
             update_all,
             start_app,
             run_action,

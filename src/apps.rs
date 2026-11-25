@@ -126,6 +126,10 @@ pub struct AppState {
     pub step: Option<StepInfo>,
     pub started_at: Option<u64>,
     pub elapsed_secs: Option<u64>,
+    /// The preview branch or pull request this installation came from; None means stable.
+    pub preview: Option<String>,
+    /// True when the app came from a preview and the marketplace is back on its default branch.
+    pub restore_available: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -177,6 +181,7 @@ pub struct AppRecord {
     pub step: Option<StepInfo>,
     pub started_at: Option<u64>,
     pub icon_data: Option<String>,
+    pub preview: Option<String>,
 }
 
 impl AppRecord {
@@ -217,6 +222,10 @@ impl AppRecord {
             prefs,
             manifest_dir: manifest_dir.to_path_buf(),
             icon_data,
+            preview: installed_record
+                .as_ref()
+                .and_then(|record| record.source.clone())
+                .filter(|_| installed),
             manifest,
             local,
         }
@@ -230,7 +239,7 @@ impl AppRecord {
             )
     }
 
-    fn wire(&self) -> AppState {
+    fn wire(&self, marketplace_source: &str) -> AppState {
         let elapsed_secs = self
             .started_at
             .map(|started| now().saturating_sub(started));
@@ -265,6 +274,8 @@ impl AppRecord {
             step: self.step.clone(),
             started_at: self.started_at,
             elapsed_secs,
+            preview: self.preview.clone(),
+            restore_available: self.preview.is_some() && marketplace_source.is_empty(),
         }
     }
 }
@@ -299,6 +310,8 @@ pub struct MarketplaceInfo {    pub path: String,
     pub refreshing: bool,
     pub last_refresh: Option<u64>,
     pub error: Option<ErrorInfo>,
+    /// The session's preview branch or pull request; empty means the default branch.
+    pub source: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -359,8 +372,15 @@ impl Shared {
                 refreshing: false,
                 last_refresh: settings.marketplace_last_refresh,
                 error: None,
+                source: String::new(),
             },
         };
+        // A preview is session-only: return the working tree to the default branch on the next start.
+        if !marketplace::applied_source(&root).is_empty() {
+            if let Err(error) = marketplace::sync(&root, "") {
+                core.marketplace.error = Some(ErrorInfo::from_error(&error));
+            }
+        }
         load_catalogue(&mut core);
         Self {
             core: Mutex::new(core),
@@ -495,7 +515,7 @@ pub fn wire(shared: &Shared) -> State {
         settings_path: settings::settings_path().to_string_lossy().to_string(),
         settings_exists: settings::settings_path().exists(),
         marketplace: core.marketplace.clone(),
-        apps: core.records.iter().map(AppRecord::wire).collect(),
+        apps: core.records.iter().map(|record| record.wire(&core.marketplace.source)).collect(),
         operations,
         busy,
         mise: core.mise.clone(),
@@ -651,6 +671,10 @@ pub fn setup(app: &AppHandle, shared: &Shared, id: &str, kind: SetupKind) -> Res
         .unwrap_or_else(|error| error.into_inner())
         .settings
         .clone();
+    let marketplace_source = {
+        let core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
+        core.marketplace.source.clone()
+    };
     let root = core_settings.root_path();
     let force_local_mise = core_settings.force_local_mise;
     let app_dir = manifest::app_dir(&root, id);
@@ -759,12 +783,14 @@ pub fn setup(app: &AppHandle, shared: &Shared, id: &str, kind: SetupKind) -> Res
             );
         }
     }
-    manifest::write_installed(&app_dir, &manifest.version, app_version.as_deref())?;
+    manifest::write_installed(&app_dir, &manifest.version, app_version.as_deref(), &marketplace_source)?;
     let version = manifest.version.clone();
+    let preview = (!marketplace_source.is_empty()).then(|| marketplace_source.clone());
     mutate(app, shared, id, |record| {
         record.installed = true;
         record.installed_version = Some(version);
         record.app_version = app_version;
+        record.preview = preview;
         record.phase = Phase::Installed;
         record.step = None;
         record.last_error = None;
@@ -1540,15 +1566,64 @@ pub fn refresh_marketplace(app: &AppHandle, shared: &Arc<Shared>) -> Result<()> 
     result
 }
 
+/// Switching the session's marketplace source takes effect immediately, so the catalogue is reloaded.
+pub fn set_marketplace_source(app: &AppHandle, shared: &Arc<Shared>, requested: &str) -> Result<()> {
+    let parsed = marketplace::Source::parse(requested)?;
+    reserve(shared, "", "marketplace")?;
+    let previous = {
+        let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
+        let previous = core.marketplace.source.clone();
+        core.marketplace.source = parsed.label();
+        previous
+    };
+    let result = refresh_inner(app, shared);
+    if result.is_err() {
+        // The clone still holds the previous source, so the state must not claim the new one.
+        let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
+        core.marketplace.source = previous;
+    }
+    release(shared, "");
+    emit_state(app, shared);
+    result
+}
+
+/// Restoring is only meaningful while the clone really is on the default branch.
+pub fn restore_guard(shared: &Shared, id: &str) -> Result<()> {
+    let (source, applied, installed) = {
+        let core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
+        let installed = core
+            .records
+            .iter()
+            .find(|record| record.manifest.id == id)
+            .map(|record| record.installed)
+            .unwrap_or(false);
+        (
+            core.marketplace.source.clone(),
+            marketplace::applied_source(&core.settings.root_path()),
+            installed,
+        )
+    };
+    if !source.is_empty() || !applied.is_empty() {
+        bail!(
+            "preview_active: restore needs the default branch. Switch the marketplace back and reload it first."
+        );
+    }
+    if !installed {
+        bail!("invalid_argument: the app is not installed");
+    }
+    Ok(())
+}
+
 fn refresh_inner(app: &AppHandle, shared: &Shared) -> Result<()> {
     let root = shared.root();
-    {
+    let source = {
         let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
         core.marketplace.refreshing = true;
         core.marketplace.error = None;
-    }
+        core.marketplace.source.clone()
+    };
     emit_state(app, shared);
-    let result = marketplace::sync(&root);
+    let result = marketplace::sync(&root, &source);
     let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
     core.marketplace.refreshing = false;
     match result {
@@ -1624,6 +1699,15 @@ pub fn replace_local_app(app: &AppHandle, shared: &Arc<Shared>, id: &str, path: 
 }
 
 pub fn update_all(app: &AppHandle, shared: &Arc<Shared>) -> Result<()> {
+    let source = {
+        let core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
+        core.marketplace.source.clone()
+    };
+    if !source.is_empty() {
+        bail!(
+            "preview_active: Update all is unavailable while the marketplace previews {source}. Switch back to the default branch first."
+        );
+    }
     reserve(shared, "", "update_all")?;
     let ids: Vec<String> = {
         let core = shared.core.lock().unwrap_or_else(|error| error.into_inner());

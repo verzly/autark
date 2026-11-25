@@ -33,6 +33,7 @@ pub enum SettingKind {
     Port,
     Boolean,
     Path,
+    File,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -426,7 +427,7 @@ fn expand_depth(
 
 fn validate_value(kind: SettingKind, key: &str, value: &Value) -> Result<()> {
     match kind {
-        SettingKind::Text | SettingKind::Path => {
+        SettingKind::Text | SettingKind::Path | SettingKind::File => {
             if !value.is_string() {
                 bail!("invalid_argument: setting `{key}` must be a string");
             }
@@ -491,7 +492,7 @@ pub fn validate_settings(manifest: &Manifest, values: &Map<String, Value>, app: 
             .with_context(|| format!("invalid_argument: unknown setting `{key}`"))?;
         validate_value(setting.kind, &setting.key, value)?;
         let value = match (setting.kind, value) {
-            (SettingKind::Path, Value::String(path)) => Value::String(portable_path(path, app)),
+            (SettingKind::Path | SettingKind::File, Value::String(path)) => Value::String(portable_path(path, app)),
             _ => value.clone(),
         };
         clean.insert(key.clone(), value);
@@ -522,6 +523,9 @@ pub struct InstalledRecord {
     pub app_version: Option<String>,
     #[serde(default)]
     pub installed_at: u64,
+    /// The preview branch or pull request the app was installed from; empty means stable.
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 pub fn read_installed(app: &Path) -> Option<InstalledRecord> {
@@ -529,7 +533,7 @@ pub fn read_installed(app: &Path) -> Option<InstalledRecord> {
     serde_json::from_str(&text).ok()
 }
 
-pub fn write_installed(app: &Path, version: &str, app_version: Option<&str>) -> Result<()> {
+pub fn write_installed(app: &Path, version: &str, app_version: Option<&str>, source: &str) -> Result<()> {
     let installed_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())
@@ -538,6 +542,7 @@ pub fn write_installed(app: &Path, version: &str, app_version: Option<&str>) -> 
         version: version.to_string(),
         app_version: app_version.map(str::to_string),
         installed_at,
+        source: (!source.is_empty()).then(|| source.to_string()),
     };
     fs::create_dir_all(app)?;
     fs::write(

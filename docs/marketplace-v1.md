@@ -97,12 +97,12 @@ README.md
 { "key": "port", "label": "Port", "kind": "port", "default": 8888, "help": "..." }
 ```
 
-`kind` is one of `text`, `number`, `port`, `boolean`, `path`. Keys must be unique per app. Autark stores the
+`kind` is one of `text`, `number`, `port`, `boolean`, `path`, `file`. `path` opens a folder picker; `file` opens a file picker. Keys must be unique per app. Autark stores the
 values in `<app>/settings.json` next to the installed manifest and exposes them to commands through
 `{settings.<key>}`. Values are validated before an operation starts: a `port` must be 1-65535. A default value
 may itself contain placeholders, for example `"default": "{app}/huggingface"`.
 
-A `path` setting is stored portably: a folder picked (or typed) inside the app folder is rewritten to the
+A `path` or `file` setting is stored portably: a path picked (or typed) inside the app folder is rewritten to the
 `{app}/...` form before it is saved, so the value keeps working when the Autark root moves.
 
 An optional `"locked_by": ["HF_HOME"]` hands the setting to the machine: when any listed variable exists in the
