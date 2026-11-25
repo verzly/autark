@@ -32,6 +32,7 @@ README.md
   "description": "Fine-tune and run local models with a bundled web UI.",
   "version": "2026.11.0",
   "homepage": "https://github.com/unslothai/unsloth",
+  "upstream": "unslothai/unsloth",
   "license": "AGPL-3.0",
   "icon": "icon.png",
   "requirements": { "disk_gb": 12, "webview2": true },
@@ -76,6 +77,7 @@ README.md
 | `description` | yes | One sentence, shown in the `+` chooser |
 | `version` | yes | Recipe version owned by the marketplace; bump in the same PR that changes behavior |
 | `homepage` | no | https link, opened from the app panel |
+| `upstream` | no | GitHub `owner/repository`; latest release or tag can enable app-version updates |
 | `license` | no | SPDX id of the app itself |
 | `icon` | no | File next to `app.json`; png, 256x256 |
 | `requirements` | no | `disk_gb` (number), `webview2` (bool); informational only, shown before install |
@@ -90,6 +92,8 @@ README.md
 | `actions` | no | App-specific buttons and commands |
 | `env` | no | Extra environment variables for setup steps and launch |
 | `env_keep_parent` | no | Env names that keep the parent process value when the machine already sets any of them |
+
+Hindsight settings provide **Test** for endpoint reachability (`OK: HTTP <status>`, including 401/403; `FAIL` if the request cannot complete) and **Check** for the configured model. Model Check requests `${llm_base_url}/models` and returns `OK: Model available`, `FAIL: Model not found: <id>`, or the first line of an HTTP error body. **Models** lists the model IDs that endpoint reports; click one to use it as the model ID. Checks use current on-screen settings and Windows `curl.exe`; the base URL must include its OpenAI-compatible path, such as `/v1` (the recipe default does).
 
 ### Settings
 
@@ -165,10 +169,21 @@ Otherwise the folder-local values from `env` apply, which keeps models in `{app}
 
 - Installed version is recorded in `<app>/installed.json` after a successful setup.
 - Latest version is `app.json.version` from the refreshed marketplace.
-- `update available` means installed version differs from latest. Only the marketplace decides when an app
-  is republished, so bump `version` on every behavior change.
+- `update available` means the marketplace recipe version is strictly greater than the installed version. Only
+  the marketplace decides when an app is republished, so bump `version` on every behavior change.
 - Update re-runs the whole setup (source refresh, tool install, steps) and reports the new installed version.
 - An app cannot be started while it updates; Start resumes after the update.
+
+## One marketplace list
+
+Autark keeps a single app list. The selected branch or pull request only changes where the catalogue data is
+read from: entries keep their order, and an app known from an earlier source stays in the list when the
+current source omits it. The choice is stored in the settings, so a restart continues from the same branch or
+pull request; the Marketplace panel shows a banner with a link to it and a one-click return to the default
+branch. While a preview source is active, every installed app shows a reload icon that copies
+the source's `app.json` (and icon) into the app folder without running setup, so a recipe change arrives
+without downloads or reinstalling. `Update all` stays version-gated: it only takes an app whose marketplace
+recipe version is strictly greater than the installed one.
 
 ## Local apps
 

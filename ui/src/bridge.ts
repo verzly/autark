@@ -11,7 +11,7 @@ export interface SettingsLock { key: string; var: string; value: string }
 export interface AppPrefs { auto_start: boolean; shortcut_autostart: boolean; shortcut_background: boolean }
 export interface AppState {
   id: string; name: string; description: string; version_installed: string | null; version_app: string | null; version_latest: string | null;
-    update_available: boolean; installed: boolean; local: boolean; phase: Phase; preview: string | null; restore_available: boolean; settings: Record<string, unknown>; settings_schema: AppSetting[]; settings_locked: SettingsLock[]; prefs: AppPrefs; actions: AppAction[]; can_start: boolean;
+    update_available: boolean; installed: boolean; local: boolean; upstream: string | null; phase: Phase; preview: string | null; restore_available: boolean; settings: Record<string, unknown>; settings_schema: AppSetting[]; settings_locked: SettingsLock[]; prefs: AppPrefs; actions: AppAction[]; can_start: boolean;
    url: string | null; homepage: string | null; license: string | null; icon_path: string | null; icon_data: string | null;
   requirements: { disk_gb: number | null; webview2: boolean };
   last_error: { code: string; message: string } | null; step: { index: number; total: number; name: string } | null;
@@ -49,6 +49,7 @@ export const api = {
   refreshMarketplace: () => invoke<State>("refresh_marketplace"),
   setMarketplaceSource: (source: string) => invoke<State>("set_marketplace_source", { source }),
   checkUpdates: () => invoke<State>("check_updates"),
+  refreshAppManifest: (app_id: string) => invoke<State>("refresh_app_manifest", { app_id }),
   installApp: (app_id: string, approve_effects: boolean) => invoke<State>("install_app", { app_id, approve_effects }),
   updateApp: (app_id: string, approve_effects: boolean) => invoke<State>("update_app", { app_id, approve_effects }),
   reinstallApp: (app_id: string, approve_effects: boolean) => invoke<State>("reinstall_app", { app_id, approve_effects }),
@@ -61,6 +62,7 @@ export const api = {
   removeApp: (app_id: string, confirm: string) => invoke<State>("remove_app", { app_id, confirm }),
   resetAutark: (confirm: string) => invoke<State>("reset_autark", { confirm }),
   saveAppSettings: (app_id: string, settings: Record<string, unknown>) => invoke<State>("save_app_settings", { app_id, settings }),
+  probeLlm: (app_id: string, check: "endpoint" | "model" | "models", settings?: Record<string, unknown>) => invoke<string>("probe_llm", { app_id, check, settings }),
   saveAppPrefs: (app_id: string, prefs: AppState["prefs"]) => invoke<State>("save_app_prefs", { app_id, prefs }),
   createShortcut: (app_id: string) => invoke<State>("create_shortcut", { app_id }),
   cancelOperation: (app_id: string) => invoke<State>("cancel_operation", { app_id }),

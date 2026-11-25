@@ -223,6 +223,7 @@ async fn save_settings(
     settings.open_tabs = current.open_tabs.clone();
     settings.active_tab = current.active_tab.clone();
     settings.marketplace_last_refresh = current.marketplace_last_refresh;
+    settings.marketplace_source = current.marketplace_source.clone();
     settings.wizard_complete |= current.wizard_complete;
     // The folder dialog returns the parent, so a new root means <picked>\<folder name>.
     let picked = settings.root_path();
@@ -405,6 +406,17 @@ async fn set_marketplace_source(
 async fn check_updates(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> CmdResult<State> {
     let inner = shared.inner().clone();
     apps::check_updates(&app, &inner)?;
+    Ok(apps::wire(&inner))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn refresh_app_manifest(
+    app: AppHandle,
+    shared: TauriState<'_, Arc<Shared>>,
+    app_id: String,
+) -> CmdResult<State> {
+    let inner = shared.inner().clone();
+    apps::refresh_app_manifest(&app, &inner, &app_id)?;
     Ok(apps::wire(&inner))
 }
 
@@ -643,6 +655,53 @@ fn save_app_settings(
 }
 
 #[tauri::command(rename_all = "snake_case")]
+fn probe_llm(shared: TauriState<'_, Arc<Shared>>, app_id: String, check: String, settings: Option<serde_json::Map<String, serde_json::Value>>) -> Result<String, String> {
+    let record = apps::app_record(&shared, &app_id).map_err(|error| format!("{error:#}"))?;
+    let root = shared.root();
+    let app_dir = manifest::app_dir(&root, &app_id);
+    let mut values = manifest::load_settings(&app_dir, &record.manifest);
+    if let Some(settings) = settings {
+        for (key, value) in settings { values.insert(key, value); }
+    }
+    let get = |key: &str| values.get(key).and_then(serde_json::Value::as_str).unwrap_or("");
+    let base = get("llm_base_url").trim_end_matches('/');
+    if base.is_empty() { return Err("LLM base URL is empty".into()); }
+    let endpoint = format!("{}/models", base);
+    let mut command = std::process::Command::new("curl.exe");
+    command.args(["--config", "-", "-m", "10", "-sS", "-w", "\n%{http_code}", endpoint.as_str()]);
+    let key_path = get("llm_api_key_file");
+    let key_path = if key_path.is_empty() { None } else {
+        manifest::expand(key_path, &root, &app_dir, &values).ok().map(std::path::PathBuf::from)
+    };
+    let key = key_path.and_then(|path| std::fs::read_to_string(path).ok()).map(|key| key.trim().to_string()).filter(|key| !key.is_empty());
+    let mut child = command.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().map_err(|error| format!("Could not start curl.exe: {error}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        if let Some(key) = &key {
+            use std::io::Write;
+            let escaped = key.replace('\\', "\\\\").replace('"', "\\\"");
+            write!(stdin, "header = \"Authorization: Bearer {escaped}\"\n").map_err(|error| error.to_string())?;
+        }
+    }
+    let output = child.wait_with_output().map_err(|error| error.to_string())?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let (body, status) = text.rsplit_once('\n').unwrap_or((&text, "000"));
+    let status: u16 = status.trim().parse().unwrap_or(0);
+    if check == "endpoint" {
+        if status == 0 { return Err("Could not reach LLM endpoint".into()); }
+        return Ok(format!("HTTP {status}"));
+    }
+    if check != "model" && check != "models" { return Err("Unknown LLM check".into()); }
+    if !(200..300).contains(&status) { return Err(body.lines().next().unwrap_or("LLM request failed").trim().chars().take(180).collect()); }
+    let json: serde_json::Value = serde_json::from_str(body).map_err(|_| "Invalid models response".to_string())?;
+    let ids: Vec<&str> = json["data"].as_array().map(|items| items.iter().filter_map(|item| item["id"].as_str()).collect()).unwrap_or_default();
+    if check == "models" { return serde_json::to_string(&ids).map_err(|error| error.to_string()); }
+    let model = get("llm_model");
+    if ids.iter().any(|id| id.eq_ignore_ascii_case(model)) {
+        Ok("Model available".into())
+    } else { Err(format!("Model not found: {model}")) }
+}
+
+#[tauri::command(rename_all = "snake_case")]
 fn save_app_prefs(app: AppHandle, shared: TauriState<'_, Arc<Shared>>, app_id: String, prefs: Prefs) -> CmdResult<State> {
     apps::save_app_prefs(&app, &shared, &app_id, prefs)?;
     Ok(apps::wire(&shared))
@@ -856,6 +915,7 @@ fn main() {
             refresh_marketplace,
             set_marketplace_source,
             check_updates,
+            refresh_app_manifest,
             install_app,
             update_app,
             reinstall_app,
@@ -867,6 +927,7 @@ fn main() {
             open_app,
             remove_app,
             save_app_settings,
+            probe_llm,
             save_app_prefs,
             create_shortcut,
             cancel_operation,

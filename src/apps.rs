@@ -104,6 +104,7 @@ pub struct AppState {
     pub version_installed: Option<String>,
     pub version_app: Option<String>,
     pub version_latest: Option<String>,
+    pub upstream: Option<String>,
     pub update_available: bool,
     pub installed: bool,
     pub phase: Phase,
@@ -185,9 +186,17 @@ pub struct AppRecord {
 }
 
 impl AppRecord {
-    fn from_manifest(root: &Path, manifest_dir: &Path, manifest: Manifest, in_catalogue: bool, local: bool) -> Self {
-        let app_dir = manifest::app_dir(root, &manifest.id);
+    fn from_manifest(root: &Path, manifest_dir: &Path, catalogue: Manifest, in_catalogue: bool, local: bool) -> Self {
+        let app_dir = manifest::app_dir(root, &catalogue.id);
         let installed_record = manifest::read_installed(&app_dir);
+        let preview = installed_record.as_ref().and_then(|record| record.source.clone());
+        let version_latest = (in_catalogue && !local).then(|| catalogue.version.clone());
+        // A preview install keeps the recipe it was installed from, because the
+        // marketplace clone is reset to the default branch on the next start.
+        let manifest = preview
+            .as_ref()
+            .and_then(|_| Manifest::load(&app_dir).ok())
+            .unwrap_or(catalogue);
         let values = manifest::load_settings(&app_dir, &manifest);
         let prefs = prefs::load(&app_dir);
         let check = manifest
@@ -207,7 +216,7 @@ impl AppRecord {
                 .as_ref()
                 .and_then(|record| record.app_version.clone())
                 .filter(|_| installed),
-            version_latest: (in_catalogue && !local).then(|| manifest.version.clone()),
+            version_latest,
             installed,
             phase: if installed {
                 Phase::Installed
@@ -235,7 +244,7 @@ impl AppRecord {
         !self.local && self.installed
             && matches!(
                 (&self.installed_version, &self.version_latest),
-                (Some(installed), Some(latest)) if installed != latest
+                (Some(installed), Some(latest)) if newer(latest, installed)
             )
     }
 
@@ -251,6 +260,7 @@ impl AppRecord {
             version_installed: self.installed_version.clone(),
             version_app: self.app_version.clone(),
             version_latest: self.version_latest.clone(),
+            upstream: self.manifest.upstream.clone(),
             update_available: self.update_available(),
             installed: self.installed,
             phase: self.phase,
@@ -278,6 +288,30 @@ impl AppRecord {
             restore_available: self.preview.is_some() && marketplace_source.is_empty(),
         }
     }
+}
+
+/// Only a strictly newer recipe may overwrite an installed app.
+fn newer(latest: &str, installed: &str) -> bool {
+    fn parts(value: &str) -> Vec<String> {
+        value
+            .trim()
+            .trim_start_matches(|c| c == 'v' || c == 'V')
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .filter(|part| !part.is_empty())
+            .map(str::to_ascii_lowercase)
+            .collect()
+    }
+    let (left, right) = (parts(latest), parts(installed));
+    for (a, b) in left.iter().zip(right.iter()) {
+        let order = match (a.parse::<u64>(), b.parse::<u64>()) {
+            (Ok(a), Ok(b)) => a.cmp(&b),
+            _ => a.cmp(b),
+        };
+        if !order.is_eq() {
+            return order.is_gt();
+        }
+    }
+    left.len() > right.len()
 }
 
 fn read_icon_data(manifest: &Manifest, manifest_dir: &Path) -> Option<String> {
@@ -372,12 +406,13 @@ impl Shared {
                 refreshing: false,
                 last_refresh: settings.marketplace_last_refresh,
                 error: None,
-                source: String::new(),
+                source: settings.marketplace_source.clone(),
             },
         };
-        // A preview is session-only: return the working tree to the default branch on the next start.
-        if !marketplace::applied_source(&root).is_empty() {
-            if let Err(error) = marketplace::sync(&root, "") {
+        // The selected source is remembered, so the clone follows it on every start.
+        let applied = marketplace::applied_source(&root);
+        if !settings.marketplace_source.is_empty() || !applied.is_empty() {
+            if let Err(error) = marketplace::sync(&root, &settings.marketplace_source) {
                 core.marketplace.error = Some(ErrorInfo::from_error(&error));
             }
         }
@@ -404,6 +439,52 @@ impl Shared {
             .settings
             .clone()
     }
+}
+
+/// Quotes a logged argument so a multi-line payload cannot swallow the flags after it.
+fn echo_arg(arg: &str) -> String {
+    if !arg.contains([' ', '\t', '\n', '"']) {
+        return arg.to_string();
+    }
+    let quoted = format!("\"{}\"", arg.replace('"', "\\\""));
+    if arg.contains('\n') {
+        format!("{quoted}\n")
+    } else {
+        quoted
+    }
+}
+
+/// Frees the app's port when the listener is an orphaned process from the app folder.
+/// A process outside the app folder is left alone, so an unrelated service is never killed.
+fn reclaim_own_port(url: &str, app_dir: &Path) -> Option<u16> {
+    let port = url.trim_end_matches('/').rsplit([':', '/']).next()?.parse::<u16>().ok()?;
+    let script = format!(
+        "$c=Get-NetTCPConnection -LocalPort {port} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if ($c) {{ $p=Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue; $w=Get-CimInstance Win32_Process -Filter \"ProcessId=$($c.OwningProcess)\" -ErrorAction SilentlyContinue; Write-Output \"$($c.OwningProcess)|$($p.Path)|$($w.CommandLine)\" }}"
+    );
+    let output = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", &script])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let mut parts = text.split('|');
+    let pid = parts.next()?;
+    let path = parts.next().unwrap_or("").to_lowercase();
+    let command_line = parts.next().unwrap_or("").to_lowercase();
+    let dir = app_dir.to_string_lossy().to_lowercase();
+    // The venv launcher runs through Autark's mise python and does not put the app
+    // folder on its command line, so a python process serving the same port counts too.
+    let python = path.ends_with("python.exe") || path.ends_with("pythonw.exe");
+    let ours = path.starts_with(&dir)
+        || command_line.contains(&dir)
+        || (python && command_line.contains(&format!("--port {port}")));
+    if !ours {
+        return None;
+    }
+    std::process::Command::new("taskkill")
+        .args(["/PID", pid, "/F"])
+        .output()
+        .ok()?;
+    Some(port)
 }
 
 fn now() -> u64 {
@@ -473,16 +554,29 @@ pub fn load_catalogue(core: &mut Core) -> Vec<String> {
         }
     }
 
-    let previous: HashMap<String, AppRecord> = core
+    // One marketplace list: the list keeps the order the user already sees, and an app
+    // known from a previously selected source stays visible when the current one omits it.
+    let order: Vec<String> = core
+        .records
+        .iter()
+        .map(|record| record.manifest.id.clone())
+        .collect();
+    let mut previous: HashMap<String, AppRecord> = core
         .records
         .drain(..)
         .map(|record| (record.manifest.id.clone(), record))
         .collect();
+    discovered.sort_by_key(|(_, manifest, _, _)| {
+        order
+            .iter()
+            .position(|id| id == &manifest.id)
+            .unwrap_or(usize::MAX)
+    });
 
-    let mut records = Vec::with_capacity(discovered.len());
+    let mut records = Vec::with_capacity(discovered.len() + previous.len());
     for (dir, manifest, in_catalogue, local) in discovered {
         let mut record = AppRecord::from_manifest(&root, &dir, manifest, in_catalogue, local);
-        if let Some(old) = previous.get(&record.manifest.id) {
+        if let Some(old) = previous.remove(&record.manifest.id) {
             if old.phase.is_busy() || old.phase == Phase::Running {
                 record.phase = old.phase;
                 record.url = old.url.clone();
@@ -495,6 +589,11 @@ pub fn load_catalogue(core: &mut Core) -> Vec<String> {
             }
         }
         records.push(record);
+    }
+    for id in &order {
+        if let Some(record) = previous.remove(id) {
+            records.push(record);
+        }
     }
     core.records = records;
     warnings
@@ -720,6 +819,17 @@ pub fn setup(app: &AppHandle, shared: &Shared, id: &str, kind: SetupKind) -> Res
     }
     manifest::save_settings(&app_dir, &values)?;
     manifest::snapshot_manifest(&app_dir, &manifest)?;
+    // Copy the recipe icon into the app folder so the card keeps it when the
+    // marketplace clone switches to another source.
+    if let Some(icon) = manifest.icon_path(&snapshot.manifest_dir) {
+        let icon = PathBuf::from(icon);
+        if let Some(name) = icon.file_name() {
+            let target = app_dir.join(name);
+            if icon.is_file() && icon != target {
+                fs::copy(&icon, &target)?;
+            }
+        }
+    }
     check_cancel(id)?;
 
     if !manifest.setup.tools.is_empty() {
@@ -1266,11 +1376,21 @@ fn start_inner(app: &AppHandle, shared: &Arc<Shared>, id: &str) -> Result<()> {
         .stderr(Stdio::piped());
 
     let mut echo = program.clone();
-    if !args.is_empty() {
-        echo.push(' ');
-        echo.push_str(&args.join(" "));
+    for arg in &args {
+        if !echo.ends_with('\n') {
+            echo.push(' ');
+        }
+        echo.push_str(&echo_arg(arg));
     }
     log(app, id, format!("$ {echo}"));
+
+    if let Some(template) = manifest.launch.url.clone() {
+        if let Ok(url) = manifest::expand(&template, &root, &app_dir, &values) {
+            if let Some(port) = reclaim_own_port(&url, &app_dir) {
+                log(app, id, format!("released port {port} from a stale app process"));
+            }
+        }
+    }
 
     set_phase(app, shared, id, Phase::Starting);
     let mut child = command
@@ -1336,15 +1456,15 @@ fn spawn_watcher(app: AppHandle, shared: Arc<Shared>, id: String) {
         if let Some(status) = exited {
             mutate(&app, &shared, &id, |record| {
                 if record.phase == Phase::Running || record.phase == Phase::Starting {
-                    record.phase = Phase::Failed;
+                    // A self-exit is not a broken install: Start stays available.
+                    record.phase = if record.installed {
+                        Phase::Installed
+                    } else {
+                        Phase::NotInstalled
+                    };
                     record.url = None;
                     record.started_at = None;
-                    record.last_error = Some(ErrorInfo::new(
-                        "start_failed",
-                        format!(
-                            "the app exited on its own ({status}). Reinstall it from the app settings."
-                        ),
-                    ));
+                    record.last_error = None;
                 }
             });
             log(&app, &id, format!("app exited ({status})"));
@@ -1582,6 +1702,14 @@ pub fn set_marketplace_source(app: &AppHandle, shared: &Arc<Shared>, requested: 
         let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
         core.marketplace.source = previous;
     }
+    if result.is_ok() {
+        // Remember the choice so the next start follows the same branch or pull request.
+        let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
+        core.settings.marketplace_source = core.marketplace.source.clone();
+        let settings = core.settings.clone();
+        drop(core);
+        settings.save()?;
+    }
     release(shared, "");
     emit_state(app, shared);
     result
@@ -1698,22 +1826,55 @@ pub fn replace_local_app(app: &AppHandle, shared: &Arc<Shared>, id: &str, path: 
     Ok(())
 }
 
-pub fn update_all(app: &AppHandle, shared: &Arc<Shared>) -> Result<()> {
-    let source = {
+/// Copies the current marketplace recipe into the installed app folder without
+/// running setup: a cheap way to pick up an app.json change from a preview source.
+pub fn refresh_app_manifest(app: &AppHandle, shared: &Arc<Shared>, id: &str) -> Result<()> {
+    let (source_dir, app_dir, manifest) = {
         let core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
-        core.marketplace.source.clone()
+        let record = match core.records.iter().find(|record| record.manifest.id == id) {
+            Some(record) => record,
+            None => bail!("unknown app: {id}"),
+        };
+        if !record.installed {
+            bail!("the app is not installed");
+        }
+        (
+            record.manifest_dir.clone(),
+            manifest::app_dir(&core.settings.root_path(), id),
+            record.manifest.clone(),
+        )
     };
-    if !source.is_empty() {
-        bail!(
-            "preview_active: Update all is unavailable while the marketplace previews {source}. Switch back to the default branch first."
-        );
+    let file = source_dir.join("app.json");
+    if source_dir == app_dir || !file.is_file() {
+        bail!("the marketplace source has no recipe for this app");
     }
+    fs::copy(&file, app_dir.join("app.json"))?;
+    if let Some(icon) = manifest.icon_path(&source_dir) {
+        let icon = PathBuf::from(icon);
+        if let Some(name) = icon.file_name() {
+            let target = app_dir.join(name);
+            if icon.is_file() && icon != target {
+                fs::copy(&icon, &target)?;
+            }
+        }
+    }
+    let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
+    load_catalogue(&mut core);
+    drop(core);
+    emit_state(app, shared);
+    log(app, id, "recipe refreshed from the marketplace source".to_string());
+    Ok(())
+}
+
+pub fn update_all(app: &AppHandle, shared: &Arc<Shared>) -> Result<()> {
     reserve(shared, "", "update_all")?;
     let ids: Vec<String> = {
         let core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
         core.records
             .iter()
-            .filter(|record| record.update_available())
+            // Global update is version-gated: it never overwrites a preview build
+            // with an equal or older recipe. A single app is force reloaded instead.
+            .filter(|record| record.installed && record.update_available())
             .map(|record| record.manifest.id.clone())
             .collect()
     };

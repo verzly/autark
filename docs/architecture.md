@@ -94,6 +94,7 @@ Commands (`invoke`, snake_case args):
 | `open_app` | `app_id` | `State` |
 | `remove_app` | `app_id`, `confirm: string` | `State` |
 | `save_app_settings` | `app_id`, `settings: Record<string, unknown>` | `State` |
+| `probe_llm` | `app_id`, `check: "endpoint" \| "model"` | Short probe result |
 | `save_app_prefs` | `app_id`, `prefs` | `State` |
 | `create_shortcut` | `app_id` | `State` |
 | `cancel_operation` | `app_id` | `State` |
