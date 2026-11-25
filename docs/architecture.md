@@ -94,7 +94,7 @@ Commands (`invoke`, snake_case args):
 | `open_app` | `app_id` | `State` |
 | `remove_app` | `app_id`, `confirm: string` | `State` |
 | `save_app_settings` | `app_id`, `settings: Record<string, unknown>` | `State` |
-| `probe_llm` | `app_id`, `check: "endpoint" \| "model"` | Short probe result |
+| `probe_llm` | `app_id`, `check: "endpoint" \| "model" \| "models"`, optional `settings` map (unsaved drafts win over stored values) | `endpoint`: `HTTP <status>`; `model`: `Model available` / `Model not found: <id>`; `models`: JSON array of model IDs from `<llm_base_url>/models` |
 | `save_app_prefs` | `app_id`, `prefs` | `State` |
 | `create_shortcut` | `app_id` | `State` |
 | `cancel_operation` | `app_id` | `State` |

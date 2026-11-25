@@ -625,8 +625,8 @@ export default function App() {
             <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="market-source-title">
               <div class="dialog-title"><div><span class="eyebrow">MARKETPLACE</span><h2 id="market-source-title">Preview branch or PR</h2></div><button class="icon-button" aria-label="Close" onClick={() => setSourceOpen(false)}><Icon name="close" /></button></div>
               <p class="settings-muted">Load the marketplace from a branch or pull request to try a preview. Leave empty for the default branch.</p>
-              <input class="search" aria-label="Marketplace branch or PR" placeholder="Default branch — session only, resets on restart" value={marketSource()} disabled={state().busy} onInput={e => setMarketSource(e.currentTarget.value)} />
-              <small class="settings-muted">Session only. Autark returns to the default branch when it restarts.</small>
+              <input class="search" aria-label="Marketplace branch or PR" placeholder="Default branch — leave empty for the default" value={marketSource()} disabled={state().busy} onInput={e => setMarketSource(e.currentTarget.value)} />
+              <small class="settings-muted">Remembered across restarts. Back to stable returns to the default branch.</small>
               <div class="confirm-strip"><button class="button" onClick={() => setSourceOpen(false)}>Cancel</button><button class="button primary" disabled={state().busy} onClick={() => void applyMarketSource()}>Apply</button></div>
             </div>
           </div>

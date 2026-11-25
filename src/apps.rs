@@ -458,43 +458,43 @@ fn echo_arg(arg: &str) -> String {
 
 /// Frees the app's port when the listener is an orphaned process from the app folder.
 /// A process outside the app folder is left alone, so an unrelated service is never killed.
-fn reclaim_own_port(url: &str, app_dir: &Path) -> Option<u16> {
-    let port = url
+fn reclaim_own_port(url: &str, app_dir: &Path) -> Result<Option<u16>> {
+    let parsed = url
         .split("://")
-        .nth(1)?
-        .split('/')
-        .next()?
-        .rsplit(':')
-        .next()?
-        .parse::<u16>()
-        .ok()?;
+        .nth(1)
+        .and_then(|rest| rest.split('/').next())
+        .and_then(|host| host.rsplit(':').next())
+        .and_then(|port| port.parse::<u16>().ok());
+    let Some(port) = parsed else {
+        return Ok(None);
+    };
     let script = format!(
         "$c=Get-NetTCPConnection -LocalPort {port} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if ($c) {{ $p=Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue; $w=Get-CimInstance Win32_Process -Filter \"ProcessId=$($c.OwningProcess)\" -ErrorAction SilentlyContinue; Write-Output \"$($c.OwningProcess)|$($p.Path)|$($w.CommandLine)\" }}"
     );
-    let output = std::process::Command::new("powershell")
+    let Ok(output) = std::process::Command::new("powershell")
         .args(["-NoProfile", "-Command", &script])
         .output()
-        .ok()?;
+    else {
+        return Ok(None);
+    };
     let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let mut parts = text.split('|');
-    let pid = parts.next()?;
+    let Some(pid) = parts.next() else {
+        return Ok(None);
+    };
     let path = parts.next().unwrap_or("").to_lowercase();
     let command_line = parts.next().unwrap_or("").to_lowercase();
     let dir = app_dir.to_string_lossy().to_lowercase();
-    // The venv launcher runs through Autark's mise python and does not put the app
-    // folder on its command line, so a python process serving the same port counts too.
-    let python = path.ends_with("python.exe") || path.ends_with("pythonw.exe");
-    let ours = path.starts_with(&dir)
-        || command_line.contains(&dir)
-        || (python && command_line.contains(&format!("--port {port}")));
-    if !ours {
-        return None;
+    // Only the app's own files prove ownership; an unknown owner is reported, never killed.
+    if dir.is_empty() || !(path.starts_with(&dir) || command_line.contains(&dir)) {
+        bail!(
+            "port {port} is held by another process ({path}). Stop it or change the port in the app settings."
+        );
     }
-    std::process::Command::new("taskkill")
+    let _ = std::process::Command::new("taskkill")
         .args(["/PID", pid, "/F"])
-        .output()
-        .ok()?;
-    Some(port)
+        .output();
+    Ok(Some(port))
 }
 
 fn now() -> u64 {
@@ -772,6 +772,9 @@ impl SetupKind {
 
 pub fn setup(app: &AppHandle, shared: &Shared, id: &str, kind: SetupKind) -> Result<()> {
     let snapshot = find_record(shared, id)?;
+    if snapshot.phase == Phase::Running || snapshot.phase == Phase::Starting {
+        bail!("stop the app before running setup");
+    }
     let manifest = snapshot.manifest.clone();
     let values = snapshot.settings.clone();
     let core_settings = shared
@@ -1396,8 +1399,10 @@ fn start_inner(app: &AppHandle, shared: &Arc<Shared>, id: &str) -> Result<()> {
 
     if let Some(template) = manifest.launch.url.clone() {
         if let Ok(url) = manifest::expand(&template, &root, &app_dir, &values) {
-            if let Some(port) = reclaim_own_port(&url, &app_dir) {
-                log(app, id, format!("released port {port} from a stale app process"));
+            match reclaim_own_port(&url, &app_dir) {
+                Ok(Some(port)) => log(app, id, format!("released port {port} from a stale app process")),
+                Ok(None) => {}
+                Err(error) => return Err(error),
             }
         }
     }
@@ -1718,7 +1723,11 @@ pub fn set_marketplace_source(app: &AppHandle, shared: &Arc<Shared>, requested: 
         core.settings.marketplace_source = core.marketplace.source.clone();
         let settings = core.settings.clone();
         drop(core);
-        settings.save()?;
+        if let Err(error) = settings.save() {
+            release(shared, "");
+            emit_state(app, shared);
+            return Err(error);
+        }
     }
     release(shared, "");
     emit_state(app, shared);

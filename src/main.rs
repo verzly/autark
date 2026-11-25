@@ -530,6 +530,7 @@ async fn restore_app(
     }
     let inner = shared.inner().clone();
     apps::restore_guard(&inner, &app_id)?;
+    apps::stop(&app, &inner, &app_id)?;
     apps::reserve(&inner, &app_id, "update")?;
     let task = inner.clone();
     let handle = app.clone();
