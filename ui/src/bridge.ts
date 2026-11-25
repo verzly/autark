@@ -14,6 +14,7 @@ export interface AppState {
     update_available: boolean; installed: boolean; local: boolean; upstream: string | null; phase: Phase; preview: string | null; restore_available: boolean; settings: Record<string, unknown>; settings_schema: AppSetting[]; settings_locked: SettingsLock[]; prefs: AppPrefs; actions: AppAction[]; can_start: boolean;
    url: string | null; homepage: string | null; license: string | null; icon_path: string | null; icon_data: string | null;
   requirements: { disk_gb: number | null; webview2: boolean };
+  faq: { question: string; answer: string }[];
   last_error: { code: string; message: string } | null; step: { index: number; total: number; name: string } | null;
   started_at: number | null; elapsed_secs: number | null;
 }

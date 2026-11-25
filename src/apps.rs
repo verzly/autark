@@ -123,6 +123,7 @@ pub struct AppState {
     pub icon_path: Option<String>,
     pub icon_data: Option<String>,
     pub requirements: Requirements,
+    pub faq: Vec<manifest::FaqItem>,
     pub last_error: Option<ErrorInfo>,
     pub step: Option<StepInfo>,
     pub started_at: Option<u64>,
@@ -280,6 +281,7 @@ impl AppRecord {
             icon_path: self.manifest.icon_path(&self.manifest_dir),
             icon_data: self.icon_data.clone(),
             requirements: self.manifest.requirements.clone(),
+            faq: self.manifest.faq.clone(),
             last_error: self.last_error.clone(),
             step: self.step.clone(),
             started_at: self.started_at,
@@ -457,7 +459,15 @@ fn echo_arg(arg: &str) -> String {
 /// Frees the app's port when the listener is an orphaned process from the app folder.
 /// A process outside the app folder is left alone, so an unrelated service is never killed.
 fn reclaim_own_port(url: &str, app_dir: &Path) -> Option<u16> {
-    let port = url.trim_end_matches('/').rsplit([':', '/']).next()?.parse::<u16>().ok()?;
+    let port = url
+        .split("://")
+        .nth(1)?
+        .split('/')
+        .next()?
+        .rsplit(':')
+        .next()?
+        .parse::<u16>()
+        .ok()?;
     let script = format!(
         "$c=Get-NetTCPConnection -LocalPort {port} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if ($c) {{ $p=Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue; $w=Get-CimInstance Win32_Process -Filter \"ProcessId=$($c.OwningProcess)\" -ErrorAction SilentlyContinue; Write-Output \"$($c.OwningProcess)|$($p.Path)|$($w.CommandLine)\" }}"
     );

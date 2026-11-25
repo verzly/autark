@@ -81,6 +81,7 @@ README.md
 | `license` | no | SPDX id of the app itself |
 | `icon` | no | File next to `app.json`; png, 256x256 |
 | `requirements` | no | `disk_gb` (number), `webview2` (bool); informational only, shown before install |
+| `faq` | no | Array of `{ "question", "answer" }`; shown on the app page. An empty or missing list hides the FAQ section. |
 | `settings` | no | Per-app user settings, see below |
 | `setup` | yes | Everything needed to make the app runnable, see below |
 | `setup.tools` | no | Map of mise tool → version. Written to `<app>/mise.toml` and installed with `mise install` |

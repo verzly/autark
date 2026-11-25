@@ -149,6 +149,7 @@ interface AppState {
   license: string | null;
   icon_path: string | null;
   requirements: { disk_gb: number | null; webview2: boolean };
+  faq: { question: string; answer: string }[];
   last_error: { code: string; message: string } | null;
   step: { index: number; total: number; name: string } | null;
   started_at: number | null;     // unix seconds

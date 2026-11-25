@@ -25,6 +25,13 @@ pub struct Requirements {
     pub webview2: bool,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FaqItem {
+    pub question: String,
+    pub answer: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SettingKind {
@@ -118,6 +125,9 @@ pub struct Manifest {
     pub upstream: Option<String>,
     pub icon: Option<String>,
     pub requirements: Requirements,
+    /// Optional questions shown on the app page; an empty list hides the section.
+    #[serde(default)]
+    pub faq: Vec<FaqItem>,
     pub settings: Vec<AppSetting>,
     pub setup: Setup,
     pub launch: Launch,
@@ -142,6 +152,7 @@ impl Default for Manifest {
             upstream: None,
             icon: None,
             requirements: Requirements::default(),
+            faq: Vec::new(),
             settings: Vec::new(),
             setup: Setup::default(),
             launch: Launch::default(),
