@@ -89,6 +89,7 @@ export default function App() {
   const [drafts, setDrafts] = createSignal<Record<string, Record<string, unknown>>>({});
   const [root, setRoot] = createSignal("");
   const [allConfirm, setAllConfirm] = createSignal(false);
+  const [appTab, setAppTab] = createSignal<"output" | "faq">("output");
   const [marketSource, setMarketSource] = createSignal(state().marketplace.source);
   const [sourceOpen, setSourceOpen] = createSignal(false);
   // The input follows the backend, but a state event must not overwrite what is being typed.
@@ -759,12 +760,15 @@ export default function App() {
            <Show when={panel() === "install"}><div class="inline-panel"><p>Setup may install system components through mise and requires network access.</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={confirmInstall}>Confirm</button></div></div></Show>
            <Show when={panel() === "restore"}><div class="inline-panel"><p>Reinstall this app from the marketplace's default branch? The preview build is replaced. Settings and user data are preserved.</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={() => { setPanel(null); restoreApp(a()); }}>Restore</button></div></div></Show>
            <For each={a().actions.filter(item => item.confirm && panel() === `action:${item.id}`)}>{item => <div class="inline-panel"><p>Run {item.label}?</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp() || !a().installed} onClick={() => { setPanel(null); void run(() => api.runAction(a().id, item.id)); }}>Confirm</button></div></div>}</For>
-          <Show when={a().faq.length}><section class="faq"><h2>FAQ</h2><For each={a().faq}>{item => <details class="faq-item"><summary>{item.question}</summary><p>{item.answer}</p></details>}</For></section></Show>
-          <section class="output-section"><div class="output-head"><h2>Output</h2><button onClick={() => { setBuffers(b => ({ ...b, [a().id]: [] })); setFollow(true); }}>Clear</button></div>
+          <div class="app-tabs" role="tablist"><button class={`app-tab ${appTab() === "output" ? "active" : ""}`} role="tab" aria-selected={appTab() === "output"} onClick={() => setAppTab("output")}>Output</button><Show when={a().faq.length}><button class={`app-tab ${appTab() === "faq" ? "active" : ""}`} role="tab" aria-selected={appTab() === "faq"} onClick={() => setAppTab("faq")}>FAQ</button></Show><Show when={!a().faq.length || appTab() === "output"}><button class="app-tab app-tab-end" onClick={() => void run(() => navigator.clipboard.writeText(logs().join("\n") as string))}>Copy</button><button class="app-tab app-tab-clear" onClick={() => { setBuffers(b => ({ ...b, [a().id]: [] })); setFollow(true); }}>Clear</button></Show></div>
+          <Show when={a().faq.length && appTab() === "faq"}><section class="faq"><For each={a().faq}>{item => <details class="faq-item"><summary>{item.question}</summary><p>{item.answer}</p></details>}</For></section></Show>
+          <Show when={!a().faq.length || appTab() === "output"}>
+          <section class="output-section">
             <div class="output-wrap"><div class="output" ref={output} onScroll={() => output && setFollow(output.scrollHeight - output.scrollTop - output.clientHeight < 24)}>
               <Show when={logs().length} fallback={<span class="quiet">Operation output will appear here.</span>}><For each={logEntries()}>{entry => <div class={entry.spacer ? "log-spacer" : `log ${lineTone(entry.line)}`} aria-hidden={entry.spacer || undefined}>{entry.spacer ? "\u00a0" : <LogText line={entry.line} />}</div>}</For></Show>
             </div><Show when={!follow() && logs().length}><button class="jump" onClick={() => { if (output) output.scrollTop = output.scrollHeight; setFollow(true); }}>Jump to latest</button></Show></div>
           </section>
+          </Show>
           <footer class="metadata"><button title={state().settings.root + "\\apps\\" + a().id} onClick={() => reveal("app", a().id)}>{`${state().settings.root}\\apps\\${a().id}`}</button><span>{a().version_app ? `app ${a().version_app}` : "app version unknown"} {a().update_available ? `latest ${a().version_latest ?? "unknown"}` : "latest"}<button class="check-button" title="Check the marketplace for a newer version" onClick={() => void run(() => api.checkUpdates())}>(check)</button></span><span>{a().local ? "local" : `recipe ${a().version_installed ?? "not installed"} ${a().update_available ? `latest ${a().version_latest ?? "unknown"}` : "latest"}`}{a().local ? null : <button class="check-button" title="Check the marketplace for a newer version" onClick={() => void run(() => api.checkUpdates())}>(check)</button>}</span><code>{a().id}</code></footer>
         </section>}>
           <section class="app-settings-page">
