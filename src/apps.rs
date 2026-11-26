@@ -784,8 +784,8 @@ pub fn setup(app: &AppHandle, shared: &Shared, id: &str, kind: SetupKind) -> Res
     if snapshot.phase == Phase::Running || snapshot.phase == Phase::Starting {
         bail!("stop the app before running setup");
     }
-    let manifest = snapshot.manifest.clone();
-    let values = snapshot.settings.clone();
+    let mut manifest = snapshot.manifest.clone();
+    let mut values = snapshot.settings.clone();
     let core_settings = shared
         .core
         .lock()
@@ -799,6 +799,14 @@ pub fn setup(app: &AppHandle, shared: &Shared, id: &str, kind: SetupKind) -> Res
     let root = core_settings.root_path();
     let force_local_mise = core_settings.force_local_mise;
     let app_dir = manifest::app_dir(&root, id);
+    // A preview recipe is kept after a switch to stable, but setup must run the
+    // recipe of the active source, otherwise new settings never appear.
+    if marketplace_source.is_empty() && snapshot.preview.is_some() {
+        if let Ok(stable) = Manifest::load(&snapshot.manifest_dir) {
+            values = manifest::load_settings(&app_dir, &stable);
+            manifest = stable;
+        }
+    }
 
     set_phase(app, shared, id, kind.phase());
     mutate(app, shared, id, |record| {
