@@ -147,6 +147,10 @@ pub fn sync(root: &Path, requested: &str) -> Result<String> {
         // No checkout first: every source, including a pull request, is fetched the same way.
         git(&["clone", "--depth", "1", "--no-checkout", MARKETPLACE_URL, &path_arg(&dir)])?;
     }
+    // A killed fetch leaves a lock behind; nothing else in this process runs git here.
+    for lock in ["shallow.lock", "index.lock"] {
+        let _ = fs::remove_file(dir.join(".git").join(lock));
+    }
     git(&[
         "-C",
         &path_arg(&dir),
