@@ -458,7 +458,7 @@ fn echo_arg(arg: &str) -> String {
 
 /// Frees the app's port when the listener is an orphaned process from the app folder.
 /// A process outside the app folder is left alone, so an unrelated service is never killed.
-fn reclaim_own_port(url: &str, app_dir: &Path) -> Result<Option<u16>> {
+fn reclaim_own_port(url: &str, app_dir: &Path, app_id: &str) -> Result<Option<u16>> {
     let parsed = url
         .split("://")
         .nth(1)
@@ -485,10 +485,16 @@ fn reclaim_own_port(url: &str, app_dir: &Path) -> Result<Option<u16>> {
     let path = parts.next().unwrap_or("").to_lowercase();
     let command_line = parts.next().unwrap_or("").to_lowercase();
     let dir = app_dir.to_string_lossy().to_lowercase();
-    // Only the app's own files prove ownership; an unknown owner is reported, never killed.
-    if dir.is_empty() || !(path.starts_with(&dir) || command_line.contains(&dir)) {
+    let app = app_id.to_lowercase();
+    // Only app-specific evidence proves ownership; an unknown owner is reported, never killed.
+    let owned = !dir.is_empty()
+        && (path.starts_with(&dir)
+            || command_line.contains(&dir)
+            || (!app.is_empty() && command_line.contains(&app)));
+    if !owned {
+        let name = if path.is_empty() { "unknown process".to_string() } else { path.clone() };
         bail!(
-            "port {port} is held by another process ({path}). Stop it or change the port in the app settings."
+            "port {port} is held by PID {pid} ({name}). Stop it or change the port in the app settings."
         );
     }
     let _ = std::process::Command::new("taskkill")
@@ -1399,7 +1405,7 @@ fn start_inner(app: &AppHandle, shared: &Arc<Shared>, id: &str) -> Result<()> {
 
     if let Some(template) = manifest.launch.url.clone() {
         if let Ok(url) = manifest::expand(&template, &root, &app_dir, &values) {
-            match reclaim_own_port(&url, &app_dir) {
+            match reclaim_own_port(&url, &app_dir, id) {
                 Ok(Some(port)) => log(app, id, format!("released port {port} from a stale app process")),
                 Ok(None) => {}
                 Err(error) => return Err(error),
