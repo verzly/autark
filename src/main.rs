@@ -521,9 +521,10 @@ async fn restore_app(
     }
     let inner = shared.inner().clone();
     apps::restore_guard(&inner, &app_id)?;
-    // Drop the preview recipe first, so the reinstall runs the default branch.
-    apps::refresh_app_source(&app, &inner, &app_id, Some(""))?;
+    // Stop with the preview recipe, so its shutdown command and port are handled,
+    // before the reinstall replaces it with the default branch.
     apps::stop(&app, &inner, &app_id)?;
+    apps::refresh_app_source(&app, &inner, &app_id, Some(""))?;
     apps::reserve(&inner, &app_id, "update")?;
     let task = inner.clone();
     let handle = app.clone();
@@ -661,7 +662,7 @@ fn probe_llm(shared: TauriState<'_, Arc<Shared>>, app_id: String, check: String,
     let base = get("llm_base_url").trim_end_matches('/');
     if base.is_empty() { return Err("LLM base URL is empty".into()); }
     let endpoint = format!("{}/models", base);
-    let mut command = std::process::Command::new("curl.exe");
+    let mut command = crate::tools::new_command("curl.exe");
     command.args(["--config", "-", "-m", "10", "-sS", "-w", "\n%{http_code}", endpoint.as_str()]);
     let key_path = get("llm_api_key_file");
     let key_path = if key_path.is_empty() { None } else {

@@ -210,18 +210,29 @@ pub fn export_app_source(root: &Path, id: &str, requested: &str, target: &Path) 
     .with_context(|| format!("that source has no recipe for {id}"))?;
     let manifest: Manifest =
         serde_json::from_str(&recipe).context("invalid app.json in that source")?;
-    fs::write(target.join("app.json"), &recipe)?;
-    if let Some(icon) = &manifest.icon {
-        let bytes = git_bytes(&[
-            "-C",
-            &path_arg(&clone),
-            "show",
-            &format!("{commit}:apps/{id}/{icon}"),
-        ])
-        .with_context(|| format!("cannot read the icon of {id} from that source"))?;
-        if let Some(name) = Path::new(icon).file_name() {
-            fs::write(target.join(name), bytes)?;
+    manifest
+        .validate(id)
+        .with_context(|| format!("that source has an invalid recipe for {id}"))?;
+    // Read the icon before touching the installed files: a missing icon must not
+    // leave the new recipe next to the old icon, recorded as another source.
+    let icon = match &manifest.icon {
+        Some(icon) => {
+            let bytes = git_bytes(&[
+                "-C",
+                &path_arg(&clone),
+                "show",
+                &format!("{commit}:apps/{id}/{icon}"),
+            ])
+            .with_context(|| format!("cannot read the icon of {id} from that source"))?;
+            Path::new(icon)
+                .file_name()
+                .map(|name| (name.to_owned(), bytes))
         }
+        None => None,
+    };
+    fs::write(target.join("app.json"), &recipe)?;
+    if let Some((name, bytes)) = icon {
+        fs::write(target.join(name), bytes)?;
     }
     Ok(source.label())
 }

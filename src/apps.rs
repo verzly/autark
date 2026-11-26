@@ -477,7 +477,7 @@ fn reclaim_own_port(url: &str, app_dir: &Path, app_id: &str) -> Result<Option<u1
     let script = format!(
         "$c=Get-NetTCPConnection -LocalPort {port} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if ($c) {{ $p=Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue; $w=Get-CimInstance Win32_Process -Filter \"ProcessId=$($c.OwningProcess)\" -ErrorAction SilentlyContinue; Write-Output \"$($c.OwningProcess)|$($p.Path)|$($w.CommandLine)\" }}"
     );
-    let Ok(output) = std::process::Command::new("powershell")
+    let Ok(output) = crate::tools::new_command("powershell")
         .args(["-NoProfile", "-Command", &script])
         .output()
     else {
@@ -506,7 +506,7 @@ fn reclaim_own_port(url: &str, app_dir: &Path, app_id: &str) -> Result<Option<u1
             "port {port} is held by PID {pid} ({name}). Stop it or change the port in the app settings."
         );
     }
-    let _ = std::process::Command::new("taskkill")
+    let _ = crate::tools::new_command("taskkill")
         .args(["/PID", pid, "/F"])
         .output();
     Ok(Some(port))
@@ -1884,6 +1884,9 @@ fn refresh_app_source_inner(
     request: &str,
 ) -> Result<()> {
     let label = if request.is_empty() {
+        // The clone may be stale, and this branch reports success: fetch the default
+        // branch first so a remote recipe change is visible without a full reload.
+        marketplace::sync(root, "")?;
         let source_dir = marketplace::dir(root).join("apps").join(id);
         let file = source_dir.join("app.json");
         if !file.is_file() {

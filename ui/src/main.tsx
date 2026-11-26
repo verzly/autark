@@ -414,18 +414,25 @@ export default function App() {
   };
   const sourceValue = (a: AppState) => sourceDrafts()[a.id] ?? a.preview ?? "";
   const setSourceValue = (a: AppState, value: string) => setSourceDrafts(d => ({ ...d, [a.id]: value }));
+  const clearSourceDraft = (id: string) => setSourceDrafts(d => { const next = { ...d }; delete next[id]; return next; });
   const applyAppSource = async (a: AppState) => {
     const source = sourceValue(a).trim();
     setSourceValue(a, source);
     if (mockMode()) {
       setState(s => ({ ...s, apps: s.apps.map(x => x.id === a.id ? { ...x, preview: source || null, restore_available: !!source } : x) }));
+      clearSourceDraft(a.id);
       return;
     }
     await run(() => api.refreshAppSource(a.id, source));
+    // Let the input follow the stored source instead of keeping the entered text.
+    clearSourceDraft(a.id);
   };
   const reloadAppSource = (a: AppState) => { if (!mockMode()) void run(() => api.refreshAppSource(a.id)); };
-  // Manifest groups become tabs; preview is always the last tab of a non-local app.
-  const appTabs = (a: AppState) => ["General", ...new Set(a.settings_schema.map(f => f.group).filter((g): g is string => Boolean(g))), ...(a.local || !a.installed ? [] : ["Preview"])];
+  // Manifest groups become tabs; preview is a reserved id, so a group named
+  // "Preview" keeps its own tab and its settings stay editable.
+  const PREVIEW_TAB = "__preview";
+  const tabLabel = (tab: string) => tab === PREVIEW_TAB ? "Preview" : tab;
+  const appTabs = (a: AppState) => ["General", ...new Set(a.settings_schema.map(f => f.group).filter((g): g is string => Boolean(g))), ...(a.local || !a.installed ? [] : [PREVIEW_TAB])];
   const tabFields = (a: AppState, tab: string) => a.settings_schema.filter(f => (f.group ?? "General") === tab);
   const currentTab = (a: AppState) => appTabs(a).includes(appSettingsTab()) ? appSettingsTab() : "General";
   const restoreApp = (a: AppState) => {
@@ -785,8 +792,8 @@ export default function App() {
           <section class="app-settings-page">
             <button class="back-button" onClick={() => { if (dirty(a()) && !confirm("Unsaved settings changes will be lost. Leave without saving?")) return; setAppSettingsOpen(null); }}>← back to app</button>
             <div class="view-heading"><div><span class="eyebrow">{a().name.toUpperCase()}</span><h1>Settings</h1></div><Show when={dirty(a())}><button class="button primary" disabled={busyApp()} onClick={() => saveDraft(a())}>Save</button></Show></div>
-            <nav class="settings-tabs" role="tablist" aria-label="App settings sections"><For each={appTabs(a())}>{tab => <button class={`settings-tab ${currentTab(a()) === tab ? "active" : ""}`} role="tab" aria-selected={currentTab(a()) === tab} onClick={() => setAppSettingsTab(tab)}>{tab}</button>}</For></nav>
-            <Show when={currentTab(a()) === "Preview"} fallback={<Show when={tabFields(a(), currentTab(a())).length} fallback={<p class="quiet">No settings in this tab.</p>}><div class="fields"><For each={tabFields(a(), currentTab(a()))}>{field => <SettingField app={a()} field={field} value={draftValue(a(), field.key)} settings={drafts()[a().id] ?? a().settings} lock={a().settings_locked.find(lock => lock.key === field.key)} setValue={value => setDraftValue(a(), field.key, value)} choose={() => void chooseFolder(a(), field)} />}</For></div></Show>}>
+            <nav class="settings-tabs" role="tablist" aria-label="App settings sections"><For each={appTabs(a())}>{tab => <button class={`settings-tab ${currentTab(a()) === tab ? "active" : ""}`} role="tab" aria-selected={currentTab(a()) === tab} onClick={() => setAppSettingsTab(tab)}>{tabLabel(tab)}</button>}</For></nav>
+            <Show when={currentTab(a()) === PREVIEW_TAB} fallback={<Show when={tabFields(a(), currentTab(a())).length} fallback={<p class="quiet">No settings in this tab.</p>}><div class="fields"><For each={tabFields(a(), currentTab(a()))}>{field => <SettingField app={a()} field={field} value={draftValue(a(), field.key)} settings={drafts()[a().id] ?? a().settings} lock={a().settings_locked.find(lock => lock.key === field.key)} setValue={value => setDraftValue(a(), field.key, value)} choose={() => void chooseFolder(a(), field)} />}</For></div></Show>}>
               <section class="preference-section"><h2>Preview source</h2>
                 <Show when={state().settings.developer_mode} fallback={<><p class="settings-muted">Developer mode is off. Preview sources are hidden.</p><button class="button" onClick={() => { setAppSettingsOpen(null); setSettingsReturn(a().id); setSettingsOpen(true); setSettingsTab("Preview"); }}>Open settings</button></>}>
                   <p class="settings-muted">Load only this app's recipe from a branch or pull request. Every other app stays on the default branch. Leave empty for the default branch.</p>
