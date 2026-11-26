@@ -1561,10 +1561,39 @@ fn run_stop_command(app: &AppHandle, shared: &Shared, id: &str) {
     }
 }
 
+/// Kills a listener left behind by a rebuilt or hard-killed Autark, when it belongs to this app.
+fn kill_leftovers(app: &AppHandle, shared: &Shared, id: &str) {
+    let (root, manifest, values, app_dir) = {
+        let core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
+        let record = match core.records.iter().find(|record| record.manifest.id == id) {
+            Some(record) => record,
+            None => return,
+        };
+        let root = core.settings.root_path();
+        (
+            root.clone(),
+            record.manifest.clone(),
+            record.settings.clone(),
+            manifest::app_dir(&root, id),
+        )
+    };
+    let Some(template) = manifest.launch.url.clone() else {
+        return;
+    };
+    let Ok(url) = manifest::expand(&template, &root, &app_dir, &values) else {
+        return;
+    };
+    if let Ok(Some(port)) = reclaim_own_port(&url, &app_dir, id) {
+        log(app, id, format!("released port {port} left by an earlier run"));
+    }
+}
+
 fn stop_inner(app: &AppHandle, shared: &Shared, id: &str) -> Result<()> {
     set_phase(app, shared, id, Phase::Stopping);
     run_stop_command(app, shared, id);
     kill_child(shared, id);
+    // A rebuild or a hard exit can leave the old process listening; the port is the proof.
+    kill_leftovers(app, shared, id);
     mutate(app, shared, id, |record| {
         record.phase = if record.installed {
             Phase::Installed
