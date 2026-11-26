@@ -414,18 +414,24 @@ export default function App() {
   };
   const sourceValue = (a: AppState) => sourceDrafts()[a.id] ?? a.preview ?? "";
   const setSourceValue = (a: AppState, value: string) => setSourceDrafts(d => ({ ...d, [a.id]: value }));
-  const clearSourceDraft = (id: string) => setSourceDrafts(d => { const next = { ...d }; delete next[id]; return next; });
+  const clearSourceDraft = (id: string, submitted: string) => setSourceDrafts(d => {
+    // Keep text the user typed while the refresh was running.
+    if ((d[id] ?? "").trim() !== submitted) return d;
+    const next = { ...d };
+    delete next[id];
+    return next;
+  });
   const applyAppSource = async (a: AppState) => {
     const source = sourceValue(a).trim();
     setSourceValue(a, source);
     if (mockMode()) {
       setState(s => ({ ...s, apps: s.apps.map(x => x.id === a.id ? { ...x, preview: source || null, restore_available: !!source } : x) }));
-      clearSourceDraft(a.id);
+      clearSourceDraft(a.id, source);
       return;
     }
     await run(() => api.refreshAppSource(a.id, source));
     // Let the input follow the stored source instead of keeping the entered text.
-    clearSourceDraft(a.id);
+    clearSourceDraft(a.id, source);
   };
   const reloadAppSource = (a: AppState) => { if (!mockMode()) void run(() => api.refreshAppSource(a.id)); };
   // Manifest groups become tabs; preview is a reserved id, so a group named

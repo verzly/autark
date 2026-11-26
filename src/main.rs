@@ -650,8 +650,8 @@ fn save_app_settings(
 }
 
 #[tauri::command(rename_all = "snake_case")]
-fn probe_llm(shared: TauriState<'_, Arc<Shared>>, app_id: String, check: String, settings: Option<serde_json::Map<String, serde_json::Value>>) -> Result<String, String> {
-    let record = apps::app_record(&shared, &app_id).map_err(|error| format!("{error:#}"))?;
+fn probe_llm(shared: TauriState<'_, Arc<Shared>>, app_id: String, check: String, settings: Option<serde_json::Map<String, serde_json::Value>>) -> CmdResult<String> {
+    let record = apps::app_record(&shared, &app_id)?;
     let root = shared.root();
     let app_dir = manifest::app_dir(&root, &app_id);
     let mut values = manifest::load_settings(&app_dir, &record.manifest);
@@ -660,7 +660,7 @@ fn probe_llm(shared: TauriState<'_, Arc<Shared>>, app_id: String, check: String,
     }
     let get = |key: &str| values.get(key).and_then(serde_json::Value::as_str).unwrap_or("");
     let base = get("llm_base_url").trim_end_matches('/');
-    if base.is_empty() { return Err("LLM base URL is empty".into()); }
+    if base.is_empty() { return Err(CmdError::new("invalid_argument", "LLM base URL is empty")); }
     let endpoint = format!("{}/models", base);
     let mut command = crate::tools::new_command("curl.exe");
     command.args(["--config", "-", "-m", "10", "-sS", "-w", "\n%{http_code}", endpoint.as_str()]);
@@ -669,31 +669,31 @@ fn probe_llm(shared: TauriState<'_, Arc<Shared>>, app_id: String, check: String,
         manifest::expand(key_path, &root, &app_dir, &values).ok().map(std::path::PathBuf::from)
     };
     let key = key_path.and_then(|path| std::fs::read_to_string(path).ok()).map(|key| key.trim().to_string()).filter(|key| !key.is_empty());
-    let mut child = command.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().map_err(|error| format!("Could not start curl.exe: {error}"))?;
+    let mut child = command.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().map_err(|error| CmdError::new("internal", format!("Could not start curl.exe: {error}")))?;
     if let Some(mut stdin) = child.stdin.take() {
         if let Some(key) = &key {
             use std::io::Write;
             let escaped = key.replace('\\', "\\\\").replace('"', "\\\"");
-            write!(stdin, "header = \"Authorization: Bearer {escaped}\"\n").map_err(|error| error.to_string())?;
+            write!(stdin, "header = \"Authorization: Bearer {escaped}\"\n").map_err(|error| CmdError::new("internal", error.to_string()))?;
         }
     }
-    let output = child.wait_with_output().map_err(|error| error.to_string())?;
+    let output = child.wait_with_output().map_err(|error| CmdError::new("internal", error.to_string()))?;
     let text = String::from_utf8_lossy(&output.stdout);
     let (body, status) = text.rsplit_once('\n').unwrap_or((&text, "000"));
     let status: u16 = status.trim().parse().unwrap_or(0);
     if check == "endpoint" {
-        if status == 0 { return Err("Could not reach LLM endpoint".into()); }
+        if status == 0 { return Err(CmdError::new("internal", "Could not reach LLM endpoint")); }
         return Ok(format!("HTTP {status}"));
     }
-    if check != "model" && check != "models" { return Err("Unknown LLM check".into()); }
-    if !(200..300).contains(&status) { return Err(body.lines().next().unwrap_or("LLM request failed").trim().chars().take(180).collect()); }
-    let json: serde_json::Value = serde_json::from_str(body).map_err(|_| "Invalid models response".to_string())?;
+    if check != "model" && check != "models" { return Err(CmdError::new("invalid_argument", "Unknown LLM check")); }
+    if !(200..300).contains(&status) { return Err(CmdError::new("internal", body.lines().next().unwrap_or("LLM request failed").trim().chars().take(180).collect::<String>())); }
+    let json: serde_json::Value = serde_json::from_str(body).map_err(|_| CmdError::new("internal", "Invalid models response"))?;
     let ids: Vec<&str> = json["data"].as_array().map(|items| items.iter().filter_map(|item| item["id"].as_str()).collect()).unwrap_or_default();
-    if check == "models" { return serde_json::to_string(&ids).map_err(|error| error.to_string()); }
+    if check == "models" { return serde_json::to_string(&ids).map_err(|error| CmdError::new("internal", error.to_string())); }
     let model = get("llm_model");
     if ids.iter().any(|id| id.eq_ignore_ascii_case(model)) {
         Ok("Model available".into())
-    } else { Err(format!("Model not found: {model}")) }
+    } else { Err(CmdError::new("invalid_argument", format!("Model not found: {model}"))) }
 }
 
 #[tauri::command(rename_all = "snake_case")]

@@ -215,7 +215,18 @@ impl AppRecord {
             .and_then(|template| manifest::expand(template, root, &app_dir, &values).ok())
             .map(|path| PathBuf::from(path).exists());
         let installed = installed_record.is_some() && check.unwrap_or(true);
-        let icon_data = read_icon_data(&manifest, manifest_dir);
+        // Setup copies a preview icon next to the installed recipe under its file
+        // name, so the marketplace folder may not hold it any more.
+        let icon_data = if preview.is_some() {
+            manifest
+                .icon
+                .as_deref()
+                .and_then(|icon| Path::new(icon).file_name())
+                .and_then(|name| icon_data_url(&app_dir.join(name)))
+                .or_else(|| read_icon_data(&manifest, manifest_dir))
+        } else {
+            read_icon_data(&manifest, manifest_dir)
+        };
         Self {
             installed_version: installed_record
                 .as_ref()
@@ -322,9 +333,12 @@ fn newer(latest: &str, installed: &str) -> bool {
 }
 
 fn read_icon_data(manifest: &Manifest, manifest_dir: &Path) -> Option<String> {
+    icon_data_url(Path::new(&manifest.icon_path(manifest_dir)?))
+}
+
+fn icon_data_url(path: &Path) -> Option<String> {
     use base64::Engine;
-    let path = PathBuf::from(manifest.icon_path(manifest_dir)?);
-    let bytes = std::fs::read(&path).ok()?;
+    let bytes = std::fs::read(path).ok()?;
     let mime = match path
         .extension()
         .and_then(|ext| ext.to_str())
@@ -610,7 +624,12 @@ pub fn load_catalogue(core: &mut Core) -> Vec<String> {
     }
     for id in &order {
         if let Some(record) = previous.remove(id) {
-            records.push(record);
+            // An uninstalled leftover exists only in the old recipe. It cannot be
+            // installed from the current catalogue, so it is dropped instead of
+            // running a recipe whose source is no longer known.
+            if record.installed {
+                records.push(record);
+            }
         }
     }
     // Retained apps take their previous slot instead of moving to the end.
@@ -1899,17 +1918,15 @@ fn refresh_app_source_inner(
         // branch first so a remote recipe change is visible without a full reload.
         marketplace::sync(root, "")?;
         let source_dir = marketplace::dir(root).join("apps").join(id);
-        let file = source_dir.join("app.json");
-        if !file.is_file() {
-            bail!("the default branch has no recipe for this app");
-        }
-        fs::copy(&file, app_dir.join("app.json"))?;
-        if let Ok(manifest) = Manifest::load(&source_dir) {
-            if let Some(icon) = manifest.icon_path(&source_dir) {
-                let icon = PathBuf::from(icon);
-                if let Some(name) = icon.file_name() {
-                    fs::copy(&icon, app_dir.join(name))?;
-                }
+        // Validate before the installed recipe is touched, so a broken recipe in the
+        // default branch cannot replace a working one.
+        let manifest = Manifest::load(&source_dir)
+            .context("the default branch has no valid recipe for this app")?;
+        fs::copy(source_dir.join("app.json"), app_dir.join("app.json"))?;
+        if let Some(icon) = manifest.icon_path(&source_dir) {
+            let icon = PathBuf::from(icon);
+            if let Some(name) = icon.file_name() {
+                fs::copy(&icon, app_dir.join(name))?;
             }
         }
         String::new()
