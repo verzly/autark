@@ -77,7 +77,7 @@ README.md
 | `description` | yes | One sentence, shown in the `+` chooser |
 | `version` | yes | Recipe version owned by the marketplace; bump in the same PR that changes behavior |
 | `homepage` | no | https link, opened from the app panel |
-| `upstream` | no | GitHub `owner/repository`; latest release or tag can enable app-version updates |
+| `upstream` | no | Version source for the update check: GitHub `owner/repository`, or `npm:<package>` for the registry's `latest` tag. Compared against the installed version from `setup.version_check`. |
 | `license` | no | SPDX id of the app itself |
 | `icon` | no | File next to `app.json`; png, 256x256 |
 | `requirements` | no | `disk_gb` (number), `webview2` (bool); informational only, shown before install |
