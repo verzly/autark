@@ -16,6 +16,16 @@ function compareVersions(left: string, right: string) {
   return 0;
 }
 async function fetchUpstream(upstream: string): Promise<string | null> {
+  if (upstream.startsWith("npm:")) {
+    // Only the package path is encoded; the registry expects the slash encoded.
+    const pkg = upstream.slice(4).replace("/", "%2F");
+    try {
+      const response = await fetch(`https://registry.npmjs.org/${pkg}/latest`);
+      if (!response.ok) return null;
+      const version = (await response.json()).version;
+      return typeof version === "string" ? version : null;
+    } catch { return null; }
+  }
   const [owner, repo] = upstream.split("/");
   if (!owner || !repo) return null;
   for (const endpoint of [`releases/latest`, `releases?per_page=1`, `tags?per_page=1`]) {
@@ -36,7 +46,9 @@ function upstreamNewer(app: AppState) {
     void fetchUpstream(app.upstream).then(version => setUpstreamVersions(versions => ({ ...versions, [app.id]: version }))).finally(() => upstreamInFlight.delete(app.id));
   }
   const latest = upstreamVersions()[app.id];
-  return Boolean(latest && compareVersions(latest, app.version_app) > 0);
+  // version_check may append detail after " | "; compare the version alone.
+  const installed = app.version_app.split(/\s*\|\s*/)[0];
+  return Boolean(latest && compareVersions(latest, installed) > 0);
 }
 import { previewLogs, previewState, previewVariants } from "./mock";
 import miseLogo from "./mise.png";
@@ -300,6 +312,12 @@ export default function App() {
     void run(() => kind === "install" ? api.installApp(id, true) : kind === "update" ? api.updateApp(id, true) : kind === "reinstall" ? api.reinstallApp(id, true) : kind === "start" ? api.startApp(id) : kind === "stop" ? api.stopApp(id) : kind === "open" ? api.openApp(id) : kind === "remove" ? api.removeApp(id, "REMOVE") : api.cancelOperation(id));
   };
   const appBusy = (a: AppState) => working(a.phase) || state().operations.some(op => op.app_id === a.id);
+  // Tabs show a dot only while a command runs, or red after a failure.
+  const tabDot = (a: AppState | undefined) => {
+    if (!a) return "";
+    if (appBusy(a)) return "busy";
+    return a.phase === "failed" ? "failed" : "";
+  };
   const changeRoot = async () => {
     try {
       const parent = mockMode() ? "D:\\Portable" : await api.pickDirectory("root_parent");
@@ -519,7 +537,7 @@ export default function App() {
           const app = () => state().apps.find(a => a.id === id);
           return <button class={`tab ${active() === id && !settingsOpen() ? "active" : ""}`} role="tab" aria-selected={active() === id && !settingsOpen()} onClick={() => selectTab(id)}>
             <span class="badge" style={{ "--hue": hue(id) }}><Show when={app()?.icon_data} fallback={id[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><span class="tab-name">{app()?.name ?? id}</span>
-            <span class={`dot ${app()?.phase ?? "not_installed"}`} />
+            <span class={`dot ${tabDot(app())}`} />
             <span class="tab-close" role="button" aria-label={`Close ${app()?.name ?? id}`} onClick={e => closeTab(id, e)}><Icon name="close" /></span>
           </button>;
         }}</For>
@@ -654,12 +672,12 @@ export default function App() {
                  <div class="marketplace-grid" role="list" aria-label="Marketplace apps"><For each={marketplaceApps()}>{(a, i) => {
                    const opened = () => openIds().includes(a.id);
                    return <article role="listitem" class={`market-card ${selected() === i() ? "market-selected" : ""}`} onMouseEnter={() => setSelected(i())}>
-                      <div class="market-card-head"><span class="badge large" style={{ "--hue": hue(a.id) }}><Show when={a.icon_data} fallback={a.id[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><div><h2>{a.name}</h2><code>{a.id}</code></div><Show when={!a.local && (a.update_available || upstreamNewer(a))}><button class="icon-button update-button" disabled={working(a.phase)} aria-label={`Update ${a.name}`} title="Update" onClick={() => installMarketplaceApp(a)}><Icon name="download" /></button></Show></div>
+                      <div class="market-card-head"><span class="badge large" style={{ "--hue": hue(a.id) }}><Show when={a.icon_data} fallback={a.id[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><div><h2>{a.name}</h2><code>{a.id}</code></div></div>
                       <p class="market-description">{a.description}</p><div class="market-versions"><span>Installed <b>{a.version_installed ?? "not installed"}</b><Show when={a.preview}>{preview => <> <span class="preview-pill">preview ({preview()})</span></>}</Show></span><span>Marketplace <b>{a.local ? "local" : a.version_latest ?? "unknown"}</b></span></div>
                      <div class="market-requirements"><Show when={a.requirements.disk_gb != null}><span>{a.requirements.disk_gb} GB disk</span></Show><Show when={a.requirements.webview2}><span>WebView2</span></Show></div>
                      <div class="market-links"><Show when={a.license}><span>{a.license}</span></Show><Show when={a.homepage}><button onClick={() => openUrl(a.homepage!)}>Homepage ↗</button></Show></div>
                       <Show when={a.installed} fallback={<div class="market-actions"><button class="button market-view-action" disabled={working(a.phase)} onClick={() => openApp(a.id)}>View</button><button class="button primary market-action" disabled={working(a.phase)} aria-label={`Install ${a.name}`} title="Install" onClick={() => installMarketplaceApp(a)}><Icon name="download" /></button></div>}>
-                        <div class="market-actions"><Show when={a.local}><button class="button market-view-action" disabled={busy()} onClick={() => replaceLocalApp(a)}>Edit</button></Show><button class={`button market-action ${opened() ? "opened-action" : "primary"}`} disabled={!opened() && working(a.phase)} onClick={() => opened() ? openApp(a.id) : activateMarketplaceApp(a)}>{opened() ? "Opened" : "Open"}</button></div>
+                        <div class="market-actions"><Show when={a.local}><button class="button market-view-action" disabled={busy()} onClick={() => replaceLocalApp(a)}>Edit</button></Show><Show when={!a.local && (a.update_available || upstreamNewer(a))}><button class="icon-button update-button" disabled={working(a.phase)} aria-label={`Update ${a.name}`} title="Update" onClick={() => installMarketplaceApp(a)}><Icon name="download" /></button></Show><button class={`button market-action icon-only ${opened() ? "opened-action" : "primary"}`} disabled={!opened() && working(a.phase)} aria-label={opened() ? `Show ${a.name}` : `Open ${a.name}`} title={opened() ? "Show window" : "Open"} onClick={() => opened() ? openApp(a.id) : activateMarketplaceApp(a)}><Icon name="eye" /></button></div>
                      </Show>
                    </article>;
                  }}</For></div>
@@ -677,7 +695,7 @@ export default function App() {
                  <div class="market-links"><Show when={a.license}><span>{a.license}</span></Show><Show when={a.homepage}><button onClick={() => openUrl(a.homepage!)}>Homepage ↗</button></Show></div>
                  <div class="market-actions"><button class="button market-view-action" disabled={working(a.phase)} onClick={() => replaceLocalApp(a)}>Edit</button>
                    <Show when={a.installed} fallback={<button class="button primary market-action" disabled={working(a.phase)} onClick={() => installMarketplaceApp(a)}>Install</button>}>
-                     <button class={`button market-action ${opened() ? "opened-action" : "primary"}`} disabled={!opened() && working(a.phase)} onClick={() => opened() ? openApp(a.id) : activateMarketplaceApp(a)}>{opened() ? "Opened" : "Open"}</button>
+                     <button class={`button market-action icon-only ${opened() ? "opened-action" : "primary"}`} disabled={!opened() && working(a.phase)} aria-label={opened() ? `Show ${a.name}` : `Open ${a.name}`} title={opened() ? "Show window" : "Open"} onClick={() => opened() ? openApp(a.id) : activateMarketplaceApp(a)}><Icon name="eye" /></button>
                    </Show>
                  </div>
                </article>;
@@ -746,7 +764,7 @@ export default function App() {
             <div class="links"><Show when={state().marketplace.source && a().installed && !a().local}><button class="reload-button" disabled={busyApp()} aria-label={`Refresh the recipe of ${a().name} from ${state().marketplace.source}`} title={`Refresh app.json from ${state().marketplace.source} without running setup`} onClick={() => mockMode() ? undefined : void run(() => api.refreshAppManifest(a().id))}><Icon name="reload" /></button></Show><Show when={a().homepage}><button onClick={() => openUrl(a().homepage!)}>Homepage ↗</button></Show><Show when={a().license}><span>{a().license}</span></Show></div></div>
           <div class="status-line"><span class={`dot ${p()}`} /><Show when={working(p())}><span class="progress"><i /></span></Show><span class="phase-label">{a().step ? `(${a().step?.index}/${a().step?.total}) ${a().step?.name}` : p().replace("_", " ")}</span><Show when={working(p()) && elapsed() != null}><span class="elapsed">run {duration(elapsed()!)}</span></Show></div>
           <div class="actions">
-              <Show when={!a().local}><button class="button primary" disabled={busyApp()} onClick={() => setPanel("install")}>{a().installed ? a().update_available || upstreamNewer(a()) ? "Update" : "Reload" : "Install"}</button></Show>
+              <Show when={!a().local}><button class={`button primary ${a().installed && (a().update_available || upstreamNewer(a())) ? "update-ready" : ""}`} disabled={busyApp()} onClick={() => setPanel("install")}>{a().installed ? "Update" : "Install"}</button></Show>
              <Show when={a().restore_available}><button class="button" disabled={busyApp()} onClick={() => setPanel("restore")}>Restore to stable</button></Show>
             <Show when={a().can_start}>
               <button class="button" disabled={!canStart()} onClick={() => action("start", a())}>Start</button>
@@ -863,6 +881,6 @@ function LogText(props: { line: string }) {
   if (!props.line.startsWith("$ ")) return <>{props.line}</>;
   return <><span class="prompt">$</span>{props.line.slice(1)}</>;
 }
-function Icon(props: { name: "menu" | "gridPlus" | "close" | "min" | "max" | "pencil" | "trash" | "reload" | "download" }) {
-  return <svg viewBox="0 0 16 16" aria-hidden="true">{props.name === "menu" ? <path d="M2 4h12M2 8h12M2 12h12" /> : props.name === "trash" ? <><path d="M2.6 4.4h10.8" /><path d="M6.2 4.4V2.9h3.6v1.5" /><path d="M4.1 4.4l.7 8.1a1.1 1.1 0 0 0 1.1 1h4.2a1.1 1.1 0 0 0 1.1-1l.7-8.1" /><path d="M6.7 7v4M9.3 7v4" /></> : props.name === "gridPlus" ? <><rect x="1.5" y="1.5" width="5" height="5" rx="1" /><rect x="9.5" y="1.5" width="5" height="5" rx="1" /><rect x="1.5" y="9.5" width="5" height="5" rx="1" /><path d="M12 9v5m-2.5-2.5h5" /></> : props.name === "close" ? <path d="m4 4 8 8m0-8-8 8" /> : props.name === "min" ? <path d="M3 8h10" /> : props.name === "max" ? <rect x="3.2" y="3.2" width="9.6" height="9.6" rx="1" /> : props.name === "reload" ? <><path d="M13 8a5 5 0 1 1-1.5-3.6" /><path d="M13.2 2.6v3.2h-3.2" /></> : props.name === "download" ? <><path d="M8 2.4v7.2" /><path d="m5 7 3 3 3-3" /><path d="M2.8 12.6h10.4" /></> : <><path d="M10.4 3.1 13 5.7" /><path d="M2.4 13.6 3.3 10 10.6 2.7a1.3 1.3 0 0 1 1.8 0l.9.9a1.3 1.3 0 0 1 0 1.8L6 12.8l-3.6.8Z" /></>}</svg>;
+function Icon(props: { name: "menu" | "gridPlus" | "close" | "min" | "max" | "pencil" | "trash" | "reload" | "download" | "eye" }) {
+  return <svg viewBox="0 0 16 16" aria-hidden="true">{props.name === "menu" ? <path d="M2 4h12M2 8h12M2 12h12" /> : props.name === "trash" ? <><path d="M2.6 4.4h10.8" /><path d="M6.2 4.4V2.9h3.6v1.5" /><path d="M4.1 4.4l.7 8.1a1.1 1.1 0 0 0 1.1 1h4.2a1.1 1.1 0 0 0 1.1-1l.7-8.1" /><path d="M6.7 7v4M9.3 7v4" /></> : props.name === "gridPlus" ? <><rect x="1.5" y="1.5" width="5" height="5" rx="1" /><rect x="9.5" y="1.5" width="5" height="5" rx="1" /><rect x="1.5" y="9.5" width="5" height="5" rx="1" /><path d="M12 9v5m-2.5-2.5h5" /></> : props.name === "close" ? <path d="m4 4 8 8m0-8-8 8" /> : props.name === "min" ? <path d="M3 8h10" /> : props.name === "max" ? <rect x="3.2" y="3.2" width="9.6" height="9.6" rx="1" /> : props.name === "reload" ? <><path d="M13 8a5 5 0 1 1-1.5-3.6" /><path d="M13.2 2.6v3.2h-3.2" /></> : props.name === "download" ? <><path d="M8 2.4v7.2" /><path d="m5 7 3 3 3-3" /><path d="M2.8 12.6h10.4" /></> : props.name === "eye" ? <><path d="M1.6 8s2.4-4.1 6.4-4.1S14.4 8 14.4 8s-2.4 4.1-6.4 4.1S1.6 8 1.6 8Z" /><circle cx="8" cy="8" r="2.1" /></> : <><path d="M10.4 3.1 13 5.7" /><path d="M2.4 13.6 3.3 10 10.6 2.7a1.3 1.3 0 0 1 1.8 0l.9.9a1.3 1.3 0 0 1 0 1.8L6 12.8l-3.6.8Z" /></>}</svg>;
 }
