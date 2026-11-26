@@ -9,7 +9,6 @@ use crate::{
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::os::windows::process::CommandExt;
 use std::{
     collections::HashMap,
     fs,
@@ -1471,13 +1470,8 @@ fn start_inner(app: &AppHandle, shared: &Arc<Shared>, id: &str) -> Result<()> {
     };
     command.args(&args);
     apply_environment(&mut command, &root, &app_dir, &manifest, &values)?;
-    command
-        .current_dir(&app_dir)
-        .stdin(Stdio::null());
-    if detached {
-        // CREATE_NEW_CONSOLE: the app and its output live in their own window.
-        command.creation_flags(0x0000_0010);
-    } else {
+    command.current_dir(&app_dir).stdin(Stdio::null());
+    if !detached {
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
     }
 
@@ -1501,9 +1495,14 @@ fn start_inner(app: &AppHandle, shared: &Arc<Shared>, id: &str) -> Result<()> {
     }
 
     set_phase(app, shared, id, Phase::Starting);
-    let mut child = command
-        .spawn()
-        .with_context(|| format!("cannot start {}", manifest.name))?;
+    let mut child = if detached {
+        // Its own console, with the Autark banner; the wrapper exits with the app.
+        crate::terminal::app_window(&root, id, &echo, &command)?
+    } else {
+        command
+            .spawn()
+            .with_context(|| format!("cannot start {}", manifest.name))?
+    };
     if let Some(stream) = child.stdout.take() {
         let handle = app.clone();
         let app_id = id.to_string();
