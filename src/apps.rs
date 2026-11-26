@@ -1223,10 +1223,13 @@ fn apply_environment(
 fn run_in_terminal(app: &AppHandle, id: &str, label: &str, command: Command) -> Result<()> {
     let root = Settings::load_or_default().root_path();
     let dir = root.join("runtime").join("terminal");
-    let exit_file = dir.join(format!("{id}.exit"));
+    // A token per run, so a command left over from an earlier run cannot report
+    // its exit code into this run's file.
+    let run = format!("{id}-{}", run_token());
+    let exit_file = dir.join(format!("{run}.exit"));
     let _ = std::fs::remove_file(&exit_file);
     log(app, id, "running in a separate terminal, which stays open");
-    let mut child = crate::terminal::run_detached(&root, id, label, &command, &exit_file)?;
+    let mut child = crate::terminal::run_detached(&root, &run, label, &command, &exit_file)?;
     let code = loop {
         if is_cancelled(id) {
             let pid = child.id().to_string();
@@ -1252,6 +1255,18 @@ fn run_in_terminal(app: &AppHandle, id: &str, label: &str, command: Command) -> 
         bail!("child command failed: exited with code {code}");
     }
     Ok(())
+}
+
+/// A token that changes for every call, used to keep run files apart.
+fn run_token() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let count = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or_default();
+    format!("{nanos:x}{count:x}")
 }
 
 fn run_streaming(
