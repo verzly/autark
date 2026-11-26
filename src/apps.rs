@@ -192,12 +192,19 @@ impl AppRecord {
         let installed_record = manifest::read_installed(&app_dir);
         let preview = installed_record.as_ref().and_then(|record| record.source.clone());
         let version_latest = (in_catalogue && !local).then(|| catalogue.version.clone());
-        // A preview install keeps the recipe it was installed from, because the
-        // marketplace clone is reset to the default branch on the next start.
-        let manifest = preview
-            .as_ref()
-            .and_then(|_| Manifest::load(&app_dir).ok())
-            .unwrap_or(catalogue);
+        // An installed app keeps its own recipe unless the catalogue is strictly
+        // newer, so a source that points at an older branch cannot hide the
+        // settings and actions the app already has.
+        let manifest = match Manifest::load(&app_dir) {
+            Ok(local_recipe)
+                if preview.is_some()
+                    || (installed_record.is_some()
+                        && !newer(&catalogue.version, &local_recipe.version)) =>
+            {
+                local_recipe
+            }
+            _ => catalogue,
+        };
         let values = manifest::load_settings(&app_dir, &manifest);
         let prefs = prefs::load(&app_dir);
         let check = manifest
