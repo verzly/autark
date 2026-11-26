@@ -591,13 +591,6 @@ pub fn load_catalogue(core: &mut Core) -> Vec<String> {
         .drain(..)
         .map(|record| (record.manifest.id.clone(), record))
         .collect();
-    discovered.sort_by_key(|(_, manifest, _, _)| {
-        order
-            .iter()
-            .position(|id| id == &manifest.id)
-            .unwrap_or(usize::MAX)
-    });
-
     let mut records = Vec::with_capacity(discovered.len() + previous.len());
     for (dir, manifest, in_catalogue, local) in discovered {
         let mut record = AppRecord::from_manifest(&root, &dir, manifest, in_catalogue, local);
@@ -620,6 +613,13 @@ pub fn load_catalogue(core: &mut Core) -> Vec<String> {
             records.push(record);
         }
     }
+    // Retained apps take their previous slot instead of moving to the end.
+    records.sort_by_key(|record| {
+        order
+            .iter()
+            .position(|id| id == &record.manifest.id)
+            .unwrap_or(usize::MAX)
+    });
     core.records = records;
     warnings
 }
@@ -790,8 +790,9 @@ pub fn setup(app: &AppHandle, shared: &Shared, id: &str, kind: SetupKind) -> Res
     if snapshot.phase == Phase::Running || snapshot.phase == Phase::Starting {
         bail!("stop the app before running setup");
     }
-    let manifest = snapshot.manifest.clone();
-    let values = snapshot.settings.clone();
+    let mut manifest = snapshot.manifest.clone();
+    let mut values = snapshot.settings.clone();
+    let mut preview = snapshot.preview.clone();
     let core_settings = shared
         .core
         .lock()
@@ -801,7 +802,17 @@ pub fn setup(app: &AppHandle, shared: &Shared, id: &str, kind: SetupKind) -> Res
     let root = core_settings.root_path();
     let force_local_mise = core_settings.force_local_mise;
     let app_dir = manifest::app_dir(&root, id);
-    let preview = snapshot.preview.clone();
+    if matches!(kind, SetupKind::Update) && preview.is_some() {
+        // An update only replaces a preview build when the stable recipe is strictly
+        // newer, and then it runs that recipe, not the snapshot from the branch.
+        if let Ok(stable) = Manifest::load(&marketplace::dir(&root).join("apps").join(id)) {
+            if newer(&stable.version, &manifest.version) {
+                values = manifest::load_settings(&app_dir, &stable);
+                manifest = stable;
+                preview = None;
+            }
+        }
+    }
 
     set_phase(app, shared, id, kind.phase());
     mutate(app, shared, id, |record| {
@@ -1936,13 +1947,20 @@ pub fn update_all(app: &AppHandle, shared: &Arc<Shared>) -> Result<()> {
         log(app, "marketplace", "every installed app is up to date");
     }
     for id in ids {
-        let running = shared
-            .children
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .contains_key(&id);
-        if running {
-            kill_child(shared, &id);
+        let active = {
+            let core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
+            core.records
+                .iter()
+                .find(|record| record.manifest.id == id)
+                .map(|record| record.phase.is_busy() || record.phase == Phase::Running)
+                .unwrap_or(false)
+        };
+        if active {
+            // setup refuses a running app, and the stop path also updates the phase.
+            if let Err(error) = stop(app, shared, &id) {
+                log(app, &id, format!("update skipped: {error:#}"));
+                continue;
+            }
         }
         log(app, &id, "starting update");
         if let Err(error) = install(app, shared, &id, SetupKind::Update) {
