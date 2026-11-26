@@ -482,6 +482,9 @@ fn reclaim_own_port(url: &str, app_dir: &Path, app_id: &str) -> Result<Option<u1
     let Some(pid) = parts.next() else {
         return Ok(None);
     };
+    if pid.trim().is_empty() {
+        return Ok(None);
+    }
     let path = parts.next().unwrap_or("").to_lowercase();
     let command_line = parts.next().unwrap_or("").to_lowercase();
     let dir = app_dir.to_string_lossy().to_lowercase();
