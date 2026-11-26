@@ -25,6 +25,13 @@ pub struct Requirements {
     pub webview2: bool,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FaqItem {
+    pub question: String,
+    pub answer: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SettingKind {
@@ -33,6 +40,7 @@ pub enum SettingKind {
     Port,
     Boolean,
     Path,
+    File,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -43,6 +51,10 @@ pub struct AppSetting {
     pub default: Value,
     #[serde(default)]
     pub help: Option<String>,
+    /// App settings tab this field belongs to. Without a group the field is listed
+    /// on the default tab.
+    #[serde(default)]
+    pub group: Option<String>,
     /// Environment variables that take the setting out of Autark's hands when the
     /// machine already defines any of them.
     #[serde(default)]
@@ -114,8 +126,12 @@ pub struct Manifest {
     pub version: String,
     pub homepage: Option<String>,
     pub license: Option<String>,
+    pub upstream: Option<String>,
     pub icon: Option<String>,
     pub requirements: Requirements,
+    /// Optional questions shown on the app page; an empty list hides the section.
+    #[serde(default)]
+    pub faq: Vec<FaqItem>,
     pub settings: Vec<AppSetting>,
     pub setup: Setup,
     pub launch: Launch,
@@ -137,8 +153,10 @@ impl Default for Manifest {
             version: String::new(),
             homepage: None,
             license: None,
+            upstream: None,
             icon: None,
             requirements: Requirements::default(),
+            faq: Vec::new(),
             settings: Vec::new(),
             setup: Setup::default(),
             launch: Launch::default(),
@@ -426,7 +444,7 @@ fn expand_depth(
 
 fn validate_value(kind: SettingKind, key: &str, value: &Value) -> Result<()> {
     match kind {
-        SettingKind::Text | SettingKind::Path => {
+        SettingKind::Text | SettingKind::Path | SettingKind::File => {
             if !value.is_string() {
                 bail!("invalid_argument: setting `{key}` must be a string");
             }
@@ -491,7 +509,7 @@ pub fn validate_settings(manifest: &Manifest, values: &Map<String, Value>, app: 
             .with_context(|| format!("invalid_argument: unknown setting `{key}`"))?;
         validate_value(setting.kind, &setting.key, value)?;
         let value = match (setting.kind, value) {
-            (SettingKind::Path, Value::String(path)) => Value::String(portable_path(path, app)),
+            (SettingKind::Path | SettingKind::File, Value::String(path)) => Value::String(portable_path(path, app)),
             _ => value.clone(),
         };
         clean.insert(key.clone(), value);
@@ -522,6 +540,9 @@ pub struct InstalledRecord {
     pub app_version: Option<String>,
     #[serde(default)]
     pub installed_at: u64,
+    /// The preview branch or pull request the app was installed from; empty means stable.
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 pub fn read_installed(app: &Path) -> Option<InstalledRecord> {
@@ -529,7 +550,7 @@ pub fn read_installed(app: &Path) -> Option<InstalledRecord> {
     serde_json::from_str(&text).ok()
 }
 
-pub fn write_installed(app: &Path, version: &str, app_version: Option<&str>) -> Result<()> {
+pub fn write_installed(app: &Path, version: &str, app_version: Option<&str>, source: &str) -> Result<()> {
     let installed_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())
@@ -538,6 +559,7 @@ pub fn write_installed(app: &Path, version: &str, app_version: Option<&str>) -> 
         version: version.to_string(),
         app_version: app_version.map(str::to_string),
         installed_at,
+        source: (!source.is_empty()).then(|| source.to_string()),
     };
     fs::create_dir_all(app)?;
     fs::write(

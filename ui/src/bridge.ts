@@ -1,25 +1,26 @@
 export type Phase = "not_installed" | "installing" | "installed" | "starting" | "running" | "stopping" | "updating" | "removing" | "failed";
-export interface Settings { root: string; folder_name: string; force_local_mise: boolean; animations: boolean; open_tabs: string[]; active_tab: string | null; tray_enabled: boolean; start_with_windows: boolean; close_to_tray: boolean; experimental_local_apps: boolean; wizard_complete: boolean; terminal: string }
+export interface Settings { root: string; folder_name: string; force_local_mise: boolean; animations: boolean; open_tabs: string[]; active_tab: string | null; tray_enabled: boolean; start_with_windows: boolean; close_to_tray: boolean; experimental_local_apps: boolean; wizard_complete: boolean; terminal: string; developer_mode: boolean }
 export interface BinEntry { name: string; path: string; version: string | null; size: number }
 export interface DetectedMise { path: string; version: string | null }
 export interface MiseInfo { available: boolean; source: string; path: string | null; version: string | null; local_path: string; bin_path: string; bin_in_path: boolean; bin: BinEntry[]; detected: DetectedMise[]; force_local: boolean }
 export interface GitExternal { path: string; version: string | null; from_mise: boolean }
 export interface GitInfo { installed: boolean; version: string | null; path: string | null; external: GitExternal | null }
-export interface AppSetting { key: string; label: string; kind: "text" | "number" | "port" | "boolean" | "path"; default: unknown; help?: string | null }
+export interface AppSetting { key: string; label: string; kind: "text" | "number" | "port" | "boolean" | "path" | "file"; default: unknown; help?: string | null; group?: string | null }
 export interface AppAction { id: string; label: string; confirm: boolean }
 export interface SettingsLock { key: string; var: string; value: string }
 export interface AppPrefs { auto_start: boolean; shortcut_autostart: boolean; shortcut_background: boolean }
 export interface AppState {
   id: string; name: string; description: string; version_installed: string | null; version_app: string | null; version_latest: string | null;
-    update_available: boolean; installed: boolean; local: boolean; phase: Phase; settings: Record<string, unknown>; settings_schema: AppSetting[]; settings_locked: SettingsLock[]; prefs: AppPrefs; actions: AppAction[]; can_start: boolean;
+    update_available: boolean; installed: boolean; local: boolean; upstream: string | null; phase: Phase; preview: string | null; restore_available: boolean; settings: Record<string, unknown>; settings_schema: AppSetting[]; settings_locked: SettingsLock[]; prefs: AppPrefs; actions: AppAction[]; can_start: boolean;
    url: string | null; homepage: string | null; license: string | null; icon_path: string | null; icon_data: string | null;
   requirements: { disk_gb: number | null; webview2: boolean };
+  faq: { question: string; answer: string }[];
   last_error: { code: string; message: string } | null; step: { index: number; total: number; name: string } | null;
   started_at: number | null; elapsed_secs: number | null;
 }
 export interface State {
   settings: Settings; settings_path: string; settings_exists: boolean;
-  marketplace: { path: string; url: string; exists: boolean; refreshing: boolean; last_refresh: number | null; error: { code: string; message: string } | null };
+  marketplace: { path: string; url: string; exists: boolean; refreshing: boolean; last_refresh: number | null; source: string; error: { code: string; message: string } | null };
   apps: AppState[]; operations: { app_id: string; kind: string }[]; busy: boolean; mise: MiseInfo; git: GitInfo; terminal: { bash: string | null; sh: string | null };
 }
 export const mockMode = () => import.meta.env.DEV && !("__TAURI_INTERNALS__" in window);
@@ -33,7 +34,7 @@ export const api = {
   getState: () => invoke<State>("get_state"),
   saveSettings: (settings: Settings, moveFolder?: boolean) => invoke<State>("save_settings", { settings, ...(moveFolder === undefined ? {} : { move_folder: moveFolder }) }),
   pickDirectory: (target: "root_parent") => invoke<string | null>("pick_directory", { target }),
-  pickFile: (title: string, kind?: "json" | "exe") => invoke<string | null>("pick_file", { title, kind }),
+  pickFile: (title: string, kind?: "json" | "exe" | "any") => invoke<string | null>("pick_file", { title, kind }),
   setMisePath: (path: string | null) => invoke<State>("set_mise_path", { path }),
   installMise: () => invoke<State>("install_mise"),
   updateMise: () => invoke<State>("update_mise"),
@@ -47,10 +48,12 @@ export const api = {
   closeTab: (app_id: string) => invoke<State>("close_tab", { app_id }),
   openAppTab: (app_id: string) => invoke<State>("open_app_tab", { app_id }),
   refreshMarketplace: () => invoke<State>("refresh_marketplace"),
+  refreshAppSource: (app_id: string, source?: string) => invoke<State>("refresh_app_source", { app_id, source: source ?? null }),
   checkUpdates: () => invoke<State>("check_updates"),
   installApp: (app_id: string, approve_effects: boolean) => invoke<State>("install_app", { app_id, approve_effects }),
   updateApp: (app_id: string, approve_effects: boolean) => invoke<State>("update_app", { app_id, approve_effects }),
   reinstallApp: (app_id: string, approve_effects: boolean) => invoke<State>("reinstall_app", { app_id, approve_effects }),
+  restoreApp: (app_id: string, approve_effects: boolean) => invoke<State>("restore_app", { app_id, approve_effects }),
   updateAll: (approve_effects: boolean) => invoke<State>("update_all", { approve_effects }),
   startApp: (app_id: string) => invoke<State>("start_app", { app_id }),
   stopApp: (app_id: string) => invoke<State>("stop_app", { app_id }),
@@ -59,6 +62,7 @@ export const api = {
   removeApp: (app_id: string, confirm: string) => invoke<State>("remove_app", { app_id, confirm }),
   resetAutark: (confirm: string) => invoke<State>("reset_autark", { confirm }),
   saveAppSettings: (app_id: string, settings: Record<string, unknown>) => invoke<State>("save_app_settings", { app_id, settings }),
+  probeLlm: (app_id: string, check: "endpoint" | "model" | "models", settings?: Record<string, unknown>) => invoke<string>("probe_llm", { app_id, check, settings }),
   saveAppPrefs: (app_id: string, prefs: AppState["prefs"]) => invoke<State>("save_app_prefs", { app_id, prefs }),
   createShortcut: (app_id: string) => invoke<State>("create_shortcut", { app_id }),
   cancelOperation: (app_id: string) => invoke<State>("cancel_operation", { app_id }),

@@ -94,6 +94,7 @@ Commands (`invoke`, snake_case args):
 | `open_app` | `app_id` | `State` |
 | `remove_app` | `app_id`, `confirm: string` | `State` |
 | `save_app_settings` | `app_id`, `settings: Record<string, unknown>` | `State` |
+| `probe_llm` | `app_id`, `check: "endpoint" \| "model" \| "models"`, optional `settings` map (unsaved drafts win over stored values) | `endpoint`: `HTTP <status>`; `model`: `Model available`, or the command fails with `Model not found: <id>`; `models`: JSON array of model IDs from `<llm_base_url>/models` |
 | `save_app_prefs` | `app_id`, `prefs` | `State` |
 | `create_shortcut` | `app_id` | `State` |
 | `cancel_operation` | `app_id` | `State` |
@@ -128,7 +129,7 @@ interface Settings {
   wizard_complete: boolean;
 }
 
-interface AppSetting { key: string; label: string; kind: "text" | "number" | "port" | "boolean" | "path"; default: unknown; help?: string | null }
+interface AppSetting { key: string; label: string; kind: "text" | "number" | "port" | "boolean" | "path" | "file"; default: unknown; help?: string | null; group?: string | null }
 
 interface AppState {
   id: string; name: string; description: string; local: boolean;
@@ -148,6 +149,7 @@ interface AppState {
   license: string | null;
   icon_path: string | null;
   requirements: { disk_gb: number | null; webview2: boolean };
+  faq: { question: string; answer: string }[];
   last_error: { code: string; message: string } | null;
   step: { index: number; total: number; name: string } | null;
   started_at: number | null;     // unix seconds

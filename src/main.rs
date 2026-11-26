@@ -223,6 +223,7 @@ async fn save_settings(
     settings.open_tabs = current.open_tabs.clone();
     settings.active_tab = current.active_tab.clone();
     settings.marketplace_last_refresh = current.marketplace_last_refresh;
+    settings.marketplace_source = current.marketplace_source.clone();
     settings.wizard_complete |= current.wizard_complete;
     // The folder dialog returns the parent, so a new root means <picked>\<folder name>.
     let picked = settings.root_path();
@@ -308,7 +309,11 @@ fn pick_directory(target: String) -> Option<String> {
 #[tauri::command(rename_all = "snake_case")]
 async fn pick_file(title: String, kind: Option<String>) -> Result<Option<String>, CmdError> {
     let dialog = rfd::FileDialog::new().set_title(title);
-    let dialog = if kind.as_deref() == Some("exe") { dialog.add_filter("Executable", &["exe"]) } else { dialog.add_filter("App manifest", &["json"]) };
+    let dialog = match kind.as_deref() {
+        Some("any") => dialog,
+        Some("exe") => dialog.add_filter("Executable", &["exe"]),
+        _ => dialog.add_filter("App manifest", &["json"]),
+    };
     Ok(dialog.pick_file()
         .map(|path| path.to_string_lossy().to_string()))
 }
@@ -383,6 +388,26 @@ async fn refresh_marketplace(
 async fn check_updates(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> CmdResult<State> {
     let inner = shared.inner().clone();
     apps::check_updates(&app, &inner)?;
+    Ok(apps::wire(&inner))
+}
+
+/// Refreshes one app's recipe from a branch or pull request, or from the default
+/// branch when `source` is empty. Other apps keep the default branch.
+#[tauri::command(rename_all = "snake_case")]
+async fn refresh_app_source(
+    app: AppHandle,
+    shared: TauriState<'_, Arc<Shared>>,
+    app_id: String,
+    source: Option<String>,
+) -> CmdResult<State> {
+    let inner = shared.inner().clone();
+    let handle = app.clone();
+    let task = inner.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        apps::refresh_app_source(&handle, &task, &app_id, source.as_deref())
+    })
+    .await
+    .map_err(|error| CmdError::new("internal", error.to_string()))??;
     Ok(apps::wire(&inner))
 }
 
@@ -468,6 +493,39 @@ async fn reinstall_app(
         return Err(CmdError::new("invalid_argument", "the app is not installed"));
     }
     apps::reserve(&inner, &app_id, "reinstall")?;
+    let task = inner.clone();
+    let handle = app.clone();
+    let id = app_id.clone();
+    let joined = tauri::async_runtime::spawn_blocking(move || {
+        apps::install(&handle, &task, &id, SetupKind::Update)
+    })
+    .await
+    .map_err(|error| CmdError::new("internal", error.to_string()));
+    apps::release(&inner, &app_id);
+    joined??;
+    Ok(apps::wire(&inner))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn restore_app(
+    app: AppHandle,
+    shared: TauriState<'_, Arc<Shared>>,
+    app_id: String,
+    approve_effects: bool,
+) -> CmdResult<State> {
+    if !approve_effects {
+        return Err(CmdError::new(
+            "approval_required",
+            "confirm the stable reinstall before it changes anything",
+        ));
+    }
+    let inner = shared.inner().clone();
+    apps::restore_guard(&inner, &app_id)?;
+    // Stop with the preview recipe, so its shutdown command and port are handled,
+    // before the reinstall replaces it with the default branch.
+    apps::stop(&app, &inner, &app_id)?;
+    apps::refresh_app_source(&app, &inner, &app_id, Some(""))?;
+    apps::reserve(&inner, &app_id, "update")?;
     let task = inner.clone();
     let handle = app.clone();
     let id = app_id.clone();
@@ -589,6 +647,53 @@ fn save_app_settings(
 ) -> CmdResult<State> {
     apps::save_app_settings(&app, &shared, &app_id, settings)?;
     Ok(apps::wire(&shared))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+fn probe_llm(shared: TauriState<'_, Arc<Shared>>, app_id: String, check: String, settings: Option<serde_json::Map<String, serde_json::Value>>) -> CmdResult<String> {
+    let record = apps::app_record(&shared, &app_id)?;
+    let root = shared.root();
+    let app_dir = manifest::app_dir(&root, &app_id);
+    let mut values = manifest::load_settings(&app_dir, &record.manifest);
+    if let Some(settings) = settings {
+        for (key, value) in settings { values.insert(key, value); }
+    }
+    let get = |key: &str| values.get(key).and_then(serde_json::Value::as_str).unwrap_or("");
+    let base = get("llm_base_url").trim_end_matches('/');
+    if base.is_empty() { return Err(CmdError::new("invalid_argument", "LLM base URL is empty")); }
+    let endpoint = format!("{}/models", base);
+    let mut command = crate::tools::new_command("curl.exe");
+    command.args(["--config", "-", "-m", "10", "-sS", "-w", "\n%{http_code}", endpoint.as_str()]);
+    let key_path = get("llm_api_key_file");
+    let key_path = if key_path.is_empty() { None } else {
+        manifest::expand(key_path, &root, &app_dir, &values).ok().map(std::path::PathBuf::from)
+    };
+    let key = key_path.and_then(|path| std::fs::read_to_string(path).ok()).map(|key| key.trim().to_string()).filter(|key| !key.is_empty());
+    let mut child = command.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().map_err(|error| CmdError::new("internal", format!("Could not start curl.exe: {error}")))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        if let Some(key) = &key {
+            use std::io::Write;
+            let escaped = key.replace('\\', "\\\\").replace('"', "\\\"");
+            write!(stdin, "header = \"Authorization: Bearer {escaped}\"\n").map_err(|error| CmdError::new("internal", error.to_string()))?;
+        }
+    }
+    let output = child.wait_with_output().map_err(|error| CmdError::new("internal", error.to_string()))?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let (body, status) = text.rsplit_once('\n').unwrap_or((&text, "000"));
+    let status: u16 = status.trim().parse().unwrap_or(0);
+    if check == "endpoint" {
+        if status == 0 { return Err(CmdError::new("internal", "Could not reach LLM endpoint")); }
+        return Ok(format!("HTTP {status}"));
+    }
+    if check != "model" && check != "models" { return Err(CmdError::new("invalid_argument", "Unknown LLM check")); }
+    if !(200..300).contains(&status) { return Err(CmdError::new("internal", body.lines().next().unwrap_or("LLM request failed").trim().chars().take(180).collect::<String>())); }
+    let json: serde_json::Value = serde_json::from_str(body).map_err(|_| CmdError::new("internal", "Invalid models response"))?;
+    let ids: Vec<&str> = json["data"].as_array().map(|items| items.iter().filter_map(|item| item["id"].as_str()).collect()).unwrap_or_default();
+    if check == "models" { return serde_json::to_string(&ids).map_err(|error| CmdError::new("internal", error.to_string())); }
+    let model = get("llm_model");
+    if ids.iter().any(|id| id.eq_ignore_ascii_case(model)) {
+        Ok("Model available".into())
+    } else { Err(CmdError::new("invalid_argument", format!("Model not found: {model}"))) }
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -803,10 +908,12 @@ fn main() {
             open_app_tab,
             close_tab,
             refresh_marketplace,
+            refresh_app_source,
             check_updates,
             install_app,
             update_app,
             reinstall_app,
+            restore_app,
             update_all,
             start_app,
             run_action,
@@ -814,6 +921,7 @@ fn main() {
             open_app,
             remove_app,
             save_app_settings,
+            probe_llm,
             save_app_prefs,
             create_shortcut,
             cancel_operation,

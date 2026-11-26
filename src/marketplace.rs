@@ -4,10 +4,80 @@ use crate::tools;
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::Mutex,
 };
+
+/// Git runs on one shared clone, so fetches must not overlap.
+static GIT: Mutex<()> = Mutex::new(());
 
 pub fn dir(root: &Path) -> PathBuf {
     root.join("marketplace")
+}
+
+/// Records which source the working tree came from, so a restart can return to the default branch.
+const APPLIED: &str = ".autark-source";
+
+/// What the session asked the clone to track: the default branch, a branch, or a pull request.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Source {
+    Default,
+    Branch(String),
+    Pr(u64),
+}
+
+impl Source {
+    pub fn parse(input: &str) -> Result<Self> {
+        let value = input.trim();
+        if value.is_empty() {
+            return Ok(Source::Default);
+        }
+        if value.len() > 120 {
+            bail!("invalid_argument: a marketplace branch or pull request name is too long");
+        }
+        let number = value.strip_prefix('#').unwrap_or(value);
+        if !number.is_empty() && number.chars().all(|c| c.is_ascii_digit()) {
+            let parsed: u64 = number
+                .parse()
+                .context("invalid_argument: that pull request number is too large")?;
+            if parsed == 0 {
+                bail!("invalid_argument: a pull request number starts at 1");
+            }
+            return Ok(Source::Pr(parsed));
+        }
+        let invalid = value.starts_with('-')
+            || value.starts_with('/')
+            || value.ends_with('/')
+            || value.ends_with('.')
+            || value.contains("..")
+            || value.contains("@{")
+            || value.contains("//")
+            || value.chars().any(|c| {
+                !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'))
+            });
+        if invalid {
+            bail!(
+                "invalid_argument: '{value}' is not a valid branch name or pull request number"
+            );
+        }
+        Ok(Source::Branch(value.to_string()))
+    }
+
+    /// The label the UI and installed app records show. Empty means the default branch.
+    pub fn label(&self) -> String {
+        match self {
+            Source::Default => String::new(),
+            Source::Branch(branch) => branch.clone(),
+            Source::Pr(number) => format!("#{number}"),
+        }
+    }
+
+    fn refspec(&self) -> String {
+        match self {
+            Source::Default => "HEAD".to_string(),
+            Source::Branch(branch) => format!("refs/heads/{branch}"),
+            Source::Pr(number) => format!("refs/pull/{number}/head"),
+        }
+    }
 }
 
 pub struct ScanResult {
@@ -60,32 +130,111 @@ pub fn scan(root: &Path) -> Result<ScanResult> {
     })
 }
 
-/// Clones the marketplace on first use, then fetches and hard-resets it.
-pub fn sync(root: &Path) -> Result<String> {
+/// The source the working tree currently holds; empty means the default branch.
+pub fn applied_source(root: &Path) -> String {
+    fs::read_to_string(dir(root).join(APPLIED))
+        .map(|text| text.trim().to_string())
+        .unwrap_or_default()
+}
+
+/// Clones the marketplace on first use, then fetches the requested source and hard-resets it.
+pub fn sync(root: &Path, requested: &str) -> Result<String> {
+    let source = Source::parse(requested)?;
+    let _guard = GIT.lock().unwrap_or_else(|error| error.into_inner());
     let dir = dir(root);
-    if dir.join(".git").exists() {
-        git(&["-C", &path_arg(&dir), "fetch", "--depth", "1", "origin", "main"])?;
-        git(&["-C", &path_arg(&dir), "reset", "--hard", "FETCH_HEAD"])?;
-        git(&["-C", &path_arg(&dir), "clean", "-fd"])?;
-        Ok("marketplace refreshed".to_string())
-    } else {
+    if !dir.join(".git").exists() {
         if dir.exists() {
             fs::remove_dir_all(&dir).context("cannot clear a partial marketplace clone")?;
         }
         if let Some(parent) = dir.parent() {
             fs::create_dir_all(parent)?;
         }
-        git(&[
-            "clone",
-            "--depth",
-            "1",
-            "--branch",
-            "main",
-            MARKETPLACE_URL,
-            &path_arg(&dir),
-        ])?;
-        Ok("marketplace cloned".to_string())
+        // No checkout first: every source, including a pull request, is fetched the same way.
+        git(&["clone", "--depth", "1", "--no-checkout", MARKETPLACE_URL, &path_arg(&dir)])?;
     }
+    // A killed fetch leaves a lock behind; nothing else in this process runs git here.
+    for lock in ["shallow.lock", "index.lock"] {
+        let _ = fs::remove_file(dir.join(".git").join(lock));
+    }
+    git(&[
+        "-C",
+        &path_arg(&dir),
+        "fetch",
+        "--depth",
+        "1",
+        "origin",
+        &source.refspec(),
+    ])?;
+    git(&["-C", &path_arg(&dir), "reset", "--hard", "FETCH_HEAD"])?;
+    git(&["-C", &path_arg(&dir), "clean", "-fd"])?;
+    fs::write(dir.join(APPLIED), source.label()).context("cannot record the marketplace source")?;
+    Ok(match &source {
+        Source::Default => "marketplace refreshed".to_string(),
+        Source::Branch(branch) => format!("marketplace preview: branch {branch}"),
+        Source::Pr(number) => format!("marketplace preview: #{number}"),
+    })
+}
+
+/// Copies one app's recipe and icon from a branch or pull request into `target`
+/// without moving the working tree, so every other app stays on the default branch.
+pub fn export_app_source(root: &Path, id: &str, requested: &str, target: &Path) -> Result<String> {
+    let source = Source::parse(requested)?;
+    if matches!(source, Source::Default) {
+        bail!("invalid_argument: the default branch is not a preview source");
+    }
+    let clone = dir(root);
+    if !clone.join(".git").exists() {
+        bail!("the marketplace has not been loaded yet");
+    }
+    let _guard = GIT.lock().unwrap_or_else(|error| error.into_inner());
+    for lock in ["shallow.lock", "index.lock"] {
+        let _ = fs::remove_file(clone.join(".git").join(lock));
+    }
+    git(&[
+        "-C",
+        &path_arg(&clone),
+        "fetch",
+        "--depth",
+        "1",
+        "origin",
+        &source.refspec(),
+    ])?;
+    let commit = git_text(&["-C", &path_arg(&clone), "rev-parse", "FETCH_HEAD"])?;
+    let commit = commit.trim();
+    let recipe = git_text(&[
+        "-C",
+        &path_arg(&clone),
+        "show",
+        &format!("{commit}:apps/{id}/app.json"),
+    ])
+    .with_context(|| format!("that source has no recipe for {id}"))?;
+    let manifest: Manifest =
+        serde_json::from_str(&recipe).context("invalid app.json in that source")?;
+    manifest
+        .validate(id)
+        .with_context(|| format!("that source has an invalid recipe for {id}"))?;
+    // Read the icon before touching the installed files: a missing icon must not
+    // leave the new recipe next to the old icon, recorded as another source.
+    let icon = match &manifest.icon {
+        Some(icon) => {
+            let bytes = git_bytes(&[
+                "-C",
+                &path_arg(&clone),
+                "show",
+                &format!("{commit}:apps/{id}/{icon}"),
+            ])
+            .with_context(|| format!("cannot read the icon of {id} from that source"))?;
+            Path::new(icon)
+                .file_name()
+                .map(|name| (name.to_owned(), bytes))
+        }
+        None => None,
+    };
+    fs::write(target.join("app.json"), &recipe)?;
+    if let Some((name, bytes)) = icon {
+        fs::write(target.join(name), bytes)?;
+    }
+    Ok(source.label())
 }
 
 fn path_arg(path: &Path) -> String {
@@ -93,6 +242,14 @@ fn path_arg(path: &Path) -> String {
 }
 
 fn git(args: &[&str]) -> Result<()> {
+    git_bytes(args).map(|_| ())
+}
+
+fn git_text(args: &[&str]) -> Result<String> {
+    Ok(String::from_utf8_lossy(&git_bytes(args)?).to_string())
+}
+
+fn git_bytes(args: &[&str]) -> Result<Vec<u8>> {
     let output = tools::new_command("git")
         .args(args)
         .output()
@@ -111,7 +268,7 @@ fn git(args: &[&str]) -> Result<()> {
             tail(&detail, 400)
         );
     }
-    Ok(())
+    Ok(output.stdout)
 }
 
 pub fn tail(text: &str, limit: usize) -> String {

@@ -32,6 +32,7 @@ README.md
   "description": "Fine-tune and run local models with a bundled web UI.",
   "version": "2026.11.0",
   "homepage": "https://github.com/unslothai/unsloth",
+  "upstream": "unslothai/unsloth",
   "license": "AGPL-3.0",
   "icon": "icon.png",
   "requirements": { "disk_gb": 12, "webview2": true },
@@ -76,9 +77,11 @@ README.md
 | `description` | yes | One sentence, shown in the `+` chooser |
 | `version` | yes | Recipe version owned by the marketplace; bump in the same PR that changes behavior |
 | `homepage` | no | https link, opened from the app panel |
+| `upstream` | no | Version source for the update check: GitHub `owner/repository`, or `npm:<package>` for the registry's `latest` tag. Compared against the installed version from `setup.version_check`. |
 | `license` | no | SPDX id of the app itself |
 | `icon` | no | File next to `app.json`; png, 256x256 |
 | `requirements` | no | `disk_gb` (number), `webview2` (bool); informational only, shown before install |
+| `faq` | no | Array of `{ "question", "answer" }`; shown on the app page. An empty or missing list hides the FAQ section. |
 | `settings` | no | Per-app user settings, see below |
 | `setup` | yes | Everything needed to make the app runnable, see below |
 | `setup.tools` | no | Map of mise tool → version. Written to `<app>/mise.toml` and installed with `mise install` |
@@ -91,18 +94,23 @@ README.md
 | `env` | no | Extra environment variables for setup steps and launch |
 | `env_keep_parent` | no | Env names that keep the parent process value when the machine already sets any of them |
 
+Hindsight settings provide **Test** for endpoint reachability (`OK: HTTP <status>`, including 401/403; `FAIL` if the request cannot complete) and **Check** for the configured model. Model Check requests `${llm_base_url}/models` and returns `OK: Model available`, `FAIL: Model not found: <id>`, or the first line of an HTTP error body. **Models** lists the model IDs that endpoint reports; click one to use it as the model ID. Checks use current on-screen settings and Windows `curl.exe`; the base URL must include its OpenAI-compatible path, such as `/v1` (the recipe default does).
+
 ### Settings
 
 ```json
 { "key": "port", "label": "Port", "kind": "port", "default": 8888, "help": "..." }
 ```
 
-`kind` is one of `text`, `number`, `port`, `boolean`, `path`. Keys must be unique per app. Autark stores the
+`kind` is one of `text`, `number`, `port`, `boolean`, `path`, `file`. `path` opens a folder picker; `file` opens a file picker. Keys must be unique per app. Autark stores the
 values in `<app>/settings.json` next to the installed manifest and exposes them to commands through
 `{settings.<key>}`. Values are validated before an operation starts: a `port` must be 1-65535. A default value
 may itself contain placeholders, for example `"default": "{app}/huggingface"`.
 
-A `path` setting is stored portably: a folder picked (or typed) inside the app folder is rewritten to the
+An optional `"group": "Model"` puts the setting on its own tab of the app settings page. Settings without a group
+share the default tab; the tabs follow the order the groups first appear in the recipe.
+
+A `path` or `file` setting is stored portably: a path picked (or typed) inside the app folder is rewritten to the
 `{app}/...` form before it is saved, so the value keeps working when the Autark root moves.
 
 An optional `"locked_by": ["HF_HOME"]` hands the setting to the machine: when any listed variable exists in the
@@ -165,10 +173,26 @@ Otherwise the folder-local values from `env` apply, which keeps models in `{app}
 
 - Installed version is recorded in `<app>/installed.json` after a successful setup.
 - Latest version is `app.json.version` from the refreshed marketplace.
-- `update available` means installed version differs from latest. Only the marketplace decides when an app
-  is republished, so bump `version` on every behavior change.
+- `update available` means the marketplace recipe version is strictly greater than the installed version. Only
+  the marketplace decides when an app is republished, so bump `version` on every behavior change.
 - Update re-runs the whole setup (source refresh, tool install, steps) and reports the new installed version.
 - An app cannot be started while it updates; Start resumes after the update.
+
+## One marketplace list
+
+Autark keeps a single app list. The catalogue always comes from the marketplace's default branch, so apps keep
+their order and a missing app never disappears because of a preview. A branch or pull request is picked per app
+in its settings under the Preview tab: Autark fetches only that app's `app.json` and icon into the app folder, so
+every other app stays on the default branch. The choice is stored in the app's `installed.json`, so a restart keeps
+the preview, and the app card and page show the preview pill. Re-applying an empty value returns that app to the
+default branch; `Restore to stable` on the app page does the same and reinstalls it. The reload icon next to it
+re-fetches the app's current source without running setup, so a recipe change arrives without downloads or
+reinstalling. `Update all` stays version-gated: it only takes an app whose marketplace recipe version is strictly
+greater than the installed one.
+
+The preview controls are behind `Developer mode` in Settings → Preview, which is remembered until it is turned off.
+A setting may declare `"group": "Name"` in the recipe to get its own tab on the app settings page; settings without
+a group share the default tab.
 
 ## Local apps
 

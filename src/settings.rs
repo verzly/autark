@@ -20,6 +20,8 @@ pub struct Settings {
     pub open_tabs: Vec<String>,
     pub active_tab: Option<String>,
     pub marketplace_last_refresh: Option<u64>,
+    /// The remembered marketplace branch or pull request; empty means the default branch.
+    pub marketplace_source: String,
     pub tray_enabled: bool,
     pub start_with_windows: bool,
     pub close_to_tray: bool,
@@ -32,6 +34,8 @@ pub struct Settings {
     /// Which shell the terminal button opens: system, powershell, cmd, sh or bash.
     #[serde(default = "default_terminal")]
     pub terminal: String,
+    /// Shows the app preview (branch or pull request) controls. Remembered once enabled.
+    pub developer_mode: bool,
 }
 
 fn default_animations() -> bool {
@@ -53,6 +57,7 @@ impl Default for Settings {
             open_tabs: Vec::new(),
             active_tab: None,
             marketplace_last_refresh: None,
+            marketplace_source: String::new(),
             tray_enabled: false,
             start_with_windows: false,
             close_to_tray: false,
@@ -60,6 +65,7 @@ impl Default for Settings {
             wizard_complete: false,
             animations: true,
             terminal: default_terminal(),
+            developer_mode: false,
         }
     }
 }
