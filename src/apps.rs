@@ -9,6 +9,7 @@ use crate::{
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::os::windows::process::CommandExt;
 use std::{
     collections::HashMap,
     fs,
@@ -1445,6 +1446,8 @@ fn start_inner(app: &AppHandle, shared: &Arc<Shared>, id: &str) -> Result<()> {
     let settings = shared.plugin_settings();
     let root = settings.root_path();
     let force_local_mise = settings.force_local_mise;
+    // With the forced terminal the app gets its own console window instead of a pipe.
+    let detached = settings.force_terminal_operations;
     let app_dir = manifest::app_dir(&root, id);
     let manifest = record.manifest.clone();
     let values = record.settings.clone();
@@ -1470,9 +1473,13 @@ fn start_inner(app: &AppHandle, shared: &Arc<Shared>, id: &str) -> Result<()> {
     apply_environment(&mut command, &root, &app_dir, &manifest, &values)?;
     command
         .current_dir(&app_dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stdin(Stdio::null());
+    if detached {
+        // CREATE_NEW_CONSOLE: the app and its output live in their own window.
+        command.creation_flags(0x0000_0010);
+    } else {
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    }
 
     let mut echo = program.clone();
     for arg in &args {

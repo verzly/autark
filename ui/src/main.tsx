@@ -601,7 +601,7 @@ export default function App() {
         <small class="terminal-menu-note">Install, update and other commands run in a new window that stays open after Autark closes.</small>
         <Show when={forceTerminalConfirm()}>
           <div class="terminal-menu-confirm">
-            <p>Every command opens its own window and keeps it open after Autark exits. Autark cannot show that output in its log, a multi-step install opens several windows, and closing a window before the command finishes marks the operation failed.</p>
+            <p>Every command, an app start included, opens its own window and keeps it open after Autark exits. Autark cannot show that output in its log, a multi-step install opens several windows, and closing a window before the command finishes marks the operation failed.</p>
             <div><button class="button" onClick={() => setForceTerminalConfirm(false)}>Cancel</button><button class="button primary" onClick={() => { setForceTerminalConfirm(false); setForceTerminal(true); }}>Enable</button></div>
           </div>
         </Show>
