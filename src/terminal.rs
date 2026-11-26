@@ -120,6 +120,8 @@ pub fn run_detached(
     let quote = |text: &str| format!("'{}'", text.replace('\'', "''"));
     let envs = command.get_envs().collect::<Vec<_>>();
     let mut lines = vec!["$ErrorActionPreference = 'Continue'".to_string()];
+    lines.extend(banner(root));
+    lines.push(String::new());
     // apply_environment clears the environment and always sets PATH.
     // shortcut: a command that sets PATH without clearing loses nothing here.
     if envs
