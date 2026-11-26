@@ -88,7 +88,8 @@ export default function App() {
   const [requestError, setRequestError] = createSignal("")
   const [terminalNotice, setTerminalNotice] = createSignal("")
   // The shell picker hangs off the terminal button, opened with a right click.
-  const [terminalMenu, setTerminalMenu] = createSignal<{ x: number; y: number } | null>(null);;
+  const [terminalMenu, setTerminalMenu] = createSignal<{ x: number; y: number } | null>(null);
+  const [forceTerminalConfirm, setForceTerminalConfirm] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
   const [buffers, setBuffers] = createSignal<Record<string, string[]>>(mockMode() ? { "unsloth-studio": previewLogs } : {});
   const [follow, setFollow] = createSignal(true);
@@ -329,7 +330,7 @@ export default function App() {
   };
   createEffect(() => {
     if (!terminalMenu()) return;
-    const close = () => setTerminalMenu(null);
+    const close = () => { setTerminalMenu(null); setForceTerminalConfirm(false); };
     const escape = (e: KeyboardEvent) => { if (e.key === "Escape") setTerminalMenu(null); };
     const timer = setTimeout(() => window.addEventListener("mousedown", close), 0);
     window.addEventListener("keydown", escape);
@@ -337,6 +338,11 @@ export default function App() {
   });
   const setTerminal = (terminal: string) => {
     const settings = { ...state().settings, terminal };
+    if (mockMode()) { setState(s => ({ ...s, settings })); return; }
+    void run(() => api.saveSettings(settings));
+  };
+  const setForceTerminal = (force_terminal_operations: boolean) => {
+    const settings = { ...state().settings, force_terminal_operations };
     if (mockMode()) { setState(s => ({ ...s, settings })); return; }
     void run(() => api.saveSettings(settings));
   };  const setGlobalPref = (key: "tray_enabled" | "start_with_windows" | "close_to_tray" | "experimental_local_apps" | "force_local_mise" | "animations" | "developer_mode", next: boolean) => {
@@ -587,6 +593,18 @@ export default function App() {
         {pick("sh", "sh")}
         {pick("bash", "bash")}
         <small class="terminal-menu-note">System default uses bash when git is installed.</small>
+        <div class="terminal-menu-sep" />
+        <button role="menuitemcheckbox" aria-checked={state().settings.force_terminal_operations} onClick={() => state().settings.force_terminal_operations ? setForceTerminal(false) : setForceTerminalConfirm(true)}>
+          <span class="terminal-menu-check">{state().settings.force_terminal_operations ? "\u2713" : ""}</span>
+          <span>Force this terminal for operations</span>
+        </button>
+        <small class="terminal-menu-note">Install, update and other commands run in a new window that stays open after Autark closes.</small>
+        <Show when={forceTerminalConfirm()}>
+          <div class="terminal-menu-confirm">
+            <p>Every command opens its own window and keeps it open after Autark exits. Autark cannot show that output in its log, a multi-step install opens several windows, and closing a window before the command finishes marks the operation failed.</p>
+            <div><button class="button" onClick={() => setForceTerminalConfirm(false)}>Cancel</button><button class="button primary" onClick={() => { setForceTerminalConfirm(false); setForceTerminal(true); }}>Enable</button></div>
+          </div>
+        </Show>
       </div>;
     }}</Show>
     <main class="card">

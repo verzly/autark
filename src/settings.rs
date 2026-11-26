@@ -36,6 +36,8 @@ pub struct Settings {
     pub terminal: String,
     /// Shows the app preview (branch or pull request) controls. Remembered once enabled.
     pub developer_mode: bool,
+    /// Runs install, update and other commands in a separate terminal that stays open.
+    pub force_terminal_operations: bool,
 }
 
 fn default_animations() -> bool {
@@ -66,6 +68,7 @@ impl Default for Settings {
             animations: true,
             terminal: default_terminal(),
             developer_mode: false,
+            force_terminal_operations: false,
         }
     }
 }

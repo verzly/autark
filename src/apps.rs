@@ -1217,6 +1217,43 @@ fn apply_environment(
     Ok(())
 }
 
+/// Runs a command in its own console, which stays open after Autark exits.
+/// The runner reports the exit code through a file, so the caller keeps the
+/// same success and failure handling as a piped command.
+fn run_in_terminal(app: &AppHandle, id: &str, label: &str, command: Command) -> Result<()> {
+    let root = Settings::load_or_default().root_path();
+    let dir = root.join("runtime").join("terminal");
+    let exit_file = dir.join(format!("{id}.exit"));
+    let _ = std::fs::remove_file(&exit_file);
+    log(app, id, "running in a separate terminal, which stays open");
+    let mut child = crate::terminal::run_detached(&root, id, label, &command, &exit_file)?;
+    let code = loop {
+        if is_cancelled(id) {
+            let pid = child.id().to_string();
+            let _ = tools::new_command("taskkill")
+                .args(["/PID", &pid, "/T", "/F"])
+                .output();
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = std::fs::remove_file(&exit_file);
+            bail!("cancelled: operation cancelled");
+        }
+        if let Ok(text) = std::fs::read_to_string(&exit_file) {
+            let _ = std::fs::remove_file(&exit_file);
+            break text.trim().parse::<i32>().unwrap_or(1);
+        }
+        if let Some(status) = child.try_wait()? {
+            // The window was closed before the command wrote its exit code.
+            bail!("the terminal was closed before `{label}` finished: {status}");
+        }
+        thread::sleep(Duration::from_millis(250));
+    };
+    if code != 0 {
+        bail!("child command failed: exited with code {code}");
+    }
+    Ok(())
+}
+
 fn run_streaming(
     app: &AppHandle,
     id: &str,
@@ -1224,6 +1261,9 @@ fn run_streaming(
     mut command: Command,
 ) -> Result<()> {
     log(app, id, format!("$ {label}"));
+    if Settings::load_or_default().force_terminal_operations {
+        return run_in_terminal(app, id, &label, command);
+    }
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
