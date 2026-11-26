@@ -2045,6 +2045,10 @@ pub fn reload_settings(shared: &Shared, settings: Settings) -> Result<()> {
 }
 
 pub fn stop_all(shared: &Shared) {
+    // The forced terminal exists to outlive Autark: its processes stay up on quit.
+    if shared.plugin_settings().force_terminal_operations {
+        return;
+    }
     let ids: Vec<String> = shared
         .children
         .lock()
