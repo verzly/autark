@@ -123,7 +123,12 @@ fn head(root: &Path, command: &Command) -> Vec<String> {
     }
     for (key, value) in envs {
         let value = value.map(|value| value.to_string_lossy().into_owned()).unwrap_or_default();
-        lines.push(format!("$env:{} = {}", key.to_string_lossy(), quote(&value)));
+        // SetEnvironmentVariable, because names such as ProgramFiles(x86) are not valid $env: names.
+        lines.push(format!(
+            "[Environment]::SetEnvironmentVariable({}, {}, 'Process')",
+            quote(&key.to_string_lossy()),
+            quote(&value)
+        ));
     }
     if let Some(cwd) = command.get_current_dir() {
         lines.push(format!("Set-Location -LiteralPath {}", quote(&cwd.to_string_lossy())));
