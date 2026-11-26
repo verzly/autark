@@ -4,7 +4,11 @@ use crate::tools;
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::Mutex,
 };
+
+/// Git runs on one shared clone, so fetches must not overlap.
+static GIT: Mutex<()> = Mutex::new(());
 
 pub fn dir(root: &Path) -> PathBuf {
     root.join("marketplace")
@@ -136,6 +140,7 @@ pub fn applied_source(root: &Path) -> String {
 /// Clones the marketplace on first use, then fetches the requested source and hard-resets it.
 pub fn sync(root: &Path, requested: &str) -> Result<String> {
     let source = Source::parse(requested)?;
+    let _guard = GIT.lock().unwrap_or_else(|error| error.into_inner());
     let dir = dir(root);
     if !dir.join(".git").exists() {
         if dir.exists() {
@@ -170,11 +175,70 @@ pub fn sync(root: &Path, requested: &str) -> Result<String> {
     })
 }
 
+/// Copies one app's recipe and icon from a branch or pull request into `target`
+/// without moving the working tree, so every other app stays on the default branch.
+pub fn export_app_source(root: &Path, id: &str, requested: &str, target: &Path) -> Result<String> {
+    let source = Source::parse(requested)?;
+    if matches!(source, Source::Default) {
+        bail!("invalid_argument: the default branch is not a preview source");
+    }
+    let clone = dir(root);
+    if !clone.join(".git").exists() {
+        bail!("the marketplace has not been loaded yet");
+    }
+    let _guard = GIT.lock().unwrap_or_else(|error| error.into_inner());
+    for lock in ["shallow.lock", "index.lock"] {
+        let _ = fs::remove_file(clone.join(".git").join(lock));
+    }
+    git(&[
+        "-C",
+        &path_arg(&clone),
+        "fetch",
+        "--depth",
+        "1",
+        "origin",
+        &source.refspec(),
+    ])?;
+    let commit = git_text(&["-C", &path_arg(&clone), "rev-parse", "FETCH_HEAD"])?;
+    let commit = commit.trim();
+    let recipe = git_text(&[
+        "-C",
+        &path_arg(&clone),
+        "show",
+        &format!("{commit}:apps/{id}/app.json"),
+    ])
+    .with_context(|| format!("that source has no recipe for {id}"))?;
+    let manifest: Manifest =
+        serde_json::from_str(&recipe).context("invalid app.json in that source")?;
+    fs::write(target.join("app.json"), &recipe)?;
+    if let Some(icon) = &manifest.icon {
+        let bytes = git_bytes(&[
+            "-C",
+            &path_arg(&clone),
+            "show",
+            &format!("{commit}:apps/{id}/{icon}"),
+        ])
+        .with_context(|| format!("cannot read the icon of {id} from that source"))?;
+        if let Some(name) = Path::new(icon).file_name() {
+            fs::write(target.join(name), bytes)?;
+        }
+    }
+    Ok(source.label())
+}
+
 fn path_arg(path: &Path) -> String {
     path.to_string_lossy().to_string()
 }
 
 fn git(args: &[&str]) -> Result<()> {
+    git_bytes(args).map(|_| ())
+}
+
+fn git_text(args: &[&str]) -> Result<String> {
+    Ok(String::from_utf8_lossy(&git_bytes(args)?).to_string())
+}
+
+fn git_bytes(args: &[&str]) -> Result<Vec<u8>> {
     let output = tools::new_command("git")
         .args(args)
         .output()
@@ -193,7 +257,7 @@ fn git(args: &[&str]) -> Result<()> {
             tail(&detail, 400)
         );
     }
-    Ok(())
+    Ok(output.stdout)
 }
 
 pub fn tail(text: &str, limit: usize) -> String {

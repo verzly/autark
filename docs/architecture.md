@@ -129,7 +129,7 @@ interface Settings {
   wizard_complete: boolean;
 }
 
-interface AppSetting { key: string; label: string; kind: "text" | "number" | "port" | "boolean" | "path" | "file"; default: unknown; help?: string | null }
+interface AppSetting { key: string; label: string; kind: "text" | "number" | "port" | "boolean" | "path" | "file"; default: unknown; help?: string | null; group?: string | null }
 
 interface AppState {
   id: string; name: string; description: string; local: boolean;

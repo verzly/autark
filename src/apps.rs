@@ -190,20 +190,21 @@ impl AppRecord {
     fn from_manifest(root: &Path, manifest_dir: &Path, catalogue: Manifest, in_catalogue: bool, local: bool) -> Self {
         let app_dir = manifest::app_dir(root, &catalogue.id);
         let installed_record = manifest::read_installed(&app_dir);
-        let preview = installed_record.as_ref().and_then(|record| record.source.clone());
+        let installed_preview = installed_record.as_ref().and_then(|record| record.source.clone());
         let version_latest = (in_catalogue && !local).then(|| catalogue.version.clone());
         // An installed app keeps its own recipe unless the catalogue is strictly
         // newer, so a source that points at an older branch cannot hide the
-        // settings and actions the app already has.
-        let manifest = match Manifest::load(&app_dir) {
+        // settings and actions the app already has. When the catalogue wins, the
+        // app runs the stable recipe, so it is no longer a preview.
+        let (manifest, preview) = match Manifest::load(&app_dir) {
             Ok(local_recipe)
-                if preview.is_some()
+                if installed_preview.is_some()
                     || (installed_record.is_some()
                         && !newer(&catalogue.version, &local_recipe.version)) =>
             {
-                local_recipe
+                (local_recipe, installed_preview)
             }
-            _ => catalogue,
+            _ => (catalogue, None),
         };
         let values = manifest::load_settings(&app_dir, &manifest);
         let prefs = prefs::load(&app_dir);
@@ -239,10 +240,7 @@ impl AppRecord {
             prefs,
             manifest_dir: manifest_dir.to_path_buf(),
             icon_data,
-            preview: installed_record
-                .as_ref()
-                .and_then(|record| record.source.clone())
-                .filter(|_| installed),
+            preview: preview.filter(|_| installed),
             manifest,
             local,
         }
@@ -256,7 +254,7 @@ impl AppRecord {
             )
     }
 
-    fn wire(&self, marketplace_source: &str) -> AppState {
+    fn wire(&self) -> AppState {
         let elapsed_secs = self
             .started_at
             .map(|started| now().saturating_sub(started));
@@ -294,7 +292,7 @@ impl AppRecord {
             started_at: self.started_at,
             elapsed_secs,
             preview: self.preview.clone(),
-            restore_available: self.preview.is_some() && marketplace_source.is_empty(),
+            restore_available: self.preview.is_some(),
         }
     }
 }
@@ -415,13 +413,14 @@ impl Shared {
                 refreshing: false,
                 last_refresh: settings.marketplace_last_refresh,
                 error: None,
-                source: settings.marketplace_source.clone(),
+                source: String::new(),
             },
         };
-        // The selected source is remembered, so the clone follows it on every start.
-        let applied = marketplace::applied_source(&root);
-        if !settings.marketplace_source.is_empty() || !applied.is_empty() {
-            if let Err(error) = marketplace::sync(&root, &settings.marketplace_source) {
+        // Preview sources are picked per app now; the shared clone always follows
+        // the default branch. A source left by an older build is dropped here.
+        core.settings.marketplace_source.clear();
+        if !marketplace::applied_source(&root).is_empty() {
+            if let Err(error) = marketplace::sync(&root, "") {
                 core.marketplace.error = Some(ErrorInfo::from_error(&error));
             }
         }
@@ -640,7 +639,7 @@ pub fn wire(shared: &Shared) -> State {
         settings_path: settings::settings_path().to_string_lossy().to_string(),
         settings_exists: settings::settings_path().exists(),
         marketplace: core.marketplace.clone(),
-        apps: core.records.iter().map(|record| record.wire(&core.marketplace.source)).collect(),
+        apps: core.records.iter().map(|record| record.wire()).collect(),
         operations,
         busy,
         mise: core.mise.clone(),
@@ -791,29 +790,18 @@ pub fn setup(app: &AppHandle, shared: &Shared, id: &str, kind: SetupKind) -> Res
     if snapshot.phase == Phase::Running || snapshot.phase == Phase::Starting {
         bail!("stop the app before running setup");
     }
-    let mut manifest = snapshot.manifest.clone();
-    let mut values = snapshot.settings.clone();
+    let manifest = snapshot.manifest.clone();
+    let values = snapshot.settings.clone();
     let core_settings = shared
         .core
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .settings
         .clone();
-    let marketplace_source = {
-        let core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
-        core.marketplace.source.clone()
-    };
     let root = core_settings.root_path();
     let force_local_mise = core_settings.force_local_mise;
     let app_dir = manifest::app_dir(&root, id);
-    // A preview recipe is kept after a switch to stable, but setup must run the
-    // recipe of the active source, otherwise new settings never appear.
-    if marketplace_source.is_empty() && snapshot.preview.is_some() {
-        if let Ok(stable) = Manifest::load(&snapshot.manifest_dir) {
-            values = manifest::load_settings(&app_dir, &stable);
-            manifest = stable;
-        }
-    }
+    let preview = snapshot.preview.clone();
 
     set_phase(app, shared, id, kind.phase());
     mutate(app, shared, id, |record| {
@@ -930,9 +918,13 @@ pub fn setup(app: &AppHandle, shared: &Shared, id: &str, kind: SetupKind) -> Res
             );
         }
     }
-    manifest::write_installed(&app_dir, &manifest.version, app_version.as_deref(), &marketplace_source)?;
+    manifest::write_installed(
+        &app_dir,
+        &manifest.version,
+        app_version.as_deref(),
+        preview.as_deref().unwrap_or(""),
+    )?;
     let version = manifest.version.clone();
-    let preview = (!marketplace_source.is_empty()).then(|| marketplace_source.clone());
     mutate(app, shared, id, |record| {
         record.installed = true;
         record.installed_version = Some(version);
@@ -1754,60 +1746,16 @@ pub fn refresh_marketplace(app: &AppHandle, shared: &Arc<Shared>) -> Result<()> 
     result
 }
 
-/// Switching the session's marketplace source takes effect immediately, so the catalogue is reloaded.
-pub fn set_marketplace_source(app: &AppHandle, shared: &Arc<Shared>, requested: &str) -> Result<()> {
-    let parsed = marketplace::Source::parse(requested)?;
-    reserve(shared, "", "marketplace")?;
-    let previous = {
-        let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
-        let previous = core.marketplace.source.clone();
-        core.marketplace.source = parsed.label();
-        previous
-    };
-    let result = refresh_inner(app, shared);
-    if result.is_err() {
-        // The clone still holds the previous source, so the state must not claim the new one.
-        let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
-        core.marketplace.source = previous;
-    }
-    if result.is_ok() {
-        // Remember the choice so the next start follows the same branch or pull request.
-        let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
-        core.settings.marketplace_source = core.marketplace.source.clone();
-        let settings = core.settings.clone();
-        drop(core);
-        if let Err(error) = settings.save() {
-            release(shared, "");
-            emit_state(app, shared);
-            return Err(error);
-        }
-    }
-    release(shared, "");
-    emit_state(app, shared);
-    result
-}
-
-/// Restoring is only meaningful while the clone really is on the default branch.
+/// Restoring is only meaningful for an installed app.
 pub fn restore_guard(shared: &Shared, id: &str) -> Result<()> {
-    let (source, applied, installed) = {
+    let installed = {
         let core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
-        let installed = core
-            .records
+        core.records
             .iter()
             .find(|record| record.manifest.id == id)
             .map(|record| record.installed)
-            .unwrap_or(false);
-        (
-            core.marketplace.source.clone(),
-            marketplace::applied_source(&core.settings.root_path()),
-            installed,
-        )
+            .unwrap_or(false)
     };
-    if !source.is_empty() || !applied.is_empty() {
-        bail!(
-            "preview_active: restore needs the default branch. Switch the marketplace back and reload it first."
-        );
-    }
     if !installed {
         bail!("invalid_argument: the app is not installed");
     }
@@ -1816,14 +1764,13 @@ pub fn restore_guard(shared: &Shared, id: &str) -> Result<()> {
 
 fn refresh_inner(app: &AppHandle, shared: &Shared) -> Result<()> {
     let root = shared.root();
-    let source = {
+    {
         let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
         core.marketplace.refreshing = true;
         core.marketplace.error = None;
-        core.marketplace.source.clone()
-    };
+    }
     emit_state(app, shared);
-    let result = marketplace::sync(&root, &source);
+    let result = marketplace::sync(&root, "");
     let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
     core.marketplace.refreshing = false;
     match result {
@@ -1898,10 +1845,15 @@ pub fn replace_local_app(app: &AppHandle, shared: &Arc<Shared>, id: &str, path: 
     Ok(())
 }
 
-/// Copies the current marketplace recipe into the installed app folder without
-/// running setup: a cheap way to pick up an app.json change from a preview source.
-pub fn refresh_app_manifest(app: &AppHandle, shared: &Arc<Shared>, id: &str) -> Result<()> {
-    let (source_dir, app_dir, manifest) = {
+/// Loads one app's recipe from its own source: a branch, a pull request, or the
+/// default branch. The shared clone stays on the default branch, so no other app moves.
+pub fn refresh_app_source(
+    app: &AppHandle,
+    shared: &Arc<Shared>,
+    id: &str,
+    requested: Option<&str>,
+) -> Result<()> {
+    let (root, app_dir, installed_source) = {
         let core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
         let record = match core.records.iter().find(|record| record.manifest.id == id) {
             Some(record) => record,
@@ -1910,31 +1862,58 @@ pub fn refresh_app_manifest(app: &AppHandle, shared: &Arc<Shared>, id: &str) -> 
         if !record.installed {
             bail!("the app is not installed");
         }
-        (
-            record.manifest_dir.clone(),
-            manifest::app_dir(&core.settings.root_path(), id),
-            record.manifest.clone(),
-        )
+        let root = core.settings.root_path();
+        (root.clone(), manifest::app_dir(&root, id), record.preview.clone())
     };
-    let file = source_dir.join("app.json");
-    if source_dir == app_dir || !file.is_file() {
-        bail!("the marketplace source has no recipe for this app");
-    }
-    fs::copy(&file, app_dir.join("app.json"))?;
-    if let Some(icon) = manifest.icon_path(&source_dir) {
-        let icon = PathBuf::from(icon);
-        if let Some(name) = icon.file_name() {
-            let target = app_dir.join(name);
-            if icon.is_file() && icon != target {
-                fs::copy(&icon, &target)?;
+    let request = match requested {
+        Some(value) => value.trim().to_string(),
+        None => installed_source.unwrap_or_default(),
+    };
+    reserve(shared, id, "refresh")?;
+    let result = refresh_app_source_inner(app, shared, id, &root, &app_dir, &request);
+    release(shared, id);
+    result
+}
+
+fn refresh_app_source_inner(
+    app: &AppHandle,
+    shared: &Shared,
+    id: &str,
+    root: &Path,
+    app_dir: &Path,
+    request: &str,
+) -> Result<()> {
+    let label = if request.is_empty() {
+        let source_dir = marketplace::dir(root).join("apps").join(id);
+        let file = source_dir.join("app.json");
+        if !file.is_file() {
+            bail!("the default branch has no recipe for this app");
+        }
+        fs::copy(&file, app_dir.join("app.json"))?;
+        if let Ok(manifest) = Manifest::load(&source_dir) {
+            if let Some(icon) = manifest.icon_path(&source_dir) {
+                let icon = PathBuf::from(icon);
+                if let Some(name) = icon.file_name() {
+                    fs::copy(&icon, app_dir.join(name))?;
+                }
             }
         }
-    }
+        String::new()
+    } else {
+        marketplace::export_app_source(root, id, request, app_dir)?
+    };
+    let installed = manifest::read_installed(app_dir)
+        .context("cannot read the installed record of this app")?;
+    manifest::write_installed(app_dir, &installed.version, installed.app_version.as_deref(), &label)?;
     let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
     load_catalogue(&mut core);
     drop(core);
     emit_state(app, shared);
-    log(app, id, "recipe refreshed from the marketplace source".to_string());
+    if label.is_empty() {
+        log(app, id, "recipe refreshed from the default branch".to_string());
+    } else {
+        log(app, id, format!("recipe refreshed from preview {label}"));
+    }
     Ok(())
 }
 

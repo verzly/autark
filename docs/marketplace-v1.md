@@ -107,6 +107,9 @@ values in `<app>/settings.json` next to the installed manifest and exposes them 
 `{settings.<key>}`. Values are validated before an operation starts: a `port` must be 1-65535. A default value
 may itself contain placeholders, for example `"default": "{app}/huggingface"`.
 
+An optional `"group": "Model"` puts the setting on its own tab of the app settings page. Settings without a group
+share the default tab; the tabs follow the order the groups first appear in the recipe.
+
 A `path` or `file` setting is stored portably: a path picked (or typed) inside the app folder is rewritten to the
 `{app}/...` form before it is saved, so the value keeps working when the Autark root moves.
 
@@ -177,14 +180,19 @@ Otherwise the folder-local values from `env` apply, which keeps models in `{app}
 
 ## One marketplace list
 
-Autark keeps a single app list. The selected branch or pull request only changes where the catalogue data is
-read from: entries keep their order, and an app known from an earlier source stays in the list when the
-current source omits it. The choice is stored in the settings, so a restart continues from the same branch or
-pull request; the Marketplace panel shows a banner with a link to it and a one-click return to the default
-branch. While a preview source is active, every installed app shows a reload icon that copies
-the source's `app.json` (and icon) into the app folder without running setup, so a recipe change arrives
-without downloads or reinstalling. `Update all` stays version-gated: it only takes an app whose marketplace
-recipe version is strictly greater than the installed one.
+Autark keeps a single app list. The catalogue always comes from the marketplace's default branch, so apps keep
+their order and a missing app never disappears because of a preview. A branch or pull request is picked per app
+in its settings under the Preview tab: Autark fetches only that app's `app.json` and icon into the app folder, so
+every other app stays on the default branch. The choice is stored in the app's `installed.json`, so a restart keeps
+the preview, and the app card and page show the preview pill. Re-applying an empty value returns that app to the
+default branch; `Restore to stable` on the app page does the same and reinstalls it. The reload icon next to it
+re-fetches the app's current source without running setup, so a recipe change arrives without downloads or
+reinstalling. `Update all` stays version-gated: it only takes an app whose marketplace recipe version is strictly
+greater than the installed one.
+
+The preview controls are behind `Developer mode` in Settings → Preview, which is remembered until it is turned off.
+A setting may declare `"group": "Name"` in the recipe to get its own tab on the app settings page; settings without
+a group share the default tab.
 
 ## Local apps
 

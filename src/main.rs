@@ -385,38 +385,29 @@ async fn refresh_marketplace(
 }
 
 #[tauri::command(rename_all = "snake_case")]
-async fn set_marketplace_source(
-    app: AppHandle,
-    shared: TauriState<'_, Arc<Shared>>,
-    source: String,
-) -> CmdResult<State> {
-    let inner = shared.inner().clone();
-    let task = inner.clone();
-    let handle = app.clone();
-    let joined = tauri::async_runtime::spawn_blocking(move || {
-        apps::set_marketplace_source(&handle, &task, &source)
-    })
-    .await
-    .map_err(|error| CmdError::new("internal", error.to_string()))?;
-    joined?;
-    Ok(apps::wire(&inner))
-}
-
-#[tauri::command(rename_all = "snake_case")]
 async fn check_updates(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> CmdResult<State> {
     let inner = shared.inner().clone();
     apps::check_updates(&app, &inner)?;
     Ok(apps::wire(&inner))
 }
 
+/// Refreshes one app's recipe from a branch or pull request, or from the default
+/// branch when `source` is empty. Other apps keep the default branch.
 #[tauri::command(rename_all = "snake_case")]
-async fn refresh_app_manifest(
+async fn refresh_app_source(
     app: AppHandle,
     shared: TauriState<'_, Arc<Shared>>,
     app_id: String,
+    source: Option<String>,
 ) -> CmdResult<State> {
     let inner = shared.inner().clone();
-    apps::refresh_app_manifest(&app, &inner, &app_id)?;
+    let handle = app.clone();
+    let task = inner.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        apps::refresh_app_source(&handle, &task, &app_id, source.as_deref())
+    })
+    .await
+    .map_err(|error| CmdError::new("internal", error.to_string()))??;
     Ok(apps::wire(&inner))
 }
 
@@ -530,6 +521,8 @@ async fn restore_app(
     }
     let inner = shared.inner().clone();
     apps::restore_guard(&inner, &app_id)?;
+    // Drop the preview recipe first, so the reinstall runs the default branch.
+    apps::refresh_app_source(&app, &inner, &app_id, Some(""))?;
     apps::stop(&app, &inner, &app_id)?;
     apps::reserve(&inner, &app_id, "update")?;
     let task = inner.clone();
@@ -914,9 +907,8 @@ fn main() {
             open_app_tab,
             close_tab,
             refresh_marketplace,
-            set_marketplace_source,
+            refresh_app_source,
             check_updates,
-            refresh_app_manifest,
             install_app,
             update_app,
             reinstall_app,

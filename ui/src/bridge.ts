@@ -1,11 +1,11 @@
 export type Phase = "not_installed" | "installing" | "installed" | "starting" | "running" | "stopping" | "updating" | "removing" | "failed";
-export interface Settings { root: string; folder_name: string; force_local_mise: boolean; animations: boolean; open_tabs: string[]; active_tab: string | null; tray_enabled: boolean; start_with_windows: boolean; close_to_tray: boolean; experimental_local_apps: boolean; wizard_complete: boolean; terminal: string }
+export interface Settings { root: string; folder_name: string; force_local_mise: boolean; animations: boolean; open_tabs: string[]; active_tab: string | null; tray_enabled: boolean; start_with_windows: boolean; close_to_tray: boolean; experimental_local_apps: boolean; wizard_complete: boolean; terminal: string; developer_mode: boolean }
 export interface BinEntry { name: string; path: string; version: string | null; size: number }
 export interface DetectedMise { path: string; version: string | null }
 export interface MiseInfo { available: boolean; source: string; path: string | null; version: string | null; local_path: string; bin_path: string; bin_in_path: boolean; bin: BinEntry[]; detected: DetectedMise[]; force_local: boolean }
 export interface GitExternal { path: string; version: string | null; from_mise: boolean }
 export interface GitInfo { installed: boolean; version: string | null; path: string | null; external: GitExternal | null }
-export interface AppSetting { key: string; label: string; kind: "text" | "number" | "port" | "boolean" | "path" | "file"; default: unknown; help?: string | null }
+export interface AppSetting { key: string; label: string; kind: "text" | "number" | "port" | "boolean" | "path" | "file"; default: unknown; help?: string | null; group?: string | null }
 export interface AppAction { id: string; label: string; confirm: boolean }
 export interface SettingsLock { key: string; var: string; value: string }
 export interface AppPrefs { auto_start: boolean; shortcut_autostart: boolean; shortcut_background: boolean }
@@ -48,9 +48,8 @@ export const api = {
   closeTab: (app_id: string) => invoke<State>("close_tab", { app_id }),
   openAppTab: (app_id: string) => invoke<State>("open_app_tab", { app_id }),
   refreshMarketplace: () => invoke<State>("refresh_marketplace"),
-  setMarketplaceSource: (source: string) => invoke<State>("set_marketplace_source", { source }),
+  refreshAppSource: (app_id: string, source?: string) => invoke<State>("refresh_app_source", { app_id, source: source ?? null }),
   checkUpdates: () => invoke<State>("check_updates"),
-  refreshAppManifest: (app_id: string) => invoke<State>("refresh_app_manifest", { app_id }),
   installApp: (app_id: string, approve_effects: boolean) => invoke<State>("install_app", { app_id, approve_effects }),
   updateApp: (app_id: string, approve_effects: boolean) => invoke<State>("update_app", { app_id, approve_effects }),
   reinstallApp: (app_id: string, approve_effects: boolean) => invoke<State>("reinstall_app", { app_id, approve_effects }),

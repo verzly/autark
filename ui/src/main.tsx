@@ -62,12 +62,6 @@ const errText = (e: unknown) => {
   return String(e);
 };
 const sentence = (text: string) => text ? text[0].toUpperCase() + text.slice(1) : text;
-const sourceLink = (source: string) => {
-  const pr = source.replace(/^#/, "");
-  return /^\d+$/.test(pr)
-    ? `https://github.com/verzly/autark-marketplace/pull/${pr}`
-    : `https://github.com/verzly/autark-marketplace/tree/${encodeURIComponent(source)}`;
-};
 const hue = (id: string) => { let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h) % 360; };
 const duration = (s: number) => `${Math.floor(s / 60)}m ${String(Math.floor(s % 60)).padStart(2, "0")}s`;
 const calver = (version: string | null) => version ? version.match(/^\d+\.\d+\.\d+/)?.[0] ?? version : "version unknown";
@@ -82,7 +76,7 @@ export default function App() {
   const [state, setState] = createSignal<State>(previewState);
   const [active, setActive] = createSignal<string | null>(previewState.settings.active_tab ?? AUTARK_TAB);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
-  const [settingsTab, setSettingsTab] = createSignal<"General" | "Apps" | "Display" | "Experimental" | "About">("General");
+  const [settingsTab, setSettingsTab] = createSignal<"General" | "Apps" | "Preview" | "Display" | "Experimental" | "About">("General");
   const [settingsReturn, setSettingsReturn] = createSignal<string | null>(null);
   const [appSettingsOpen, setAppSettingsOpen] = createSignal<string | null>(null);
   const [chooser, setChooser] = createSignal(false);
@@ -102,16 +96,8 @@ export default function App() {
   const [root, setRoot] = createSignal("");
   const [allConfirm, setAllConfirm] = createSignal(false);
   const [appTab, setAppTab] = createSignal<"output" | "faq">("output");
-  const [marketSource, setMarketSource] = createSignal(state().marketplace.source);
-  const [sourceOpen, setSourceOpen] = createSignal(false);
-  // The input follows the backend, but a state event must not overwrite what is being typed.
-  let seededSource = state().marketplace.source;
-  createEffect(() => {
-    const source = state().marketplace.source;
-    if (source === seededSource) return;
-    seededSource = source;
-    setMarketSource(source);
-  });
+  const [sourceDrafts, setSourceDrafts] = createSignal<Record<string, string>>({});
+  const [appSettingsTab, setAppSettingsTab] = createSignal("General");
   const [localAppsConfirm, setLocalAppsConfirm] = createSignal(false);
   const [binRemoveConfirm, setBinRemoveConfirm] = createSignal<string | null>(null);
   const [wizardStep, setWizardStep] = createSignal(1);
@@ -249,7 +235,9 @@ export default function App() {
       setChooser(false);
       return;
     }
-    if (mockMode()) { setState(s => ({ ...s, settings: { ...s.settings, open_tabs: [...s.settings.open_tabs, id], active_tab: id } })); setActive(id); }
+    // Focus the new tab before the request, otherwise the reply puts the new-tab view back.
+    setActive(id);
+    if (mockMode()) { setState(s => ({ ...s, settings: { ...s.settings, open_tabs: [...s.settings.open_tabs, id], active_tab: id } })); }
     else void run(() => api.openAppTab(id));
     setAutarkTab(false);
     setChooser(false);
@@ -312,10 +300,12 @@ export default function App() {
     void run(() => kind === "install" ? api.installApp(id, true) : kind === "update" ? api.updateApp(id, true) : kind === "reinstall" ? api.reinstallApp(id, true) : kind === "start" ? api.startApp(id) : kind === "stop" ? api.stopApp(id) : kind === "open" ? api.openApp(id) : kind === "remove" ? api.removeApp(id, "REMOVE") : api.cancelOperation(id));
   };
   const appBusy = (a: AppState) => working(a.phase) || state().operations.some(op => op.app_id === a.id);
-  // Tabs show a dot only while a command runs, or red after a failure.
+  // Tabs show yellow while installing or updating, green for other running commands, red after a failure.
   const tabDot = (a: AppState | undefined) => {
     if (!a) return "";
-    if (appBusy(a)) return "busy";
+    const ops = state().operations.filter(op => op.app_id === a.id).map(op => op.kind);
+    if (["installing", "updating", "removing"].includes(a.phase) || ops.some(kind => ["install", "update", "reinstall", "remove"].includes(kind))) return "busy";
+    if (appBusy(a)) return "live";
     return a.phase === "failed" ? "failed" : "";
   };
   const changeRoot = async () => {
@@ -349,7 +339,7 @@ export default function App() {
     const settings = { ...state().settings, terminal };
     if (mockMode()) { setState(s => ({ ...s, settings })); return; }
     void run(() => api.saveSettings(settings));
-  };  const setGlobalPref = (key: "tray_enabled" | "start_with_windows" | "close_to_tray" | "experimental_local_apps" | "force_local_mise" | "animations", next: boolean) => {
+  };  const setGlobalPref = (key: "tray_enabled" | "start_with_windows" | "close_to_tray" | "experimental_local_apps" | "force_local_mise" | "animations" | "developer_mode", next: boolean) => {
     const settings = { ...state().settings, [key]: next };
     if (key === "experimental_local_apps" && !next) setMarketFilter("marketplace");
     if (mockMode()) setState(s => ({ ...s, settings }));
@@ -422,12 +412,22 @@ export default function App() {
     if (mockMode()) return;
     setAllConfirm(false); void run(() => api.updateAll(true));
   };
-  const applyMarketSource = async () => {
-    const source = marketSource().trim();
-    setMarketSource(source);
-    if (mockMode()) { setState(s => ({ ...s, marketplace: { ...s.marketplace, source } })); setSourceOpen(false); return; }
-    if (await run(() => api.setMarketplaceSource(source))) setSourceOpen(false);
+  const sourceValue = (a: AppState) => sourceDrafts()[a.id] ?? a.preview ?? "";
+  const setSourceValue = (a: AppState, value: string) => setSourceDrafts(d => ({ ...d, [a.id]: value }));
+  const applyAppSource = async (a: AppState) => {
+    const source = sourceValue(a).trim();
+    setSourceValue(a, source);
+    if (mockMode()) {
+      setState(s => ({ ...s, apps: s.apps.map(x => x.id === a.id ? { ...x, preview: source || null, restore_available: !!source } : x) }));
+      return;
+    }
+    await run(() => api.refreshAppSource(a.id, source));
   };
+  const reloadAppSource = (a: AppState) => { if (!mockMode()) void run(() => api.refreshAppSource(a.id)); };
+  // Manifest groups become tabs; preview is always the last tab of a non-local app.
+  const appTabs = (a: AppState) => ["General", ...new Set(a.settings_schema.map(f => f.group).filter((g): g is string => Boolean(g))), ...(a.local || !a.installed ? [] : ["Preview"])];
+  const tabFields = (a: AppState, tab: string) => a.settings_schema.filter(f => (f.group ?? "General") === tab);
+  const currentTab = (a: AppState) => appTabs(a).includes(appSettingsTab()) ? appSettingsTab() : "General";
   const restoreApp = (a: AppState) => {
     if (mockMode()) {
       setState(s => ({ ...s, apps: s.apps.map(x => x.id === a.id ? { ...x, preview: null, restore_available: false } : x) }));
@@ -582,7 +582,7 @@ export default function App() {
         <button class="back-button" onClick={() => { const target = settingsReturn() ?? AUTARK_TAB; setSettingsOpen(false); setActive(target); setChooser(false); setAppSettingsOpen(null); }}>← back to homepage</button>
         <div class="view-heading"><div><span class="eyebrow">AUTARK</span><h1>Settings</h1></div></div>
         <nav class="settings-tabs" role="tablist" aria-label="Settings sections">
-          <For each={["General", "Apps", "Display", "Experimental", "About"] as const}>{tab => <button class={`settings-tab ${settingsTab() === tab ? "active" : ""}`} role="tab" aria-selected={settingsTab() === tab} onClick={() => setSettingsTab(tab)}>{tab}</button>}</For>
+          <For each={["General", "Apps", "Preview", "Display", "Experimental", "About"] as const}>{tab => <button class={`settings-tab ${settingsTab() === tab ? "active" : ""}`} role="tab" aria-selected={settingsTab() === tab} onClick={() => setSettingsTab(tab)}>{tab}</button>}</For>
         </nav>
         <div class="settings-content">
         <Show when={settingsTab() === "General"}>
@@ -627,10 +627,9 @@ export default function App() {
           <p class="settings-muted">Experimental features may change or break.</p>
         </Show>
         <Show when={settingsTab() === "Apps"}>
-        <section class="setting-row"><div><h2>Marketplace<Show when={state().marketplace.source}>{(source) => <> <span class="preview-pill">preview ({source()})</span></>}</Show></h2><p>{state().marketplace.exists ? <button class="path" onClick={() => reveal("marketplace")}>{state().marketplace.path}</button> : "Marketplace has not been loaded."}</p><Show when={state().marketplace.last_refresh}><small>Last refreshed {new Date(state().marketplace.last_refresh! * 1000).toLocaleString()}</small></Show></div><span class="row-buttons"><button class="icon-button" aria-label="Marketplace branch or PR" title="Marketplace branch or PR" disabled={state().busy} onClick={() => setSourceOpen(true)}><Icon name="pencil" /></button><button class="button" disabled={state().busy} onClick={refresh}>{state().marketplace.exists ? "Reload marketplace" : "Load marketplace"}</button></span></section>
+        <section class="setting-row"><div><h2>Marketplace</h2><p>{state().marketplace.exists ? <button class="path" onClick={() => reveal("marketplace")}>{state().marketplace.path}</button> : "Marketplace has not been loaded."}</p><Show when={state().marketplace.last_refresh}><small>Last refreshed {new Date(state().marketplace.last_refresh! * 1000).toLocaleString()}</small></Show></div><span class="row-buttons"><button class="button" disabled={state().busy} onClick={refresh}>{state().marketplace.exists ? "Reload marketplace" : "Load marketplace"}</button></span></section>
         <section class="setting-row"><div><h2>Updates</h2><p>Check marketplace versions manually.</p></div><button class="button" disabled={state().busy} onClick={() => mockMode() ? undefined : void run(() => api.checkUpdates())}>Check for updates</button></section>
         <section class="updates"><h2>Update all</h2><p>Running apps stop during updates and cannot be used until each update finishes.</p>
-          <Show when={state().marketplace.source}>{(source) => <p>A preview source is active ({source()}). Update all only takes apps whose recipe version is newer; use the reload icon on an app to force it.</p>}</Show>
           <div class="update-table">
             <For each={state().apps.filter(a => a.installed)}>{a => <article class="update-app"><h3>{a.name}<Show when={a.preview}>{(preview) => <> <span class="preview-pill">preview ({preview()})</span></>}</Show></h3><div class="update-details"><span>App version <b>{a.version_app ?? "unknown"}</b></span><span>Installed <b>{a.version_installed ?? "not installed"}</b></span><span>Marketplace <b>{a.version_latest ?? "unknown"}</b></span><span>State <b>{a.phase}</b></span></div></article>}</For>
           </div>
@@ -638,16 +637,11 @@ export default function App() {
           <Show when={allConfirm()}><div class="confirm-strip"><span>Update every installed app now?</span><button class="button" onClick={() => setAllConfirm(false)}>Cancel</button><button class="button primary" disabled={state().busy} onClick={doUpdateAll}>Confirm</button></div></Show>
         </section>
         </Show>
-        <Show when={sourceOpen()}>
-          <div class="backdrop" onClick={e => { if (e.target === e.currentTarget) setSourceOpen(false); }}>
-            <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="market-source-title">
-              <div class="dialog-title"><div><span class="eyebrow">MARKETPLACE</span><h2 id="market-source-title">Preview branch or PR</h2></div><button class="icon-button" aria-label="Close" onClick={() => setSourceOpen(false)}><Icon name="close" /></button></div>
-              <p class="settings-muted">Load the marketplace from a branch or pull request to try a preview. Leave empty for the default branch.</p>
-              <input class="search" aria-label="Marketplace branch or PR" placeholder="Default branch — leave empty for the default" value={marketSource()} disabled={state().busy} onInput={e => setMarketSource(e.currentTarget.value)} />
-              <small class="settings-muted">Remembered across restarts. Back to stable returns to the default branch.</small>
-              <div class="confirm-strip"><button class="button" onClick={() => setSourceOpen(false)}>Cancel</button><button class="button primary" disabled={state().busy} onClick={() => void applyMarketSource()}>Apply</button></div>
-            </div>
-          </div>
+        <Show when={settingsTab() === "Preview"}>
+          <section class="preference-section"><h2>Developer mode</h2><p>Adds preview controls to every app: load one app's recipe from a branch or pull request, refresh it, or restore it to the default branch.</p>
+            <label class="preference-toggle"><input type="checkbox" role="switch" checked={state().settings.developer_mode} onChange={e => setGlobalPref("developer_mode", e.currentTarget.checked)} /><span><b>Developer mode</b><small>Show the preview tab in the app settings and the preview actions on the app page. Remembered until you turn it off.</small></span></label>
+            <Show when={!state().settings.developer_mode}><small class="preference-note">Preview controls are hidden while this is off.</small></Show>
+          </section>
         </Show>
         <Show when={settingsTab() === "About"}>
           <section class="settings-about">
@@ -664,7 +658,6 @@ export default function App() {
          <div class="marketplace-heading"><button class="back-button" onClick={hideChooser}>← back to homepage</button><div><span class="eyebrow">MARKETPLACE</span><h1>Add an app</h1></div><div class="marketplace-tools"><input ref={dialogInput} class="search" aria-label="Search marketplace apps" placeholder="Search apps..." value={search()} onInput={e => { setSearch(e.currentTarget.value); setSelected(0); }} /><Show when={marketFilter() === "marketplace"}><button class="button" disabled={state().busy || state().marketplace.refreshing} onClick={refresh}>{state().marketplace.refreshing ? "Refreshing..." : "Reload marketplace"}</button></Show><Show when={marketFilter() === "local" && state().settings.experimental_local_apps}><button class="button" disabled={busy()} onClick={addLocalApp}>Add local app</button></Show><Show when={state().marketplace.last_refresh && marketFilter() === "marketplace"}><small>Last refreshed {new Date(state().marketplace.last_refresh! * 1000).toLocaleString()}</small></Show></div></div>
           <div class="market-filters" role="group" aria-label="App source"><button class={`market-filter ${marketFilter() === "builtin" ? "active" : ""}`} aria-pressed={marketFilter() === "builtin"} onClick={() => setMarketFilter("builtin")}>Built-in</button><button class={`market-filter ${marketFilter() === "marketplace" ? "active" : ""}`} aria-pressed={marketFilter() === "marketplace"} onClick={() => setMarketFilter("marketplace")}>Marketplace</button><Show when={state().settings.experimental_local_apps}><button class={`market-filter ${marketFilter() === "local" ? "active" : ""}`} aria-pressed={marketFilter() === "local"} onClick={() => setMarketFilter("local")}>Local</button></Show></div>
 
-          <Show when={state().marketplace.source}>{(source) => <div class="source-banner" role="status"><span>Preview source: working from <button class="link-inline" onClick={() => openUrl(sourceLink(source()))}>{source()}</button> instead of the default branch.</span><button class="button" disabled={state().busy} onClick={() => void run(() => api.setMarketplaceSource(""))}>Back to stable</button></div>}</Show>
           <Show when={marketFilter() === "marketplace"}>
            <Show when={state().marketplace.exists} fallback={<div class="marketplace-load"><p>Marketplace has not been loaded.</p><button class="button primary" disabled={state().marketplace.refreshing} onClick={refresh}>Load marketplace</button></div>}>
              <Show when={!state().marketplace.refreshing} fallback={<div class="marketplace-load">Refreshing marketplace...</div>}>
@@ -761,17 +754,17 @@ export default function App() {
         const confirmInstall = () => { setPanel(null); action(a().installed ? "update" : "install", a()); };
         return <Show when={appSettingsOpen() === a().id} fallback={<section class="app-view">
           <div class="app-header"><div class="app-title"><span class="badge large" style={{ "--hue": hue(a().id) }}><Show when={a().icon_data} fallback={a().id[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><div><h1>{a().name}</h1><div class="version-line">{a().version_app ? `app ${a().version_app}` : "app version unknown"} · {a().local ? "local" : `recipe ${a().version_installed ?? "not installed"}`}<Show when={!a().local && a().update_available}> · latest recipe {a().version_latest ?? "unknown"} <Show when={!upstreamNewer(a())}><span class="update-pill">update</span></Show></Show><Show when={!a().local && upstreamNewer(a())}> · upstream release {upstreamVersions()[a().id]}</Show><Show when={a().preview}>{(preview) => <> · <span class="preview-pill">preview ({preview()})</span></>}</Show></div></div></div>
-            <div class="links"><Show when={state().marketplace.source && a().installed && !a().local}><button class="reload-button" disabled={busyApp()} aria-label={`Refresh the recipe of ${a().name} from ${state().marketplace.source}`} title={`Refresh app.json from ${state().marketplace.source} without running setup`} onClick={() => mockMode() ? undefined : void run(() => api.refreshAppManifest(a().id))}><Icon name="reload" /></button></Show><Show when={a().homepage}><button onClick={() => openUrl(a().homepage!)}>Homepage ↗</button></Show><Show when={a().license}><span>{a().license}</span></Show></div></div>
+            <div class="links"><Show when={a().homepage}><button onClick={() => openUrl(a().homepage!)}>Homepage ↗</button></Show><Show when={a().license}><span>{a().license}</span></Show><Show when={a().preview && a().installed && !a().local}>{(preview) => <div class="preview-actions"><button class="button" disabled={busyApp()} onClick={() => setPanel("restore")}>Restore to stable</button><button class="reload-button" disabled={busyApp()} aria-label={`Refresh ${a().name} from ${preview()}`} title={`Refresh the recipe from ${preview()} without running setup`} onClick={() => reloadAppSource(a())}><Icon name="reload" /></button></div>}</Show></div></div>
           <div class="status-line"><span class={`dot ${p()}`} /><Show when={working(p())}><span class="progress"><i /></span></Show><span class="phase-label">{a().step ? `(${a().step?.index}/${a().step?.total}) ${a().step?.name}` : p().replace("_", " ")}</span><Show when={working(p()) && elapsed() != null}><span class="elapsed">run {duration(elapsed()!)}</span></Show></div>
           <div class="actions">
               <Show when={!a().local}><button class={`button primary ${a().installed && (a().update_available || upstreamNewer(a())) ? "update-ready" : ""}`} disabled={busyApp()} onClick={() => setPanel("install")}>{a().installed ? "Update" : "Install"}</button></Show>
-             <Show when={a().restore_available}><button class="button" disabled={busyApp()} onClick={() => setPanel("restore")}>Restore to stable</button></Show>
+
             <Show when={a().can_start}>
               <button class="button" disabled={!canStart()} onClick={() => action("start", a())}>Start</button>
               <button class="button" disabled={!canStop()} onClick={() => action("stop", a())}>Stop</button>
             </Show>
             <button class="button" disabled={busyApp() || !a().url} onClick={() => action("open", a())}>Open</button>
-             <button class="button" aria-label={`${a().name} settings`} onClick={() => { setPanel(null); setAppSettingsOpen(a().id); }}><Icon name="menu" /> Settings</button>
+             <button class="button" aria-label={`${a().name} settings`} onClick={() => { setPanel(null); setAppSettingsTab("General"); setAppSettingsOpen(a().id); }}><Icon name="menu" /> Settings</button>
              <For each={a().actions}>{item => <button class="button" disabled={busyApp() || !a().installed} onClick={() => item.confirm ? setPanel(`action:${item.id}`) : void run(() => api.runAction(a().id, item.id))}>{item.label}</button>}</For>
              <Show when={working(p())}><button class="button" onClick={() => action("cancel", a())}>Cancel operation</button></Show>
            </div>
@@ -792,8 +785,16 @@ export default function App() {
           <section class="app-settings-page">
             <button class="back-button" onClick={() => { if (dirty(a()) && !confirm("Unsaved settings changes will be lost. Leave without saving?")) return; setAppSettingsOpen(null); }}>← back to app</button>
             <div class="view-heading"><div><span class="eyebrow">{a().name.toUpperCase()}</span><h1>Settings</h1></div><Show when={dirty(a())}><button class="button primary" disabled={busyApp()} onClick={() => saveDraft(a())}>Save</button></Show></div>
-            <Show when={a().settings_schema.length} fallback={<p class="quiet">No app settings.</p>}>
-              <div class="fields"><For each={a().settings_schema}>{field => <SettingField app={a()} field={field} value={draftValue(a(), field.key)} settings={drafts()[a().id] ?? a().settings} lock={a().settings_locked.find(lock => lock.key === field.key)} setValue={value => setDraftValue(a(), field.key, value)} choose={() => void chooseFolder(a(), field)} />}</For></div>
+            <nav class="settings-tabs" role="tablist" aria-label="App settings sections"><For each={appTabs(a())}>{tab => <button class={`settings-tab ${currentTab(a()) === tab ? "active" : ""}`} role="tab" aria-selected={currentTab(a()) === tab} onClick={() => setAppSettingsTab(tab)}>{tab}</button>}</For></nav>
+            <Show when={currentTab(a()) === "Preview"} fallback={<Show when={tabFields(a(), currentTab(a())).length} fallback={<p class="quiet">No settings in this tab.</p>}><div class="fields"><For each={tabFields(a(), currentTab(a()))}>{field => <SettingField app={a()} field={field} value={draftValue(a(), field.key)} settings={drafts()[a().id] ?? a().settings} lock={a().settings_locked.find(lock => lock.key === field.key)} setValue={value => setDraftValue(a(), field.key, value)} choose={() => void chooseFolder(a(), field)} />}</For></div></Show>}>
+              <section class="preference-section"><h2>Preview source</h2>
+                <Show when={state().settings.developer_mode} fallback={<><p class="settings-muted">Developer mode is off. Preview sources are hidden.</p><button class="button" onClick={() => { setAppSettingsOpen(null); setSettingsReturn(a().id); setSettingsOpen(true); setSettingsTab("Preview"); }}>Open settings</button></>}>
+                  <p class="settings-muted">Load only this app's recipe from a branch or pull request. Every other app stays on the default branch. Leave empty for the default branch.</p>
+                  <div class="field-control"><input class="search" aria-label="Branch or pull request for this app" placeholder="Default branch" value={sourceValue(a())} disabled={busyApp()} onInput={e => setSourceValue(a(), e.currentTarget.value)} /><button class="button" disabled={busyApp()} onClick={() => void applyAppSource(a())}>Apply</button><button class="icon-button" disabled={busyApp() || !a().preview} aria-label={`Refresh ${a().name} from its preview source`} title="Refresh the recipe from the current source" onClick={() => reloadAppSource(a())}><Icon name="reload" /></button></div>
+                  <p class="settings-muted">Current source: {a().preview ? <span class="preview-pill">preview ({a().preview})</span> : "default branch"}</p>
+                  <Show when={a().preview}><Show when={panel() !== "restore"}><button class="button" disabled={busyApp()} onClick={() => setPanel("restore")}>Restore to stable</button></Show><Show when={panel() === "restore"}><div class="inline-panel"><p>Reinstall this app from the marketplace's default branch? The preview build is replaced. Settings and user data are preserved.</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={() => { setPanel(null); restoreApp(a()); }}>Restore</button></div></div></Show></Show>
+                </Show>
+              </section>
             </Show>
             <section class="preference-section"><h2>Shortcut</h2><p>A desktop shortcut that opens this app in Autark.</p>
               <button class="button" disabled={busyApp() || !a().installed || shortcutBusy().includes(a().id)} onClick={() => { if (shortcutBusy().includes(a().id)) return; if (mockMode()) { setShortcutDone(ids => [...ids, a().id]); return; } setShortcutBusy(ids => [...ids, a().id]); void run(async () => { try { const next = await api.createShortcut(a().id); setShortcutDone(ids => ids.includes(a().id) ? ids : [...ids, a().id]); return next; } finally { setShortcutBusy(ids => ids.filter(x => x !== a().id)); } }); }}>Create shortcut</button>

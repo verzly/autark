@@ -34,6 +34,8 @@ pub struct Settings {
     /// Which shell the terminal button opens: system, powershell, cmd, sh or bash.
     #[serde(default = "default_terminal")]
     pub terminal: String,
+    /// Shows the app preview (branch or pull request) controls. Remembered once enabled.
+    pub developer_mode: bool,
 }
 
 fn default_animations() -> bool {
@@ -63,6 +65,7 @@ impl Default for Settings {
             wizard_complete: false,
             animations: true,
             terminal: default_terminal(),
+            developer_mode: false,
         }
     }
 }

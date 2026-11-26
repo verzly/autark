@@ -51,6 +51,10 @@ pub struct AppSetting {
     pub default: Value,
     #[serde(default)]
     pub help: Option<String>,
+    /// App settings tab this field belongs to. Without a group the field is listed
+    /// on the default tab.
+    #[serde(default)]
+    pub group: Option<String>,
     /// Environment variables that take the setting out of Autark's hands when the
     /// machine already defines any of them.
     #[serde(default)]
