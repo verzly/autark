@@ -1217,6 +1217,58 @@ fn apply_environment(
     Ok(())
 }
 
+/// Runs a command in its own console, which stays open after Autark exits.
+/// The runner reports the exit code through a file, so the caller keeps the
+/// same success and failure handling as a piped command.
+fn run_in_terminal(app: &AppHandle, id: &str, label: &str, command: Command) -> Result<()> {
+    let root = Settings::load_or_default().root_path();
+    let dir = root.join("runtime").join("terminal");
+    // A token per run, so a command left over from an earlier run cannot report
+    // its exit code into this run's file.
+    let run = format!("{id}-{}", run_token());
+    let exit_file = dir.join(format!("{run}.exit"));
+    let _ = std::fs::remove_file(&exit_file);
+    log(app, id, "running in a separate terminal, which stays open");
+    let mut child = crate::terminal::run_detached(&root, &run, label, &command, &exit_file)?;
+    let code = loop {
+        if is_cancelled(id) {
+            let pid = child.id().to_string();
+            let _ = tools::new_command("taskkill")
+                .args(["/PID", &pid, "/T", "/F"])
+                .output();
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = std::fs::remove_file(&exit_file);
+            bail!("cancelled: operation cancelled");
+        }
+        if let Ok(text) = std::fs::read_to_string(&exit_file) {
+            let _ = std::fs::remove_file(&exit_file);
+            break text.trim().parse::<i32>().unwrap_or(1);
+        }
+        if let Some(status) = child.try_wait()? {
+            // The window was closed before the command wrote its exit code.
+            bail!("the terminal was closed before `{label}` finished: {status}");
+        }
+        thread::sleep(Duration::from_millis(250));
+    };
+    if code != 0 {
+        bail!("child command failed: exited with code {code}");
+    }
+    Ok(())
+}
+
+/// A token that changes for every call, used to keep run files apart.
+fn run_token() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let count = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or_default();
+    format!("{nanos:x}{count:x}")
+}
+
 fn run_streaming(
     app: &AppHandle,
     id: &str,
@@ -1224,6 +1276,9 @@ fn run_streaming(
     mut command: Command,
 ) -> Result<()> {
     log(app, id, format!("$ {label}"));
+    if Settings::load_or_default().force_terminal_operations {
+        return run_in_terminal(app, id, &label, command);
+    }
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -1405,6 +1460,8 @@ fn start_inner(app: &AppHandle, shared: &Arc<Shared>, id: &str) -> Result<()> {
     let settings = shared.plugin_settings();
     let root = settings.root_path();
     let force_local_mise = settings.force_local_mise;
+    // With the forced terminal the app gets its own console window instead of a pipe.
+    let detached = settings.force_terminal_operations;
     let app_dir = manifest::app_dir(&root, id);
     let manifest = record.manifest.clone();
     let values = record.settings.clone();
@@ -1428,11 +1485,10 @@ fn start_inner(app: &AppHandle, shared: &Arc<Shared>, id: &str) -> Result<()> {
     };
     command.args(&args);
     apply_environment(&mut command, &root, &app_dir, &manifest, &values)?;
-    command
-        .current_dir(&app_dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    command.current_dir(&app_dir).stdin(Stdio::null());
+    if !detached {
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    }
 
     let mut echo = program.clone();
     for arg in &args {
@@ -1454,9 +1510,14 @@ fn start_inner(app: &AppHandle, shared: &Arc<Shared>, id: &str) -> Result<()> {
     }
 
     set_phase(app, shared, id, Phase::Starting);
-    let mut child = command
-        .spawn()
-        .with_context(|| format!("cannot start {}", manifest.name))?;
+    let mut child = if detached {
+        // Its own console, with the Autark banner; the wrapper exits with the app.
+        crate::terminal::app_window(&root, id, &echo, &command)?
+    } else {
+        command
+            .spawn()
+            .with_context(|| format!("cannot start {}", manifest.name))?
+    };
     if let Some(stream) = child.stdout.take() {
         let handle = app.clone();
         let app_id = id.to_string();
@@ -1999,6 +2060,10 @@ pub fn reload_settings(shared: &Shared, settings: Settings) -> Result<()> {
 }
 
 pub fn stop_all(shared: &Shared) {
+    // The forced terminal exists to outlive Autark: its processes stay up on quit.
+    if shared.plugin_settings().force_terminal_operations {
+        return;
+    }
     let ids: Vec<String> = shared
         .children
         .lock()

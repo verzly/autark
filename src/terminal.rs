@@ -103,6 +103,132 @@ pub fn open(root: &Path, requested: &str, shells: &tools::TerminalInfo) -> Resul
     Ok(())
 }
 
+/// Banner and a clean environment: both windows look like the Autark terminal.
+fn head(root: &Path, command: &Command) -> Vec<String> {
+    let quote = |text: &str| format!("'{}'", text.replace('\'', "''"));
+    let envs = command.get_envs().collect::<Vec<_>>();
+    let mut lines = vec!["$ErrorActionPreference = 'Continue'".to_string()];
+    lines.extend(banner(root));
+    // A source-level empty line prints nothing; the terminal keeps a blank line here.
+    lines.push("Write-Host ''".to_string());
+    // apply_environment clears the environment and always sets PATH.
+    // shortcut: a command that sets PATH without clearing loses nothing here.
+    if envs
+        .iter()
+        .any(|(key, _)| key.to_string_lossy().eq_ignore_ascii_case("PATH"))
+    {
+        lines.push(
+            "Get-ChildItem env: | ForEach-Object { Remove-Item \"env:$($_.Name)\" -ErrorAction SilentlyContinue }"
+                .to_string(),
+        );
+    }
+    for (key, value) in envs {
+        let value = value.map(|value| value.to_string_lossy().into_owned()).unwrap_or_default();
+        // SetEnvironmentVariable, because names such as ProgramFiles(x86) are not valid $env: names.
+        lines.push(format!(
+            "[Environment]::SetEnvironmentVariable({}, {}, 'Process')",
+            quote(&key.to_string_lossy()),
+            quote(&value)
+        ));
+    }
+    if let Some(cwd) = command.get_current_dir() {
+        lines.push(format!("Set-Location -LiteralPath {}", quote(&cwd.to_string_lossy())));
+    }
+    lines
+}
+
+/// The program and its arguments as one PowerShell call.
+fn call(command: &Command) -> String {
+    let quote = |text: &str| format!("'{}'", text.replace('\'', "''"));
+    let mut call = quote(&command.get_program().to_string_lossy());
+    for arg in command.get_args() {
+        call.push(' ');
+        call.push_str(&quote(&arg.to_string_lossy()));
+    }
+    call
+}
+
+fn write_script(root: &Path, name: &str, lines: &[String]) -> Result<PathBuf> {
+    let dir = root.join("runtime").join("terminal");
+    fs::create_dir_all(&dir).with_context(|| format!("cannot create {}", dir.display()))?;
+    let script = dir.join(format!("{name}.ps1"));
+    fs::write(&script, format!("\u{feff}{}\r\n", lines.join("\r\n")))
+        .with_context(|| format!("cannot write {}", script.display()))?;
+    Ok(script)
+}
+
+fn window(root: &Path, script: &Path, keep_open: bool, label: &str) -> Result<std::process::Child> {
+    let mut spawn = Command::new("powershell.exe");
+    spawn.args(["-NoLogo", "-ExecutionPolicy", "Bypass", "-File"]);
+    if keep_open {
+        spawn.arg("-NoExit");
+    }
+    spawn.arg(script);
+    tools::environment(&mut spawn, root);
+    spawn
+        .env("PATH", autark_path(root))
+        .env("AUTARK_ROOT", root)
+        .current_dir(root)
+        // CREATE_NEW_CONSOLE: the window outlives Autark.
+        .creation_flags(0x0000_0010);
+    spawn
+        .spawn()
+        .with_context(|| format!("cannot open a terminal for `{label}`"))
+}
+
+/// A separate console window that runs the command and stays open afterwards.
+///
+/// Autark cannot read the child's status once its own window owns the process,
+/// so the runner writes the exit code to `exit_file`.
+pub fn run_detached(
+    root: &Path,
+    id: &str,
+    label: &str,
+    command: &Command,
+    exit_file: &Path,
+) -> Result<std::process::Child> {
+    let quote = |text: &str| format!("'{}'", text.replace('\'', "''"));
+    let mut lines = head(root, command);
+    lines.push(format!(
+        "Write-Host {} -ForegroundColor DarkGray",
+        quote(&format!("$ {label}"))
+    ));
+    lines.extend([
+        "$code = 1".to_string(),
+        "try {".to_string(),
+        format!("    & {}", call(command)),
+        "    $code = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 0 }".to_string(),
+        "} catch {".to_string(),
+        "    Write-Host $_ -ForegroundColor Red".to_string(),
+        "} finally {".to_string(),
+        format!(
+            "    Set-Content -LiteralPath {} -Value $code -Encoding ascii",
+            quote(&exit_file.to_string_lossy())
+        ),
+        "    Write-Host ''".to_string(),
+        "    Write-Host \"exit code $code - this terminal stays open\" -ForegroundColor DarkGray"
+            .to_string(),
+        "}".to_string(),
+    ]);
+    let script = write_script(root, id, &lines)?;
+    window(root, &script, true, label)
+}
+
+/// The app's own console: the same banner, then the app in the foreground.
+/// The wrapper exits with the app, so the phase watcher still sees it end.
+pub fn app_window(root: &Path, id: &str, label: &str, command: &Command) -> Result<std::process::Child> {
+    let quote = |text: &str| format!("'{}'", text.replace('\'', "''"));
+    let mut lines = head(root, command);
+    lines.push(format!(
+        "Write-Host {} -ForegroundColor DarkGray",
+        quote(&format!("$ {label}"))
+    ));
+    lines.push(format!("& {}", call(command)));
+    lines.push("exit $LASTEXITCODE".to_string());
+    let script = write_script(root, &format!("{id}-app"), &lines)?;
+    window(root, &script, false, label)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{autark_path, launcher, selected};
