@@ -598,7 +598,7 @@ export default function App() {
           <span class="terminal-menu-check">{state().settings.force_terminal_operations ? "\u2713" : ""}</span>
           <span>Force this terminal for operations</span>
         </button>
-        <small class="terminal-menu-note">Install, update and other commands run in a new window that stays open after Autark closes.</small>
+        <small class="terminal-menu-note">Commands open in a window that outlives Autark.</small>
         <Show when={forceTerminalConfirm()}>
           <div class="terminal-menu-confirm">
             <p>Every command, an app start included, opens its own window and keeps it open after Autark exits. Autark cannot show that output in its log, a multi-step install opens several windows, and closing a window before the command finishes marks the operation failed.</p>
