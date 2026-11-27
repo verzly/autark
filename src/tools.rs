@@ -434,6 +434,11 @@ bin_path = "cmd"
 
 postinstall = '''powershell -NoProfile -ExecutionPolicy Bypass -File "@@POSTINSTALL@@"'''
 
+[tools."pg0"]
+version = "latest"
+asset_pattern = "pg0-windows-x86_64.exe"
+format = "raw"
+
 [env]
 _.path = { path = [
     "{{ tools.git.path }}/usr/bin",
