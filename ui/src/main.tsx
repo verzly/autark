@@ -747,9 +747,9 @@ export default function App() {
                   const external = isGit ? git.external?.path ?? null : isPg0 ? state().pg0.source ?? state().pg0.path ?? null : state().mise.path;
                   return <article role="listitem" class={`market-card ${selected() === i() ? "market-selected" : ""}`} onMouseEnter={() => setSelected(i())}>
                     <div class="market-card-head"><span class="badge large" style={{ "--hue": hue(entry.name) }}><Show when={builtinLogo(entry.name)} fallback={title[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><div><h2>{title}</h2><code>{entry.name}</code></div><span class="local-tag">{tag}</span></div>
-                    <p class="market-description">{isGit ? "Installed once by Autark's mise, next to the rest of its runtime." : isPg0 ? "Embedded PostgreSQL binaries that every app can share." : systemMise ? "Autark runs every app through this mise." : "Managed in Autark's own bin folder."}</p>
+                    <p class="market-description">{isGit ? "Installed once by Autark's mise, next to the rest of its runtime." : isPg0 ? "Installed by Autark's mise. Apps share the payload only after you move it into Autark." : systemMise ? "Autark runs every app through this mise." : "Managed in Autark's own bin folder."}</p>
                     <Show when={isGit ? git.installed : isPg0 ? state().pg0.available : !systemMise}><div class="market-versions"><span>Version <b>{entry.version ?? "unknown"}</b></span><span>By <b>{isGit ? "Autark" : isPg0 ? "Autark" : state().mise.source}</b></span></div>
-                      <div class="market-links"><span>{isGit ? git.path : state().mise.bin_path}</span></div></Show>
+                      <div class="market-links"><span>{isGit ? git.path : isPg0 ? state().pg0.path ?? "not resolved" : state().mise.bin_path}</span></div></Show>
                     <div class="market-actions">
                       <Show when={!systemMise}><button class="button market-action icon-only" aria-label={`Show ${title}`} title="Show" onClick={() => openBuiltin(entry.name)}><Icon name="eye" /></button></Show>
                       <Show when={!isGit && !isPg0 && !systemMise}><button class="button primary market-action" disabled={busy()} onClick={() => { openBuiltin(entry.name); void run(() => api.updateMise()); }}>Update</button></Show>
