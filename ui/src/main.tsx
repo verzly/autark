@@ -263,9 +263,10 @@ export default function App() {
   };
   const builtinName = (id: string | null) => (id ?? "").replace(/\.exe$/i, "");
   const isBuiltin = (id: string | null) => builtinTabs().includes(id ?? "");
-  const openBuiltin = (name: string) => {
+  // Leaving the tool closes its settings page, so it never reopens by itself.
+  createEffect(() => { active(); setBuiltinSettings(false); });  const openBuiltin = (name: string) => {
     if (!builtinTabs().includes(name)) setBuiltinTabs(tabs => [...tabs, name]);
-    setActive(name); setAutarkTab(false); setChooser(false); setSettingsOpen(false); setAppSettingsOpen(null);
+    setActive(name); setAutarkTab(false); setChooser(false); setSettingsOpen(false); setAppSettingsOpen(null); setBuiltinSettings(false);
   };
   const closeBuiltin = (name: string, event: MouseEvent) => {
     event.stopPropagation();
