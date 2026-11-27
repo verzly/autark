@@ -782,6 +782,7 @@ export default function App() {
               <Show when={active()?.toLowerCase() === "mise.exe"}><button class="button danger" disabled={busy() || !localInstalled()} onClick={() => { setBuiltinSettings(false); void run(() => api.removeBinEntry("mise.exe")); }}>Uninstall</button></Show>
               <Show when={active()?.toLowerCase() === "git.exe"}><span class="settings-muted">Autark needs git for marketplace updates.</span></Show>
             </div>
+          <footer class="metadata"><span>{active()?.toLowerCase() === "git.exe" ? state().git.path ?? "not resolved" : active()?.toLowerCase() === "pg0.exe" ? state().pg0.path ?? "not resolved" : state().mise.path ?? "not resolved"}</span><code>{builtinName(active() ?? "")}</code></footer>
           </section>
         </section></Show>
         <Show when={!builtinSettings()}><section class="app-view">
@@ -860,6 +861,7 @@ export default function App() {
                   <p class="settings-muted">Current source: {a().preview ? <span class="preview-pill">preview ({a().preview})</span> : "default branch"}</p>
                   <Show when={a().preview}><Show when={panel() !== "restore"}><button class="button" disabled={busyApp()} onClick={() => setPanel("restore")}>Restore to stable</button></Show><Show when={panel() === "restore"}><div class="inline-panel"><p>Reinstall this app from the marketplace's default branch? The preview build is replaced. Settings and user data are preserved.</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={() => { setPanel(null); restoreApp(a()); }}>Restore</button></div></div></Show></Show>
                 </Show>
+          <footer class="metadata"><button title={state().settings.root + "\\apps\\" + a().id} onClick={() => reveal("app", a().id)}>{`${state().settings.root}\\apps\\${a().id}`}</button><span>{a().version_app ? `app ${a().version_app}` : "app version unknown"}</span><code>{a().id}</code></footer>
               </section>
             </Show>
             <section class="preference-section"><h2>Shortcut</h2><p>A desktop shortcut that opens this app in Autark.</p>

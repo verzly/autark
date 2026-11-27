@@ -224,3 +224,5 @@ body.is-loading{overflow:hidden}
 .probe-result{align-self:center;font-size:11px}.probe-result.ok{color:#a6c49f}.probe-result.fail{color:#d49393}.model-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.links .reload-button{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;padding:0;border:1px solid #383838;border-radius:7px;background:#161616;color:#d0aa61;text-decoration:none}.links .reload-button:hover{background:#1e1e1e}.links .reload-button:disabled{opacity:.5}.links .reload-button svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.4}.links .preview-actions{margin-left:auto;display:flex;align-items:center;gap:8px}.links .preview-actions .button{height:26px;padding:0 9px;font-size:11px}
 
 .actions .button.icon-only{width:32px;padding:0;justify-content:center}
+
+.app-settings-page{min-height:100%}.app-settings-page>.metadata{margin-top:auto}
