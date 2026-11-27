@@ -1014,7 +1014,7 @@ async fn install_pg0(
     let after = root.clone();
     let handle = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        crate::tools::install_pg0(&handle, "pg0", &settings, &root, force)
+        crate::tools::install_pg0(&handle, "pg0.exe", &settings, &root, force)
     })
     .await
     .map_err(|error| CmdError::new("internal", error.to_string()))??;
