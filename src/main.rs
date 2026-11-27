@@ -988,7 +988,7 @@ fn _phase_marker(phase: Phase) -> Phase {
     phase
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 async fn migrate_pg0(
     app: AppHandle,
     shared: TauriState<'_, Arc<Shared>>,
@@ -1010,19 +1010,23 @@ async fn install_pg0(
     shared: TauriState<'_, Arc<Shared>>,
     force: bool,
 ) -> CmdResult<State> {
+    apps::reserve(&shared, "pg0.exe", "install")?;
     let settings = shared.inner().plugin_settings();
     let root = settings.root_path();
-    let after = root.clone();
     let handle = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         crate::tools::install_pg0(&handle, "pg0.exe", &settings, &root, force)
     })
     .await
-    .map_err(|error| CmdError::new("internal", error.to_string()))??;
-    {
+    .map_err(|error| CmdError::new("internal", error.to_string()))
+    .and_then(|result| result.map_err(CmdError::from));
+    if result.is_ok() {
+        let root = shared.inner().plugin_settings().root_path();
         let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
-        core.pg0 = crate::tools::probe_pg0(&after);
+        core.pg0 = crate::tools::probe_pg0(&root);
     }
+    apps::release(&shared, "pg0.exe");
+    result?;
     Ok(apps::wire(&shared))
 }
 
@@ -1034,7 +1038,6 @@ async fn uninstall_pg0(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> C
     }
     let settings = shared.inner().plugin_settings();
     let root = settings.root_path();
-    let after = root.clone();
     let handle = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         crate::tools::uninstall_pg0(&handle, "pg0.exe", &settings, &root)
@@ -1042,11 +1045,16 @@ async fn uninstall_pg0(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> C
     .await
     .map_err(|error| CmdError::new("internal", error.to_string()))
     .and_then(|result| result.map_err(CmdError::from));
-    apps::release(&shared, "pg0.exe");
-    result?;
     {
+        let current_root = shared.inner().plugin_settings().root_path();
         let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
-        core.pg0 = crate::tools::probe_pg0(&after);
+        core.pg0 = crate::tools::probe_pg0(&current_root);
     }
-    Ok(apps::wire(&shared))
+    let state = apps::wire(&shared);
+    apps::release(&shared, "pg0.exe");
+    if result.is_err() {
+        apps::emit_state(&app, &shared);
+    }
+    result?;
+    Ok(state)
 }

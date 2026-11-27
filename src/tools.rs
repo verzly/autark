@@ -134,8 +134,18 @@ pub fn install_pg0(
             command.arg("--force");
         }
         command.arg("pg0");
-        apps::run_tool_streaming(app, id, "installing pg0".to_string(), command)?;
+        if let Err(error) = apps::run_tool_streaming(app, id, "installing pg0".to_string(), command) {
+            if error.to_string().starts_with("cancelled") {
+                return Err(error);
+            }
+            apps::log(app, id, format!("mise pg0 install failed; trying app-local fallback: {error:#}"));
+        }
         if pg0_shim(root).exists() {
+            match fs::remove_file(pg0_exe(root)) {
+                Ok(()) => apps::log(app, id, "removed stale app-local pg0.exe".to_string()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error).context("cannot remove stale app-local pg0.exe"),
+            }
             return Ok(());
         }
     }
@@ -157,10 +167,26 @@ pub fn uninstall_pg0(app: &AppHandle, id: &str, settings: &Settings, root: &Path
     if resolve(settings, root).is_some() {
         let mut command = git_command(settings, root);
         command.args(["uninstall", "pg0"]);
-        let _ = command.output();
+        let output = command.output().context("cannot run mise uninstall pg0")?;
+        if !output.status.success() {
+            let tail = |bytes: &[u8]| {
+                String::from_utf8_lossy(bytes).lines().rev().take(4).collect::<Vec<_>>()
+                    .into_iter().rev().collect::<Vec<_>>().join("\n")
+            };
+            bail!("mise uninstall pg0 failed ({}): {}", output.status, tail(if output.stderr.is_empty() { &output.stdout } else { &output.stderr }));
+        }
     }
-    let _ = fs::remove_file(pg0_exe(root));
-    let _ = fs::remove_file(pg0_shim(root));
+    let mut errors = Vec::new();
+    for path in [pg0_exe(root), pg0_shim(root)] {
+        if let Err(error) = fs::remove_file(&path) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                errors.push(format!("{}: {error}", path.display()));
+            }
+        }
+    }
+    if !errors.is_empty() {
+        bail!("failed to remove pg0 files: {}", errors.join("; "));
+    }
     apps::log(app, id, "pg0 removed from Autark".to_string());
     Ok(())
 }

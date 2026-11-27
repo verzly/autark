@@ -731,7 +731,7 @@ fn reserve_in(
 ) -> Result<()> {
     let setup = matches!(kind, "install" | "update");
     if operations.contains_key("pg0.exe") {
-        bail!("operation_in_progress: pg0 is being removed");
+        bail!("operation_in_progress: a pg0 operation is running");
     }
     if operations.contains_key(app_id) {
         bail!("operation_in_progress: this app is already busy");
@@ -2209,6 +2209,13 @@ fn pg0_has_installation(dir: &Path) -> bool {
         .unwrap_or(false)
 }
 
+const PG0_MIGRATION_MARKER: &str = ".autark-migration";
+
+fn migration_marker_matches(target: &Path, id: &str) -> bool {
+    fs::read_to_string(target.join(PG0_MIGRATION_MARKER))
+        .is_ok_and(|marker| marker == id)
+}
+
 /// Keeps a path relocatable: root and app prefixes become placeholders.
 fn portable_path(path: &Path, root: &Path, app_dir: &Path) -> String {
     let text = path.to_string_lossy().to_string();
@@ -2242,7 +2249,7 @@ fn migrate_pg0_inner(app: &AppHandle, shared: &Arc<Shared>, id: &str, to_shared:
         bail!("invalid_argument: install the app first");
     }
     if matches!(record.phase, Phase::Running | Phase::Starting) {
-        stop(app, shared, id)?;
+        stop_inner(app, shared, id)?;
     }
     let settings = shared.plugin_settings();
     let root = settings.root_path();
@@ -2257,19 +2264,39 @@ fn migrate_pg0_inner(app: &AppHandle, shared: &Arc<Shared>, id: &str, to_shared:
     if !pg0_has_installation(&source) {
         bail!("invalid_argument: there is no pg0 installation at {}", source.display());
     }
-    if pg0_has_installation(&target) {
+    let marker = target.join(PG0_MIGRATION_MARKER);
+    let resuming = migration_marker_matches(&target, id) && pg0_has_installation(&target);
+    if pg0_has_installation(&target) && !resuming {
         bail!("invalid_argument: {} already holds a pg0 installation", target.display());
     }
     let backup = root.join("backups").join("pg0").join(format!("{id}-{}", now()));
-    log(app, id, format!("copying pg0 binaries to {}", target.display()));
-    copy_dir(&source, &backup)?;
-    copy_dir(&source, &target)?;
+    if !resuming {
+        log(app, id, format!("copying pg0 binaries to {}", target.display()));
+        copy_dir(&source, &backup)?;
+        let parent = target.parent().context("pg0 target has no parent")?;
+        fs::create_dir_all(parent)?;
+        let staging = parent.join(format!(".pg0-migration-{id}-{}", now()));
+        if let Err(error) = copy_dir(&source, &staging) {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error);
+        }
+        if let Err(error) = fs::write(staging.join(PG0_MIGRATION_MARKER), id) {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error).with_context(|| "cannot write pg0 migration marker");
+        }
+        if let Err(error) = fs::rename(&staging, &target) {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error).with_context(|| format!("cannot publish {}", target.display()));
+        }
+    }
     let mut values = manifest::load_settings(&app_dir, &record.manifest);
     values.insert(
         "pg0_installation_dir".to_string(),
         Value::String(portable_path(&target, &root, &app_dir)),
     );
     manifest::save_settings(&app_dir, &values)?;
+    let _ = fs::remove_file(&marker);
+    mutate(app, shared, id, |record| record.settings = values.clone());
     log(
         app,
         id,
@@ -2280,6 +2307,23 @@ fn migrate_pg0_inner(app: &AppHandle, shared: &Arc<Shared>, id: &str, to_shared:
     );
     emit_state(app, shared);
     Ok(())
+}
+
+#[cfg(test)]
+mod pg0_migration_tests {
+    use super::*;
+
+    #[test]
+    fn migration_marker_identifies_retry_and_is_not_an_installation() {
+        let dir = std::env::temp_dir().join(format!("autark-pg0-migration-{}", now()));
+        let target = dir.join("installation");
+        fs::create_dir_all(target.join("16")).unwrap();
+        fs::write(target.join(PG0_MIGRATION_MARKER), "app-id").unwrap();
+        assert!(pg0_has_installation(&target));
+        assert!(migration_marker_matches(&target, "app-id"));
+        assert!(!migration_marker_matches(&target, "other-app"));
+        fs::remove_dir_all(dir).unwrap();
+    }
 }
 pub fn stop_all(shared: &Shared) {
     // The forced terminal exists to outlive Autark: its processes stay up on quit.
