@@ -812,6 +812,7 @@ export default function App() {
           <div class="status-line"><span class={`dot ${p()}`} /><Show when={working(p())}><span class="progress"><i /></span></Show><span class="phase-label">{a().step ? `(${a().step?.index}/${a().step?.total}) ${a().step?.name}` : p().replace("_", " ")}</span><Show when={working(p()) && elapsed() != null}><span class="elapsed">run {duration(elapsed()!)}</span></Show></div>
           <div class="actions">
               <button class="button icon-only" aria-label="Back" title="Back" onClick={() => { setActive(null); setChooser(false); }}><Icon name="back" /></button>
+              <button class="button icon-only" aria-label={`${a().name} settings`} title="Settings" onClick={() => { setPanel(null); setAppSettingsTab("General"); setAppSettingsOpen(a().id); }}><Icon name="gear" /></button>
               <Show when={!a().local}><button class={`button primary ${a().installed && (a().update_available || upstreamNewer(a())) ? "update-ready" : ""}`} disabled={busyApp()} onClick={() => setPanel("install")}>{a().installed ? "Update" : "Install"}</button></Show>
 
             <Show when={a().can_start}>
@@ -819,7 +820,6 @@ export default function App() {
               <button class="button" disabled={!canStop()} onClick={() => action("stop", a())}>Stop</button>
             </Show>
             <button class="button" disabled={busyApp() || !a().url} onClick={() => action("open", a())}>Open</button>
-             <button class="button icon-only" aria-label={`${a().name} settings`} title="Settings" onClick={() => { setPanel(null); setAppSettingsTab("General"); setAppSettingsOpen(a().id); }}><Icon name="gear" /></button>
              <For each={a().actions}>{item => <button class="button" disabled={busyApp() || !a().installed} onClick={() => item.confirm ? setPanel(`action:${item.id}`) : void run(() => api.runAction(a().id, item.id))}>{item.label}</button>}</For>
              <Show when={working(p())}><button class="button" onClick={() => action("cancel", a())}>Cancel operation</button></Show>
            </div>
