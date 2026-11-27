@@ -98,11 +98,10 @@ pub fn probe_pg0(root: &Path) -> Pg0Info {
     } else {
         None
     };
-    let exe = installed.or_else(|| source.clone());
     Pg0Info {
-        available: exe.is_some(),
-        version: exe.as_deref().and_then(|path| run_version(path, root)),
-        path: exe.map(|path| path.to_string_lossy().to_string()),
+        available: installed.is_some(),
+        version: installed.as_deref().and_then(|path| run_version(path, root)),
+        path: installed.map(|path| path.to_string_lossy().to_string()),
         installation: pg0_installation(root).to_string_lossy().to_string(),
         source: source.map(|path| path.to_string_lossy().to_string()),
     }
