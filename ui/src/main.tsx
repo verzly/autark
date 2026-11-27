@@ -785,6 +785,7 @@ export default function App() {
             </div>
           </section>
           <footer class="metadata"><span>{active()?.toLowerCase() === "git.exe" ? state().git.path ?? "not resolved" : active()?.toLowerCase() === "pg0.exe" ? state().pg0.path ?? "not resolved" : state().mise.path ?? "not resolved"}</span><code>{builtinName(active() ?? "")}</code></footer>
+            <footer class="about"><span>Autark <b>v{version()}{import.meta.env.DEV ? " (dev)" : ""}</b></span><span>AGPL-3.0</span><button onClick={() => openUrl("https://github.com/verzly/autark")}>Source</button><button onClick={() => openUrl("https://github.com/verzly/autark-marketplace")}>Marketplace</button></footer>
         </section></Show>
         <Show when={!builtinSettings()}><section class="app-view">
         <div class="app-header"><div class="app-title"><span class="badge large"><Show when={builtinLogo(active() ?? "")} fallback={builtinName(active())[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><div><h1>{builtinName(active())}</h1><div class="version-line">version {active()?.toLowerCase() === "git.exe" ? state().git.version ?? "unknown" : active()?.toLowerCase() === "pg0.exe" ? state().pg0.version ?? "unknown" : state().mise.version ?? "unknown"} · {active()?.toLowerCase() === "git.exe" ? (state().git.installed ? "By Autark" : state().git.external?.from_mise ? "By mise" : state().git.external ? "By your machine" : "Not installed") : (state().mise.source === "local" ? "By Autark" : "By your machine")}</div></div></div></div>
@@ -794,6 +795,7 @@ export default function App() {
           <For each={logEntries()}>{entry => entry.spacer ? <div class="log-spacer" aria-hidden="true" /> : <div class={`log ${lineTone(entry.line)}`}><LogText line={entry.line} /></div>}</For>
         </div></div>
         <footer class="metadata"><span>{active()?.toLowerCase() === "git.exe" ? state().git.path ?? "not resolved" : state().mise.path ?? "not resolved"}</span><code>{builtinName(active())}</code></footer>
+            <footer class="about"><span>Autark <b>v{version()}{import.meta.env.DEV ? " (dev)" : ""}</b></span><span>AGPL-3.0</span><button onClick={() => openUrl("https://github.com/verzly/autark")}>Source</button><button onClick={() => openUrl("https://github.com/verzly/autark-marketplace")}>Marketplace</button></footer>
       </section></Show></Show>
       <Show when={!chooser() && !settingsOpen() && active() === AUTARK_TAB}><section class="empty-state"><div class="empty-mark">autark</div>
         <div class="landing-app-list" role="list" aria-label="Installed apps">
@@ -863,6 +865,7 @@ export default function App() {
                   <Show when={a().preview}><Show when={panel() !== "restore"}><button class="button" disabled={busyApp()} onClick={() => setPanel("restore")}>Restore to stable</button></Show><Show when={panel() === "restore"}><div class="inline-panel"><p>Reinstall this app from the marketplace's default branch? The preview build is replaced. Settings and user data are preserved.</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={() => { setPanel(null); restoreApp(a()); }}>Restore</button></div></div></Show></Show>
                 </Show>
           <footer class="metadata"><button title={state().settings.root + "\\apps\\" + a().id} onClick={() => reveal("app", a().id)}>{`${state().settings.root}\\apps\\${a().id}`}</button><span>{a().version_app ? `app ${a().version_app}` : "app version unknown"}</span><code>{a().id}</code></footer>
+            <footer class="about"><span>Autark <b>v{version()}{import.meta.env.DEV ? " (dev)" : ""}</b></span><span>AGPL-3.0</span><button onClick={() => openUrl("https://github.com/verzly/autark")}>Source</button><button onClick={() => openUrl("https://github.com/verzly/autark-marketplace")}>Marketplace</button></footer>
               </section>
             </Show>
             <section class="preference-section"><h2>Shortcut</h2><p>A desktop shortcut that opens this app in Autark.</p>
