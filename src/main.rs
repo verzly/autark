@@ -958,6 +958,14 @@ fn main() {
                 }
             }
             if let Some(window) = app.get_webview_window("main") {
+                // Sleep can leave the WebView2 renderer blank. The wall clock keeps
+                // running across sleep, so a long gap means a resuming machine.
+                // The baseline is set now, so the first focus can already measure a gap.
+                static LAST_FOCUS: std::sync::Mutex<Option<std::time::SystemTime>> =
+                    std::sync::Mutex::new(None);
+                *LAST_FOCUS
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner()) = Some(std::time::SystemTime::now());
                 let handle = handle.clone();
                 window.on_window_event(move |event| match event {
                     tauri::WindowEvent::CloseRequested { api, .. } => {
@@ -972,11 +980,7 @@ fn main() {
                         }
                         handle.exit(0);
                     }
-                    // Sleep can leave the WebView2 renderer blank. The wall clock keeps
-                    // running across sleep, so a long gap means a resuming machine.
                     tauri::WindowEvent::Focused(true) => {
-                        static LAST_FOCUS: std::sync::Mutex<Option<std::time::SystemTime>> =
-                            std::sync::Mutex::new(None);
                         let now = std::time::SystemTime::now();
                         let gap = {
                             let mut last = LAST_FOCUS
