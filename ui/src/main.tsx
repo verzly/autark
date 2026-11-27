@@ -783,8 +783,8 @@ export default function App() {
               <Show when={active()?.toLowerCase() === "mise.exe"}><button class="button danger" disabled={busy() || !localInstalled()} onClick={() => { setBuiltinSettings(false); void run(() => api.removeBinEntry("mise.exe")); }}>Uninstall</button></Show>
               <Show when={active()?.toLowerCase() === "git.exe"}><span class="settings-muted">Autark needs git for marketplace updates.</span></Show>
             </div>
-          <footer class="metadata"><span>{active()?.toLowerCase() === "git.exe" ? state().git.path ?? "not resolved" : active()?.toLowerCase() === "pg0.exe" ? state().pg0.path ?? "not resolved" : state().mise.path ?? "not resolved"}</span><code>{builtinName(active() ?? "")}</code></footer>
           </section>
+          <footer class="metadata"><span>{active()?.toLowerCase() === "git.exe" ? state().git.path ?? "not resolved" : active()?.toLowerCase() === "pg0.exe" ? state().pg0.path ?? "not resolved" : state().mise.path ?? "not resolved"}</span><code>{builtinName(active() ?? "")}</code></footer>
         </section></Show>
         <Show when={!builtinSettings()}><section class="app-view">
         <div class="app-header"><div class="app-title"><span class="badge large"><Show when={builtinLogo(active() ?? "")} fallback={builtinName(active())[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><div><h1>{builtinName(active())}</h1><div class="version-line">version {active()?.toLowerCase() === "git.exe" ? state().git.version ?? "unknown" : active()?.toLowerCase() === "pg0.exe" ? state().pg0.version ?? "unknown" : state().mise.version ?? "unknown"} · {active()?.toLowerCase() === "git.exe" ? (state().git.installed ? "By Autark" : state().git.external?.from_mise ? "By mise" : state().git.external ? "By your machine" : "Not installed") : (state().mise.source === "local" ? "By Autark" : "By your machine")}</div></div></div></div>
