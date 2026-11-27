@@ -52,6 +52,8 @@ pub struct Pg0Info {
     pub path: Option<String>,
     pub installation: String,
     pub source: Option<String>,
+    #[serde(default)]
+    pub used_by: Vec<String>,
 }
 
 pub fn pg0_exe(root: &Path) -> PathBuf {
@@ -104,6 +106,7 @@ pub fn probe_pg0(root: &Path) -> Pg0Info {
         path: installed.map(|path| path.to_string_lossy().to_string()),
         installation: pg0_installation(root).to_string_lossy().to_string(),
         source: source.map(|path| path.to_string_lossy().to_string()),
+        used_by: Vec::new(),
     }
 }
 

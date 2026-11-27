@@ -6,7 +6,7 @@ export const previewState: State = {
   mise: { available: true, source: "local", path: "C:\\Portable\\Autark\\bin\\mise.exe", version: "2026.11.1", local_path: "C:\\Portable\\Autark\\bin\\mise.exe", bin_path: "C:\\Portable\\Autark\\bin", bin_in_path: false, bin: [{ name: "mise.exe", path: "C:\\Portable\\Autark\\bin\\mise.exe", version: "2026.11.1", size: 41231360 }], detected: [{ path: "C:\\Program Files\\mise\\mise.exe", version: "2026.11.2" }], force_local: false },
   git: { installed: true, version: "2.50.1", path: "C:\\Portable\\Autark\\runtime\\mise-data\\installs\\git\\2.50.1\\cmd\\git.exe", external: { path: "C:\\Program Files\\Git\\cmd\\git.exe", version: "2.49.0", from_mise: false } },
   terminal: { bash: "C:\\Portable\\Autark\\runtime\\mise-data\\installs\\git\\2.50.1\\bin\\bash.exe", sh: null },
-  pg0: { available: false, version: null, path: null, installation: "D:\\Portable\\Autark\\runtime\\pg0\\installation", source: "D:\\Portable\\Autark\\apps\\hindsight\\venv\\Lib\\site-packages\\pg0\\bin\\pg0.exe" },
+  pg0: { available: false, version: null, path: null, installation: "D:\\Portable\\Autark\\runtime\\pg0\\installation", source: "D:\\Portable\\Autark\\apps\\hindsight\\venv\\Lib\\site-packages\\pg0\\bin\\pg0.exe", used_by: [] },
   marketplace: { path: "D:\\Portable\\Autark\\marketplace", url: "https://github.com/verzly/autark-marketplace", exists: true, refreshing: false, last_refresh: 1794931200, source: "", error: null },
   busy: false, operations: [],
   apps: [

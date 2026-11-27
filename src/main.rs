@@ -1028,15 +1028,22 @@ async fn install_pg0(
 
 #[tauri::command]
 async fn uninstall_pg0(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> CmdResult<State> {
+    apps::reserve_pg0_removal(&shared)?;
+    if let Err(error) = apps::pg0_removal_preflight(&shared) {
+        return Err(error.into());
+    }
     let settings = shared.inner().plugin_settings();
     let root = settings.root_path();
     let after = root.clone();
     let handle = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         crate::tools::uninstall_pg0(&handle, "pg0.exe", &settings, &root)
     })
     .await
-    .map_err(|error| CmdError::new("internal", error.to_string()))??;
+    .map_err(|error| CmdError::new("internal", error.to_string()))
+    .and_then(|result| result.map_err(CmdError::from));
+    apps::release(&shared, "pg0.exe");
+    result?;
     {
         let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
         core.pg0 = crate::tools::probe_pg0(&after);

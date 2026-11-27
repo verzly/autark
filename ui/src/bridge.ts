@@ -21,7 +21,7 @@ export interface AppState {
 export interface State {
   settings: Settings; settings_path: string; settings_exists: boolean;
   marketplace: { path: string; url: string; exists: boolean; refreshing: boolean; last_refresh: number | null; source: string; error: { code: string; message: string } | null };
-  apps: AppState[]; operations: { app_id: string; kind: string }[]; busy: boolean; mise: MiseInfo; git: GitInfo; terminal: { bash: string | null; sh: string | null }; pg0: { available: boolean; version: string | null; path: string | null; installation: string; source: string | null };
+  apps: AppState[]; operations: { app_id: string; kind: string }[]; busy: boolean; mise: MiseInfo; git: GitInfo; terminal: { bash: string | null; sh: string | null }; pg0: { available: boolean; version: string | null; path: string | null; installation: string; source: string | null; used_by: string[] };
 }
 export const mockMode = () => import.meta.env.DEV && !("__TAURI_INTERNALS__" in window);
 const isTauri = () => "__TAURI_INTERNALS__" in window;

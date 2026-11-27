@@ -23,6 +23,7 @@ pub struct MarketplaceIndex {
 pub struct Requirements {
     pub disk_gb: Option<f64>,
     pub webview2: bool,
+    pub pg0: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -580,6 +581,16 @@ pub fn snapshot_manifest(app: &Path, manifest: &Manifest) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pg0_requirement_defaults_to_false_and_accepts_true_or_false() {
+        let default: Requirements = serde_json::from_str("{}").unwrap();
+        let enabled: Requirements = serde_json::from_str(r#"{"pg0":true}"#).unwrap();
+        let disabled: Requirements = serde_json::from_str(r#"{"pg0":false}"#).unwrap();
+        assert!(!default.pg0);
+        assert!(enabled.pg0);
+        assert!(!disabled.pg0);
+    }
 
     fn demo(gate: &str, settings: &str) -> String {
         format!(

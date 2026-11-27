@@ -56,7 +56,7 @@ import miseLogo from "./mise.png";
 import gitLogo from "./git.svg";
 import pg0Logo from "./pg0.svg";
 
-type InlineAction = "install" | "restore" | "reinstall" | "remove" | `action:${string}` | null;
+type InlineAction = "install" | "restore" | `action:${string}` | null;
 const working = (p: Phase) => ["installing", "starting", "stopping", "updating", "removing"].includes(p);
 const errText = (e: unknown) => {
   if (e instanceof Error) return e.message;
@@ -86,7 +86,6 @@ export default function App() {
   const [search, setSearch] = createSignal("");
   const [selected, setSelected] = createSignal(0);
   const [panel, setPanel] = createSignal<InlineAction>(null);
-  const [removeText, setRemoveText] = createSignal("");
   const [requestError, setRequestError] = createSignal("")
   const [terminalNotice, setTerminalNotice] = createSignal("")
   // The shell picker hangs off the terminal button, opened with a right click.
@@ -187,6 +186,10 @@ export default function App() {
   createEffect(() => { if (!busy()) { setMiseInstalling(false); setResetting(false); } });
   createEffect(() => document.body.classList.toggle("is-loading", miseInstalling() || misePicking() || resetting()));
   const localInstalled = () => state().mise.bin.some(entry => entry.name.toLowerCase() === "mise.exe");
+  const builtinInstalled = (id: string | null) => {
+    const name = id?.toLowerCase();
+    return name === "git.exe" ? state().git.installed : name === "pg0.exe" ? state().pg0.available && !!state().pg0.path?.startsWith(state().settings.root) : localInstalled();
+  };
   const localSelected = () => {
     const selected = state().mise.path;
     return !!selected && selected.toLowerCase() === state().mise.local_path.toLowerCase();
@@ -246,18 +249,33 @@ export default function App() {
     setAutarkTab(false);
     setChooser(false);
   };
+  const visibleTabs = () => [...openIds(), ...builtinTabs(), ...(autarkTab() ? [AUTARK_TAB] : [])];
+  // Browsers activate the tab that takes the closed one's place, then the one before it.
+  const neighborAfterClose = (id: string) => {
+    const list = visibleTabs(), rest = list.filter(tab => tab !== id);
+    return list[list.indexOf(id) + 1] ?? rest[rest.length - 1] ?? AUTARK_TAB;
+  };
+  const activate = (id: string) => {
+    setActive(id);
+    setChooser(false);
+    if (id === AUTARK_TAB) setAutarkTab(true);
+  };
+  const persistTab = (chosen: string) => chosen !== AUTARK_TAB && !isBuiltin(chosen) ? chosen : null;
   const closeTab = (id: string, event: MouseEvent) => {
     event.stopPropagation();
+    const wasActive = active() === id;
+    const chosen = wasActive ? neighborAfterClose(id) : active();
+    // Activate before removing, so the empty-window guard never sees a gap.
+    if (wasActive && chosen) activate(chosen);
     if (mockMode()) {
-      const tabs = openIds().filter(x => x !== id), nextActive = active() === id ? tabs[tabs.length - 1] ?? AUTARK_TAB : active();
-      setState(s => ({ ...s, settings: { ...s.settings, open_tabs: tabs, active_tab: nextActive === AUTARK_TAB ? null : nextActive } }));
-      if (active() === id) { setActive(nextActive); setChooser(false); }
-      if (tabs.length === 0) { setAutarkTab(true); setActive(AUTARK_TAB); }
-    } else void run(async () => {
-      const next = await api.closeTab(id);
-      if (active() === id) { const nextActive = next.settings.active_tab ?? AUTARK_TAB; setActive(nextActive); setChooser(false); }
-      if (next.settings.open_tabs.length === 0) { setAutarkTab(true); setActive(AUTARK_TAB); }
-      return next;
+      setState(s => ({ ...s, settings: { ...s.settings, open_tabs: openIds().filter(x => x !== id), active_tab: chosen && persistTab(chosen) } }));
+      return;
+    }
+    void run(async () => {
+      const closed = await api.closeTab(id);
+      if (!wasActive || !chosen) return closed;
+      if (chosen === AUTARK_TAB || isBuiltin(chosen)) { setState(closed); return undefined; }
+      return await api.setActiveTab(chosen);
     });
   };
   const builtinName = (id: string | null) => (id ?? "").replace(/\.exe$/i, "");
@@ -269,21 +287,31 @@ export default function App() {
   };
   const closeBuiltin = (name: string, event: MouseEvent) => {
     event.stopPropagation();
+    const wasActive = active() === name;
+    const chosen = wasActive ? neighborAfterClose(name) : active();
+    // Activate before removing, so the empty-window guard never sees a gap.
+    if (wasActive && chosen) activate(chosen);
     setBuiltinTabs(tabs => tabs.filter(x => x !== name));
-    if (active() !== name) return;
-    const last = openIds()[openIds().length - 1];
-    if (last) { setActive(last); if (!mockMode()) void run(() => api.setActiveTab(last)); }
-    else { setAutarkTab(true); setActive(AUTARK_TAB); }
+    if (!wasActive || !chosen) return;
+    if (mockMode()) {
+      setState(s => ({ ...s, settings: { ...s.settings, active_tab: persistTab(chosen) } }));
+      return;
+    }
+    if (persistTab(chosen)) void run(() => api.setActiveTab(chosen));
   };
   const closeAutarkTab = (event: MouseEvent) => {
     event.stopPropagation();
+    const wasActive = active() === AUTARK_TAB;
+    const chosen = wasActive ? neighborAfterClose(AUTARK_TAB) : active();
+    if (!wasActive) { setAutarkTab(false); return; }
+    if (!chosen || chosen === AUTARK_TAB) { setAutarkTab(true); setActive(AUTARK_TAB); return; }
+    activate(chosen);
     setAutarkTab(false);
-    if (openIds().length === 0) { setAutarkTab(true); setActive(AUTARK_TAB); return; }
-    if (active() === AUTARK_TAB) {
-      const last = openIds()[openIds().length - 1];
-      setActive(last);
-      if (!mockMode()) void run(() => api.setActiveTab(last));
+    if (mockMode()) {
+      setState(s => ({ ...s, settings: { ...s.settings, active_tab: persistTab(chosen) } }));
+      return;
     }
+    if (persistTab(chosen)) void run(() => api.setActiveTab(chosen));
   };
   // Never leave the window empty: a closed or unknown tab opens the Autark tab again.
   createEffect(() => {
@@ -542,20 +570,14 @@ export default function App() {
   );
   type AppSettingsOperation = {
     description: string;
+    applicable?: () => boolean;
     disabled: () => boolean;
-    unavailableReason?: string;
-    onClick?: () => void;
-    confirmation?: {
-      open: () => boolean;
-      onStart: () => void;
-      onCancel: () => void;
-      onConfirm: () => void;
-      label?: string;
-      input?: { label: string; value: () => string; onInput: (value: string) => void; valid: () => boolean };
-    };
+    unavailableReason?: () => string | undefined;
+    onConfirm: () => void;
   };
   const AppSettingsPage = (props: {
     name: () => string;
+    targetId: () => string;
     backLabel: () => string;
     onBack: () => void;
     tabs: () => string[];
@@ -584,16 +606,38 @@ export default function App() {
     reinstall: AppSettingsOperation;
     uninstall: AppSettingsOperation;
   }) => {
-    const operationSection = (title: string, label: string, operation: AppSettingsOperation, danger = false) => {
-      const confirmation = operation.confirmation;
-      return <section class="uninstall-section"><h2>{title}</h2><Show when={operation.description}><p>{operation.description}</p></Show>
-        <Show when={operation.unavailableReason} fallback={<Show when={confirmation?.open()} fallback={<button class={`button ${danger ? "danger-quiet" : ""}`} disabled={operation.disabled()} onClick={() => confirmation ? confirmation.onStart() : operation.onClick?.()}>{label}</button>}>
-          <div class={confirmation?.input ? "inline-panel remove-panel" : "inline-panel"}>
-            {confirmation?.input && <label>{confirmation.input.label}<input value={confirmation.input.value()} onInput={e => confirmation?.input?.onInput(e.currentTarget.value)} /></label>}
-            <div><button class="button" onClick={() => confirmation?.onCancel()}>Cancel</button><button class={`button ${danger ? "danger" : "primary"}`} disabled={operation.disabled() || !!confirmation?.input && !confirmation.input.valid()} onClick={() => confirmation?.onConfirm()}>{confirmation?.label ?? "Confirm"}</button></div>
+    const [pending, setPending] = createSignal<{ operation: "reinstall" | "uninstall"; target: string } | null>(null);
+    const [removeText, setRemoveText] = createSignal("");
+    const cancelOperation = () => { setPending(null); setRemoveText(""); };
+    const operationFor = (key: "reinstall" | "uninstall") => key === "reinstall" ? props.reinstall : props.uninstall;
+    createEffect(() => {
+      const target = props.targetId();
+      const active = pending();
+      if (active) {
+        const operation = operationFor(active.operation);
+        if (active.target !== target || operation.applicable?.() === false || operation.disabled() || operation.unavailableReason?.()) cancelOperation();
+      }
+    });
+    const operationSection = (key: "reinstall" | "uninstall", title: string, label: string, operation: AppSettingsOperation, danger = false) => {
+      const isPending = () => pending()?.operation === key && pending()?.target === props.targetId();
+      const applicable = () => operation.applicable?.() ?? true;
+      const unavailableReason = () => operation.unavailableReason?.();
+      const confirm = () => {
+        if (!isPending() || !applicable() || operation.disabled() || unavailableReason() || key === "uninstall" && removeText() !== "REMOVE") return;
+        cancelOperation();
+        operation.onConfirm();
+      };
+      return <Show when={applicable()}><section class="uninstall-section"><h2>{title}</h2><Show when={operation.description}><p>{operation.description}</p></Show>
+        <button class={`button ${danger ? "danger-quiet" : ""}`} disabled={operation.disabled() || !!unavailableReason()} onClick={() => { if (applicable() && !operation.disabled() && !unavailableReason()) { setRemoveText(""); setPending({ operation: key, target: props.targetId() }); } }}>{label}</button>
+        <Show when={unavailableReason()}>{reason => <p class="settings-muted">{reason()}</p>}</Show>
+        <Show when={isPending() && applicable() && !unavailableReason()}>
+          <div class={key === "uninstall" ? "inline-panel remove-panel" : "inline-panel"}>
+            <p>Are you sure you want to {key === "reinstall" ? "reinstall" : "uninstall"} {props.name()}?</p>
+            {key === "uninstall" && <label>Type REMOVE<input value={removeText()} onInput={e => setRemoveText(e.currentTarget.value)} /></label>}
+            <div><button class="button" onClick={cancelOperation}>Cancel</button><button class={`button ${danger ? "danger" : "primary"}`} disabled={!applicable() || operation.disabled() || key === "uninstall" && removeText() !== "REMOVE"} onClick={confirm}>{key === "reinstall" ? "Reinstall" : "Remove"}</button></div>
           </div>
-        </Show>}>{reason => <p class="settings-muted">{reason()}</p>}</Show>
-      </section>;
+        </Show>
+      </section></Show>;
     };
     return <section class="app-settings-page">
       <button class="back-button" onClick={props.onBack}>{props.backLabel()}</button>
@@ -610,8 +654,8 @@ export default function App() {
         <label class="preference-toggle"><input type="checkbox" role="switch" checked={shortcut().background()} onChange={e => shortcut().setBackground(e.currentTarget.checked)} /><span><b>Run hidden in the background</b></span></label>
       </section>}</Show>
       <Show when={props.preferences?.startup}>{startup => <section class="preference-section"><h2>Startup</h2><label class="preference-toggle"><input type="checkbox" role="switch" checked={startup().checked()} onChange={e => startup().onChange(e.currentTarget.checked)} /><span><b>Start when Autark starts</b></span></label></section>}</Show>
-      {operationSection("Reinstall app", "Reinstall", props.reinstall)}
-      {operationSection("Uninstall app", "Uninstall", props.uninstall, true)}
+      {operationSection("reinstall", "Reinstall app", "Reinstall", props.reinstall)}
+      {operationSection("uninstall", "Uninstall app", "Uninstall", props.uninstall, true)}
       <footer class="about"><span>Autark <b>v{version()}{import.meta.env.DEV ? " (dev)" : ""}</b></span><span>AGPL-3.0</span><button onClick={() => openUrl("https://github.com/verzly/autark")}>Source</button><button onClick={() => openUrl("https://github.com/verzly/autark-marketplace")}>Marketplace</button></footer>
     </section>;
   };
@@ -909,9 +953,9 @@ export default function App() {
        </section></Show>
       <Show when={!chooser() && !settingsOpen() && isBuiltin(active())}>
           <Show when={builtinSettings()}>
-          <AppSettingsPage name={() => builtinName(active())} backLabel={() => `← back to ${builtinName(active())} app`} onBack={() => setBuiltinSettings(false)} tabs={() => ["General"]} currentTab={builtinSettingsTab} onTab={setBuiltinSettingsTab} tabLabel={tab => tab} fields={() => []}
-            reinstall={{ description: "Reinstall this tool for Autark.", disabled: () => busy(), onClick: () => { const id = active()?.toLowerCase(); setBuiltinSettings(false); if (id === "pg0.exe") { openBuiltin("pg0.exe"); void run(() => api.installPg0(true)); } else if (id === "git.exe") { void run(() => api.updateGit()); } else { void run(() => api.updateMise()); } } }}
-            uninstall={{ description: "", unavailableReason: active()?.toLowerCase() === "git.exe" ? "Autark needs git for marketplace updates." : undefined, disabled: () => busy() || active()?.toLowerCase() === "git.exe" || active()?.toLowerCase() === "mise.exe" && !localInstalled(), onClick: () => { const id = active()?.toLowerCase(); setBuiltinSettings(false); void run(() => id === "pg0.exe" ? api.uninstallPg0() : api.removeBinEntry("mise.exe")); } }} />
+          <AppSettingsPage name={() => builtinName(active())} targetId={() => active() ?? ""} backLabel={() => `← back to ${builtinName(active())} app`} onBack={() => setBuiltinSettings(false)} tabs={() => ["General"]} currentTab={builtinSettingsTab} onTab={setBuiltinSettingsTab} tabLabel={tab => tab} fields={() => []}
+            reinstall={{ description: "Reinstall this tool for Autark.", applicable: () => builtinInstalled(active()), disabled: () => busy(), onConfirm: () => { const id = active()?.toLowerCase(); setBuiltinSettings(false); if (id === "pg0.exe") { openBuiltin("pg0.exe"); void run(() => api.installPg0(true)); } else if (id === "git.exe") { void run(() => api.updateGit()); } else { void run(() => api.updateMise()); } } }}
+            uninstall={{ description: "", applicable: () => builtinInstalled(active()), unavailableReason: () => active()?.toLowerCase() === "git.exe" ? "Autark needs git for marketplace updates." : active()?.toLowerCase() === "pg0.exe" && state().pg0.used_by.length > 0 ? `Uninstall these apps before removing pg0: ${state().pg0.used_by.join(", ")}.` : undefined, disabled: () => busy() || active()?.toLowerCase() === "git.exe" || active()?.toLowerCase() === "mise.exe" && !localInstalled() || active()?.toLowerCase() === "pg0.exe" && state().pg0.used_by.length > 0, onConfirm: () => { const id = active()?.toLowerCase(); setBuiltinSettings(false); void run(() => id === "pg0.exe" ? api.uninstallPg0() : api.removeBinEntry("mise.exe")); } }} />
         </Show>
         <Show when={!builtinSettings()}>
           <AppMainPage id={() => active() ?? ""} name={() => builtinName(active())}
@@ -969,14 +1013,14 @@ export default function App() {
           panels={<><Show when={panel() === "install"}><div class="inline-panel"><p>Setup may install system components through mise and requires network access.</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={confirmInstall}>Confirm</button></div></div></Show><Show when={panel() === "restore"}><div class="inline-panel"><p>Reinstall this app from the marketplace's default branch? The preview build is replaced. Settings and user data are preserved.</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={() => { setPanel(null); restoreApp(a()); }}>Restore</button></div></div></Show><For each={a().actions.filter(item => item.confirm && panel() === `action:${item.id}`)}>{item => <div class="inline-panel"><p>Run {item.label}?</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp() || !a().installed} onClick={() => { setPanel(null); void run(() => api.runAction(a().id, item.id)); }}>Confirm</button></div></div>}</For></>}
           faq={() => a().faq}
           metadata={{ type: "marketplace", root: () => state().settings.root, id: () => a().id, appVersion: () => a().version_app, updateAvailable: () => a().update_available, latestVersion: () => a().version_latest, local: () => a().local, recipeVersion: () => a().version_installed, revealPath: () => reveal("app", a().id), checkUpdates: () => void run(() => api.checkUpdates()) }} />}>
-          <AppSettingsPage name={() => a().name} backLabel={() => "← back to app"} onBack={() => { if (dirty(a()) && !confirm("Unsaved settings changes will be lost. Leave without saving?")) return; setAppSettingsOpen(null); }} tabs={() => appTabs(a())} currentTab={() => currentTab(a())} onTab={tab => setAppSettingsTab(tab)} tabLabel={tabLabel} save={{ visible: () => dirty(a()), disabled: busyApp, onSave: () => saveDraft(a()) }}
+          <AppSettingsPage name={() => a().name} targetId={() => a().id} backLabel={() => "← back to app"} onBack={() => { if (dirty(a()) && !confirm("Unsaved settings changes will be lost. Leave without saving?")) return; setAppSettingsOpen(null); }} tabs={() => appTabs(a())} currentTab={() => currentTab(a())} onTab={tab => setAppSettingsTab(tab)} tabLabel={tabLabel} save={{ visible: () => dirty(a()), disabled: busyApp, onSave: () => saveDraft(a()) }}
             beforeFields={<Show when={a().settings_schema.some(field => field.key === "pg0_installation_dir")}><section class="preference-section"><h2>pg0 binaries</h2><p class="settings-muted">PostgreSQL payload: {String(a().settings.pg0_installation_dir ?? "unknown")}. The databases stay in this app's folder either way.</p><div class="row-buttons"><button class="button" disabled={busyApp()} onClick={() => migratePg0(a(), true)}>Move to Autark</button><button class="button" disabled={busyApp()} onClick={() => migratePg0(a(), false)}>Move into the app</button></div></section></Show>}
             fields={() => currentTab(a()) === PREVIEW_TAB ? [] : tabFields(a(), currentTab(a()))}
             renderField={field => <SettingField app={a()} field={field} value={draftValue(a(), field.key)} settings={drafts()[a().id] ?? a().settings} lock={a().settings_locked.find(lock => lock.key === field.key)} setValue={value => setDraftValue(a(), field.key, value)} choose={() => void chooseFolder(a(), field)} />}
             alternate={{ when: () => currentTab(a()) === PREVIEW_TAB, content: <section class="preference-section"><h2>Preview source</h2><Show when={state().settings.developer_mode} fallback={<><p class="settings-muted">Developer mode is off. Preview sources are hidden.</p><button class="button" onClick={() => { setAppSettingsOpen(null); setSettingsReturn(a().id); setSettingsOpen(true); setSettingsTab("Preview"); }}>Open settings</button></>}><p class="settings-muted">Load only this app's recipe from a branch or pull request. Every other app stays on the default branch. Leave empty for the default branch.</p><div class="field-control"><input class="search" aria-label="Branch or pull request for this app" placeholder="Default branch" value={sourceValue(a())} disabled={busyApp()} onInput={e => setSourceValue(a(), e.currentTarget.value)} /><button class="button" disabled={busyApp()} onClick={() => void applyAppSource(a())}>Apply</button><button class="icon-button" disabled={busyApp() || !a().preview} aria-label={`Refresh ${a().name} from its preview source`} title="Refresh the recipe from the current source" onClick={() => reloadAppSource(a())}><Icon name="reload" /></button></div><p class="settings-muted">Current source: {a().preview ? <span class="preview-pill">preview ({a().preview})</span> : "default branch"}</p><Show when={a().preview}><Show when={panel() !== "restore"}><button class="button" disabled={busyApp()} onClick={() => setPanel("restore")}>Restore to stable</button></Show><Show when={panel() === "restore"}><div class="inline-panel"><p>Reinstall this app from the marketplace's default branch? The preview build is replaced. Settings and user data are preserved.</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={() => { setPanel(null); restoreApp(a()); }}>Restore</button></div></div></Show></Show></Show><footer class="metadata"><button title={state().settings.root + "\\apps\\" + a().id} onClick={() => reveal("app", a().id)}>{`${state().settings.root}\\apps\\${a().id}`}</button><span>{a().version_app ? `app ${a().version_app}` : "app version unknown"}</span><code>{a().id}</code></footer></section> }}
             preferences={{ shortcut: { description: "A desktop shortcut that opens this app in Autark.", disabled: () => !a().installed, busy: () => busyApp() || shortcutBusy().includes(a().id), created: () => shortcutDone().includes(a().id), onCreate: () => { if (shortcutBusy().includes(a().id)) return; if (mockMode()) { setShortcutDone(ids => [...ids, a().id]); return; } setShortcutBusy(ids => [...ids, a().id]); void run(async () => { try { const next = await api.createShortcut(a().id); setShortcutDone(ids => ids.includes(a().id) ? ids : [...ids, a().id]); return next; } finally { setShortcutBusy(ids => ids.filter(x => x !== a().id)); } }); }, autostart: () => a().prefs.shortcut_autostart, setAutostart: value => setAppPref(a(), "shortcut_autostart", value), background: () => a().prefs.shortcut_background, setBackground: value => setAppPref(a(), "shortcut_background", value) }, startup: { checked: () => a().prefs.auto_start, onChange: value => setAppPref(a(), "auto_start", value) } }}
-            reinstall={{ description: "Runs the full setup again with the current recipe. Settings and user data are preserved.", disabled: () => busyApp() || !a().installed, confirmation: { open: () => panel() === "reinstall", onStart: () => setPanel("reinstall"), onCancel: () => setPanel(null), onConfirm: () => { setPanel(null); action("reinstall", a()); }, label: "Reinstall" } }}
-            uninstall={{ description: "Remove this app from the launcher. User data and settings are preserved.", disabled: () => busyApp() || !a().installed, confirmation: { open: () => panel() === "remove", onStart: () => { setRemoveText(""); setPanel("remove"); }, onCancel: () => setPanel(null), onConfirm: () => { setPanel(null); action("remove", a()); }, label: "Remove", input: { label: "Type REMOVE", value: removeText, onInput: setRemoveText, valid: () => removeText() === "REMOVE" } } }} />
+            reinstall={{ description: "Runs the full setup again with the current recipe. Settings and user data are preserved.", applicable: () => a().installed, disabled: () => busyApp() || !a().installed, onConfirm: () => { setPanel(null); action("reinstall", a()); } }}
+            uninstall={{ description: "Remove this app from the launcher. User data and settings are preserved.", applicable: () => a().installed, disabled: () => busyApp() || !a().installed, onConfirm: () => { setPanel(null); action("remove", a()); } }} />
         </Show>;
       }}</Show>
       </>}>
