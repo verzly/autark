@@ -910,6 +910,7 @@ fn main() {
             refresh_marketplace,
             refresh_app_source,
             migrate_pg0,
+            install_pg0,
             check_updates,
             install_app,
             update_app,
@@ -999,5 +1000,16 @@ async fn migrate_pg0(
     tauri::async_runtime::spawn_blocking(move || apps::migrate_pg0(&handle, &inner, &id, to_shared))
         .await
         .map_err(|error| CmdError::new("internal", error.to_string()))??;
+    Ok(apps::wire(&shared))
+}
+
+#[tauri::command]
+fn install_pg0(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> CmdResult<State> {
+    let root = shared.plugin_settings().root_path();
+    crate::tools::install_pg0(&app, "pg0", &root)?;
+    {
+        let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
+        core.pg0 = crate::tools::probe_pg0(&root);
+    }
     Ok(apps::wire(&shared))
 }

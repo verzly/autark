@@ -53,6 +53,7 @@ function upstreamNewer(app: AppState) {
 import { previewLogs, previewState, previewVariants } from "./mock";
 import miseLogo from "./mise.png";
 import gitLogo from "./git.svg";
+import pg0Logo from "./pg0.svg";
 
 type InlineAction = "install" | "restore" | "reinstall" | "remove" | `action:${string}` | null;
 const working = (p: Phase) => ["installing", "starting", "stopping", "updating", "removing"].includes(p);
@@ -69,7 +70,7 @@ const AUTARK_TAB = "__autark__";
 // Built-in tools with a real logo; everything else falls back to its first letter.
 const builtinLogo = (name: string) => {
   const lower = name.toLowerCase();
-  return lower === "mise.exe" ? miseLogo : lower === "git.exe" ? gitLogo : null;
+  return lower === "mise.exe" ? miseLogo : lower === "git.exe" ? gitLogo : lower === "pg0.exe" ? pg0Logo : null;
 };
 
 export default function App() {
@@ -112,6 +113,8 @@ export default function App() {
     if (!hasLocalMise) entries.unshift({ name: "mise.exe", path: "", version: null, size: 0 });
     // git lives in Autark's mise installs, not in bin, so its card is added here.
     if (!entries.some(entry => entry.name.toLowerCase() === "git.exe")) entries.push({ name: "git.exe", path: state().git.path ?? "", version: state().git.version, size: 0 });
+    // pg0 ships inside an app Python environment until it is copied into Autark bin.
+    if (!entries.some(entry => entry.name.toLowerCase() === "pg0.exe")) entries.push({ name: "pg0.exe", path: state().pg0.path ?? "", version: state().pg0.version, size: 0 });
     return entries.filter(entry => `${entry.name} ${entry.version ?? ""}`.toLowerCase().includes(search().toLowerCase()));
   });
   const isResolvedMise = (name: string) => name.toLowerCase() === "mise.exe" && !state().mise.bin.some(entry => entry.name.toLowerCase() === "mise.exe");
@@ -737,19 +740,21 @@ export default function App() {
                 <div class="marketplace-grid" role="list" aria-label="Built-in apps"><For each={builtinApps()}>{(entry, i) => {
                   const title = entry.name.replace(/\.exe$/i, "");
                   const isGit = entry.name.toLowerCase() === "git.exe";
+                  const isPg0 = entry.name.toLowerCase() === "pg0.exe";
                   const git = state().git;
                   const systemMise = isResolvedMise(entry.name);
-                  const tag = isGit ? (git.installed ? "By Autark" : git.external?.from_mise ? "By mise" : git.external ? "By your machine" : "Not installed") : systemMise ? "Not installed" : "By Autark";
-                  const external = isGit ? git.external?.path ?? null : state().mise.path;
+                  const tag = isGit ? (git.installed ? "By Autark" : git.external?.from_mise ? "By mise" : git.external ? "By your machine" : "Not installed") : isPg0 ? (state().pg0.available && state().pg0.path?.startsWith(state().settings.root) ? "By Autark" : "Not installed") : systemMise ? "Not installed" : "By Autark";
+                  const external = isGit ? git.external?.path ?? null : isPg0 ? state().pg0.source ?? state().pg0.path ?? null : state().mise.path;
                   return <article role="listitem" class={`market-card ${selected() === i() ? "market-selected" : ""}`} onMouseEnter={() => setSelected(i())}>
                     <div class="market-card-head"><span class="badge large" style={{ "--hue": hue(entry.name) }}><Show when={builtinLogo(entry.name)} fallback={title[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><div><h2>{title}</h2><code>{entry.name}</code></div><span class="local-tag">{tag}</span></div>
-                    <p class="market-description">{isGit ? "Installed once by Autark's mise, next to the rest of its runtime." : systemMise ? "Autark runs every app through this mise." : "Managed in Autark's own bin folder."}</p>
-                    <Show when={isGit ? git.installed : !systemMise}><div class="market-versions"><span>Version <b>{entry.version ?? "unknown"}</b></span><span>By <b>{isGit ? "Autark" : state().mise.source}</b></span></div>
+                    <p class="market-description">{isGit ? "Installed once by Autark's mise, next to the rest of its runtime." : isPg0 ? "Embedded PostgreSQL binaries that every app can share." : systemMise ? "Autark runs every app through this mise." : "Managed in Autark's own bin folder."}</p>
+                    <Show when={isGit ? git.installed : isPg0 ? state().pg0.available : !systemMise}><div class="market-versions"><span>Version <b>{entry.version ?? "unknown"}</b></span><span>By <b>{isGit ? "Autark" : isPg0 ? "Autark" : state().mise.source}</b></span></div>
                       <div class="market-links"><span>{isGit ? git.path : state().mise.bin_path}</span></div></Show>
                     <div class="market-actions">
-                      <Show when={!isGit && !systemMise}><button class="button primary market-action" disabled={busy()} onClick={() => { openBuiltin(entry.name); void run(() => api.updateMise()); }}>Update</button></Show>
+                      <Show when={!isGit && !isPg0 && !systemMise}><button class="button primary market-action" disabled={busy()} onClick={() => { openBuiltin(entry.name); void run(() => api.updateMise()); }}>Update</button></Show>
                       <Show when={isGit}><Show when={git.installed} fallback={<button class="button primary market-action" disabled={busy() || !state().mise.available} onClick={() => { openBuiltin(entry.name); void run(() => api.installGit()); }}>Install</button>}><button class="button primary market-action" disabled={busy()} onClick={() => { openBuiltin(entry.name); void run(() => api.updateGit()); }}>Update</button></Show></Show>
-                      <Show when={!systemMise && !isGit}>
+                      <Show when={isPg0}><Show when={state().pg0.available} fallback={<button class="button primary market-action" disabled={busy() || !state().pg0.source} title={state().pg0.source ? "Copy pg0.exe from an app into Autark" : "No pg0.exe in an installed app yet"} onClick={() => void run(() => api.installPg0())}>Install</button>}><span class="market-versions"><span>Binaries in <b>{state().pg0.installation}</b></span></span></Show></Show>
+                      <Show when={!systemMise && !isGit && !isPg0}>
                         <Show when={binRemoveConfirm() !== entry.name}><button class="button market-view-action" onClick={() => setBinRemoveConfirm(entry.name)}>Remove</button></Show>
                         <Show when={binRemoveConfirm() === entry.name}><div class="confirm-strip"><span>Remove {entry.name} from Autark's bin folder?</span><button class="button" onClick={() => setBinRemoveConfirm(null)}>Cancel</button><button class="button" disabled={busy()} onClick={() => { setBinRemoveConfirm(null); void run(() => api.removeBinEntry(entry.name)); }}>Remove</button></div></Show>
                       </Show>

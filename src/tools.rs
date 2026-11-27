@@ -45,6 +45,66 @@ pub struct MiseInfo {
     pub force_local: bool,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct Pg0Info {
+    pub available: bool,
+    pub version: Option<String>,
+    pub path: Option<String>,
+    pub installation: String,
+    pub source: Option<String>,
+}
+
+pub fn pg0_exe(root: &Path) -> PathBuf {
+    root.join("bin").join("pg0.exe")
+}
+
+/// Finds a pg0.exe that an app installed into its own Python environment.
+fn find_app_pg0(root: &Path) -> Option<PathBuf> {
+    let apps = root.join("apps");
+    for entry in fs::read_dir(apps).ok()?.flatten() {
+        let base = entry.path().join("venv");
+        for lib in ["Lib", "lib"] {
+            let candidate = base
+                .join(lib)
+                .join("site-packages")
+                .join("pg0")
+                .join("bin")
+                .join("pg0.exe");
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+/// A pg0 in Autark's bin is the shared copy; otherwise an app's copy is only a source.
+pub fn probe_pg0(root: &Path) -> Pg0Info {
+    let own = pg0_exe(root);
+    let source = if own.exists() { None } else { find_app_pg0(root) };
+    let exe = if own.exists() { Some(own) } else { source.clone() };
+    Pg0Info {
+        available: exe.is_some(),
+        version: exe.as_deref().and_then(|path| run_version(path, root)),
+        path: exe.map(|path| path.to_string_lossy().to_string()),
+        installation: pg0_installation(root).to_string_lossy().to_string(),
+        source: source.map(|path| path.to_string_lossy().to_string()),
+    }
+}
+
+/// Copies pg0.exe from an app into Autark's bin, so it is not downloaded again.
+pub fn install_pg0(app: &AppHandle, id: &str, root: &Path) -> Result<()> {
+    let target = pg0_exe(root);
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let source = find_app_pg0(root)
+        .context("no pg0.exe found in an app; install an app that uses pg0 first")?;
+    fs::copy(&source, &target)
+        .with_context(|| format!("cannot copy {}", source.display()))?;
+    apps::log(app, id, format!("pg0.exe installed from {}", source.display()));
+    Ok(())
+}
 /// The shared pg0 installation: one PostgreSQL payload for every app.
 pub fn pg0_installation(root: &Path) -> PathBuf {
     root.join("runtime").join("pg0").join("installation")

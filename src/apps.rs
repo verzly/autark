@@ -387,6 +387,7 @@ pub struct State {
     pub mise: MiseInfo,
     pub git: tools::GitInfo,
     pub terminal: tools::TerminalInfo,
+    pub pg0: tools::Pg0Info,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -402,6 +403,7 @@ pub struct Core {
     pub mise: MiseInfo,
     pub git: tools::GitInfo,
     pub terminal: tools::TerminalInfo,
+    pub pg0: tools::Pg0Info,
 }
 
 pub struct Shared {
@@ -419,6 +421,7 @@ impl Shared {
             mise: tools::probe(&settings),
             git: tools::probe_git(&settings),
             terminal: tools::probe_terminal(&root),
+            pg0: tools::probe_pg0(&root),
             records: Vec::new(),
             marketplace: MarketplaceInfo {
                 path: marketplace::dir(&root).to_string_lossy().to_string(),
@@ -664,6 +667,7 @@ pub fn wire(shared: &Shared) -> State {
         mise: core.mise.clone(),
         git: core.git.clone(),
         terminal: core.terminal.clone(),
+        pg0: core.pg0.clone(),
     }
 }
 
