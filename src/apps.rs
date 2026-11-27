@@ -2108,6 +2108,9 @@ fn portable_path(path: &Path, root: &Path, app_dir: &Path) -> String {
 /// Copies the pg0 PostgreSQL binaries between the app folder and Autark's shared
 /// folder. The instances (the databases) are never touched, and the source stays.
 pub fn migrate_pg0(app: &AppHandle, shared: &Arc<Shared>, id: &str, to_shared: bool) -> Result<()> {
+    // One copy at a time, so two apps cannot publish into the shared folder together.
+    static PG0_MIGRATE: Mutex<()> = Mutex::new(());
+    let _guard = PG0_MIGRATE.lock().unwrap_or_else(|error| error.into_inner());
     reserve(shared, id, "migrate")?;
     let result = migrate_pg0_inner(app, shared, id, to_shared);
     release(shared, id);
