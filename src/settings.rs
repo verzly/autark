@@ -38,6 +38,8 @@ pub struct Settings {
     pub developer_mode: bool,
     /// Runs install, update and other commands in a separate terminal that stays open.
     pub force_terminal_operations: bool,
+    /// Day bucket (unix seconds / 86400) of the last successful update notification.
+    pub marketplace_notified_window: Option<u64>,
 }
 
 fn default_animations() -> bool {
@@ -69,6 +71,7 @@ impl Default for Settings {
             terminal: default_terminal(),
             developer_mode: false,
             force_terminal_operations: false,
+            marketplace_notified_window: None,
         }
     }
 }

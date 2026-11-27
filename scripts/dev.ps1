@@ -1,8 +1,10 @@
 $ErrorActionPreference = 'Stop'
-# A running autark.exe locks target\debug\autark.exe, so cargo cannot replace it.
+# A running autark.exe locks the debug executable, so cargo cannot replace it.
 # Only the debug build is stopped: a release Autark can keep running next to it.
+$targetDir = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).target_directory
+$debugExe = Join-Path $targetDir 'debug\autark.exe'
 Get-Process autark -ErrorAction SilentlyContinue |
-    Where-Object { $_.Path -like '*\target\debug\autark.exe' } |
+    Where-Object { $_.Path -and $_.Path -ieq $debugExe } |
     Stop-Process -Force
 # A WebView2 process left over from an earlier run keeps the profile busy,
 # which fails the next start with HRESULT 0x800700AA (resource in use).

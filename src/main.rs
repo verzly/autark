@@ -224,6 +224,7 @@ async fn save_settings(
     settings.active_tab = current.active_tab.clone();
     settings.marketplace_last_refresh = current.marketplace_last_refresh;
     settings.marketplace_source = current.marketplace_source.clone();
+    settings.marketplace_notified_window = current.marketplace_notified_window;
     settings.wizard_complete |= current.wizard_complete;
     // The folder dialog returns the parent, so a new root means <picked>\<folder name>.
     let picked = settings.root_path();
@@ -934,13 +935,6 @@ fn main() {
             exit_app
         ])
         .setup(|app| {
-            let startup_handle = app.handle().clone();
-            let startup_shared = app.state::<Arc<Shared>>().inner().clone();
-            tauri::async_runtime::spawn_blocking(move || {
-                if let Err(error) = apps::daily_update_check(&startup_handle, &startup_shared) {
-                    apps::log(&startup_handle, "marketplace", format!("startup update check failed: {error:#}"));
-                }
-            });
             let handle = app.handle().clone();
             let settings = apps::wire(&app.state::<Arc<Shared>>()).settings;
             reconcile_tray(&handle, &settings);
@@ -1012,12 +1006,12 @@ fn main() {
             }
             let handle = app.handle().clone();
             tauri::async_runtime::spawn_blocking(move || loop {
-                std::thread::sleep(std::time::Duration::from_secs(24 * 60 * 60));
                 if let Some(shared) = handle.try_state::<Arc<Shared>>() {
                     if let Err(error) = apps::daily_update_check(&handle, &shared) {
                         apps::log(&handle, "marketplace", format!("daily update check failed: {error:#}"));
                     }
                 }
+                std::thread::sleep(std::time::Duration::from_secs(24 * 60 * 60));
             });
             Ok(())
         })

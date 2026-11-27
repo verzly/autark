@@ -27,6 +27,10 @@ async function fetchUpstream(upstream: string): Promise<string | null> {
     return typeof version === "string" ? version : null;
   } catch { return null; }
 }
+function resolvedUpstreamVersion(app: AppState): string | null {
+  const npmUpstream = app.upstream?.startsWith("npm:") ? app.upstream : null;
+  return npmUpstream ? upstreamVersions()[app.id] ?? null : app.latest_upstream;
+}
 function upstreamNewer(app: AppState) {
   if (!app.version_app) return false;
   const npmUpstream = app.upstream?.startsWith("npm:") ? app.upstream : null;
@@ -34,7 +38,7 @@ function upstreamNewer(app: AppState) {
     upstreamInFlight.add(app.id);
     void fetchUpstream(npmUpstream).then(version => setUpstreamVersions(versions => ({ ...versions, [app.id]: version }))).finally(() => upstreamInFlight.delete(app.id));
   }
-  const latest = npmUpstream ? upstreamVersions()[app.id] : app.latest_upstream;
+  const latest = resolvedUpstreamVersion(app);
   // version_check may append detail after " | "; compare the version alone.
   const installed = app.version_app.split(/\s*\|\s*/)[0];
   const upstreamVersion = latest?.split(/\s*\|\s*/)[0];
@@ -1032,14 +1036,14 @@ type AppMainAction = { id: string; label: () => string; className: () => string;
         ];
         return <Show when={appSettingsOpen() === a().id} fallback={<AppMainPage id={() => a().id} name={() => a().name}
           badge={{ src: () => a().icon_data, fallback: () => a().id[0]?.toUpperCase() ?? "", hue: () => hue(a().id) }}
-          version={{ type: "marketplace", appVersion: () => a().version_app, local: () => a().local, recipeVersion: () => a().version_installed, updateAvailable: () => a().update_available, latestRecipeVersion: () => a().version_latest, newerUpstream: () => upstreamNewer(a()), upstreamVersion: () => a().latest_upstream, preview: () => a().preview }}
+          version={{ type: "marketplace", appVersion: () => a().version_app, local: () => a().local, recipeVersion: () => a().version_installed, updateAvailable: () => a().update_available, latestRecipeVersion: () => a().version_latest, newerUpstream: () => upstreamNewer(a()), upstreamVersion: () => resolvedUpstreamVersion(a()), preview: () => a().preview }}
           links={{ homepage: () => a().homepage, license: () => a().license, preview: { visible: () => !!a().preview && a().installed && !a().local, branch: () => a().preview ?? "", disabled: busyApp, appName: () => a().name, onRestore: () => setPanel("restore"), onRefresh: () => reloadAppSource(a()) } }}
           status={{ phase: p, step: () => a().step, elapsed }}
           backLabel="Back" onBack={() => { setActive(null); setChooser(false); }} settingsLabel={`${a().name} settings`} onSettings={() => { setPanel(null); setAppSettingsTab("General"); setAppSettingsOpen(a().id); }}
           actions={pageActions}
           panels={<><Show when={panel() === "install"}><div class="inline-panel"><p>Setup may install system components through mise and requires network access.</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={confirmInstall}>Confirm</button></div></div></Show><Show when={panel() === "restore"}><div class="inline-panel"><p>Reinstall this app from the marketplace's default branch? The preview build is replaced. Settings and user data are preserved.</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={() => { setPanel(null); restoreApp(a()); }}>Restore</button></div></div></Show><For each={a().actions.filter(item => item.confirm && panel() === `action:${item.id}`)}>{item => <div class="inline-panel"><p>Run {item.label}?</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp() || !a().installed} onClick={() => { setPanel(null); void run(() => api.runAction(a().id, item.id)); }}>Confirm</button></div></div>}</For></>}
           faq={() => a().faq}
-          metadata={{ type: "marketplace", root: () => state().settings.root, id: () => a().id, appVersion: () => a().version_app, updateAvailable: () => a().update_available, latestVersion: () => a().version_latest, upstreamVersion: () => a().latest_upstream, local: () => a().local, recipeVersion: () => a().version_installed, revealPath: () => reveal("app", a().id), checkUpdates: () => void run(() => api.checkUpdates()) }} />}>
+          metadata={{ type: "marketplace", root: () => state().settings.root, id: () => a().id, appVersion: () => a().version_app, updateAvailable: () => a().update_available, latestVersion: () => a().version_latest, upstreamVersion: () => resolvedUpstreamVersion(a()), local: () => a().local, recipeVersion: () => a().version_installed, revealPath: () => reveal("app", a().id), checkUpdates: () => void run(() => api.checkUpdates()) }} />}>
           <AppSettingsPage name={() => a().name} targetId={() => a().id} backLabel={() => "← back to app"} onBack={() => { if (dirty(a()) && !confirm("Unsaved settings changes will be lost. Leave without saving?")) return; setAppSettingsOpen(null); }} tabs={() => appTabs(a())} currentTab={() => currentTab(a())} onTab={tab => setAppSettingsTab(tab)} tabLabel={tabLabel} save={{ visible: () => dirty(a()), disabled: busyApp, onSave: () => saveDraft(a()) }}
             beforeFields={<>
               <Show when={a().settings_schema.some(field => field.key === "pg0_installation_dir")}><section class="preference-section"><h2>pg0 binaries</h2><p class="settings-muted">PostgreSQL payload: {String(a().settings.pg0_installation_dir ?? "unknown")}. The databases stay in this app's folder either way.</p><div class="row-buttons"><button class="button" disabled={busyApp() || dirty(a())} onClick={() => migratePg0(a(), true)}>Move to Autark</button><button class="button" disabled={busyApp() || dirty(a())} onClick={() => migratePg0(a(), false)}>Move into the app</button></div></section></Show>

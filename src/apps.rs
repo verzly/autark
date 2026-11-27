@@ -22,7 +22,6 @@ use std::{
 use tauri::{AppHandle, Emitter};
 
 static CANCEL: Mutex<Vec<String>> = Mutex::new(Vec::new());
-static LAST_NOTIFIED_SET: Mutex<Option<(u64, Vec<String>)>> = Mutex::new(None);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1193,7 +1192,9 @@ pub fn setup(app: &AppHandle, shared: &Shared, id: &str, kind: SetupKind) -> Res
         record.app_version = app_version;
         record.preview = preview;
         record.installed_source_ref = target_source_ref.clone();
-        record.source_reinstall_required = false;
+        let branch = record.manifest.setup.source.as_ref().map(|source| source.branch.as_str());
+        let selected = resolve_source_ref(record.prefs.source_ref.as_deref(), record.latest_upstream.as_deref(), branch);
+        record.source_reinstall_required = record.installed_source_ref != selected;
         record.phase = Phase::Installed;
         record.step = None;
         record.last_error = None;
@@ -2197,8 +2198,11 @@ pub fn daily_update_check(app: &AppHandle, shared: &Shared) -> Result<()> {
     };
     if !names.is_empty() {
         let window = now() / (24 * 60 * 60);
-        let mut last = LAST_NOTIFIED_SET.lock().unwrap_or_else(|error| error.into_inner());
-        if last.as_ref().is_some_and(|(previous, _)| *previous == window) {
+        let already_notified = {
+            let core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
+            core.settings.marketplace_notified_window == Some(window)
+        };
+        if already_notified {
             return Ok(());
         }
         use tauri_plugin_notification::NotificationExt;
@@ -2206,7 +2210,9 @@ pub fn daily_update_check(app: &AppHandle, shared: &Shared) -> Result<()> {
             .title("Autark updates available")
             .body(format!("Updates available for: {}", names.join(", ")))
             .show()?;
-        *last = Some((window, names));
+        let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
+        core.settings.marketplace_notified_window = Some(window);
+        let _ = core.settings.save();
     }
     emit_state(app, shared);
     Ok(())
