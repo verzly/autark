@@ -49,6 +49,7 @@ export const api = {
   openAppTab: (app_id: string) => invoke<State>("open_app_tab", { app_id }),
   refreshMarketplace: () => invoke<State>("refresh_marketplace"),
   refreshAppSource: (app_id: string, source?: string) => invoke<State>("refresh_app_source", { app_id, source: source ?? null }),
+  migratePg0: (app_id: string, to_shared: boolean) => invoke<State>("migrate_pg0", { app_id, to_shared }),
   checkUpdates: () => invoke<State>("check_updates"),
   installApp: (app_id: string, approve_effects: boolean) => invoke<State>("install_app", { app_id, approve_effects }),
   updateApp: (app_id: string, approve_effects: boolean) => invoke<State>("update_app", { app_id, approve_effects }),

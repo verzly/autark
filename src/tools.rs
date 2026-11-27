@@ -45,6 +45,11 @@ pub struct MiseInfo {
     pub force_local: bool,
 }
 
+/// The shared pg0 installation: one PostgreSQL payload for every app.
+pub fn pg0_installation(root: &Path) -> PathBuf {
+    root.join("runtime").join("pg0").join("installation")
+}
+
 pub fn bin_dir(root: &Path) -> PathBuf {
     root.join("bin")
 }

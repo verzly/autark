@@ -2059,6 +2059,102 @@ pub fn reload_settings(shared: &Shared, settings: Settings) -> Result<()> {
     Ok(())
 }
 
+/// Copies a directory tree, which fs::copy does not do.
+fn copy_dir(from: &Path, to: &Path) -> Result<()> {
+    fs::create_dir_all(to).with_context(|| format!("cannot create {}", to.display()))?;
+    for entry in fs::read_dir(from).with_context(|| format!("cannot read {}", from.display()))? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &target)?;
+        } else {
+            fs::copy(entry.path(), &target)
+                .with_context(|| format!("cannot copy {}", entry.path().display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// A pg0 installation holds one folder per PostgreSQL version.
+fn pg0_has_installation(dir: &Path) -> bool {
+    fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .any(|entry| entry.path().is_dir())
+        })
+        .unwrap_or(false)
+}
+
+/// Keeps a path relocatable: root and app prefixes become placeholders.
+fn portable_path(path: &Path, root: &Path, app_dir: &Path) -> String {
+    let text = path.to_string_lossy().to_string();
+    let app = app_dir.to_string_lossy().to_string();
+    let base = root.to_string_lossy().to_string();
+    let rest = |prefix: &str| text.strip_prefix(prefix).map(|rest| rest.replace('\\', "/"));
+    if let Some(rest) = rest(&app) {
+        return format!("{{app}}{rest}");
+    }
+    if let Some(rest) = rest(&base) {
+        return format!("{{root}}{rest}");
+    }
+    text
+}
+
+/// Copies the pg0 PostgreSQL binaries between the app folder and Autark's shared
+/// folder. The instances (the databases) are never touched, and the source stays.
+pub fn migrate_pg0(app: &AppHandle, shared: &Arc<Shared>, id: &str, to_shared: bool) -> Result<()> {
+    reserve(shared, id, "migrate")?;
+    let result = migrate_pg0_inner(app, shared, id, to_shared);
+    release(shared, id);
+    result
+}
+
+fn migrate_pg0_inner(app: &AppHandle, shared: &Arc<Shared>, id: &str, to_shared: bool) -> Result<()> {
+    let record = find_record(shared, id)?;
+    if !record.installed {
+        bail!("invalid_argument: install the app first");
+    }
+    if matches!(record.phase, Phase::Running | Phase::Starting) {
+        stop(app, shared, id)?;
+    }
+    let settings = shared.plugin_settings();
+    let root = settings.root_path();
+    let app_dir = manifest::app_dir(&root, id);
+    let local = app_dir.join("pg0").join("installation");
+    let shared_dir = tools::pg0_installation(&root);
+    let (source, target) = if to_shared {
+        (local, shared_dir)
+    } else {
+        (shared_dir, local)
+    };
+    if !pg0_has_installation(&source) {
+        bail!("invalid_argument: there is no pg0 installation at {}", source.display());
+    }
+    if pg0_has_installation(&target) {
+        bail!("invalid_argument: {} already holds a pg0 installation", target.display());
+    }
+    let backup = root.join("backups").join("pg0").join(format!("{id}-{}", now()));
+    log(app, id, format!("copying pg0 binaries to {}", target.display()));
+    copy_dir(&source, &backup)?;
+    copy_dir(&source, &target)?;
+    let mut values = manifest::load_settings(&app_dir, &record.manifest);
+    values.insert(
+        "pg0_installation_dir".to_string(),
+        Value::String(portable_path(&target, &root, &app_dir)),
+    );
+    manifest::save_settings(&app_dir, &values)?;
+    log(
+        app,
+        id,
+        format!(
+            "pg0 binaries moved; backup at {}; the old copy stays in place",
+            backup.display()
+        ),
+    );
+    emit_state(app, shared);
+    Ok(())
+}
 pub fn stop_all(shared: &Shared) {
     // The forced terminal exists to outlive Autark: its processes stay up on quit.
     if shared.plugin_settings().force_terminal_operations {

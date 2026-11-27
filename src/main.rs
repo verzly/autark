@@ -909,6 +909,7 @@ fn main() {
             close_tab,
             refresh_marketplace,
             refresh_app_source,
+            migrate_pg0,
             check_updates,
             install_app,
             update_app,
@@ -983,4 +984,20 @@ fn main() {
 #[allow(dead_code)]
 fn _phase_marker(phase: Phase) -> Phase {
     phase
+}
+
+#[tauri::command]
+async fn migrate_pg0(
+    app: AppHandle,
+    shared: TauriState<'_, Arc<Shared>>,
+    app_id: String,
+    to_shared: bool,
+) -> CmdResult<State> {
+    let inner = shared.inner().clone();
+    let handle = app.clone();
+    let id = app_id.clone();
+    tauri::async_runtime::spawn_blocking(move || apps::migrate_pg0(&handle, &inner, &id, to_shared))
+        .await
+        .map_err(|error| CmdError::new("internal", error.to_string()))??;
+    Ok(apps::wire(&shared))
 }

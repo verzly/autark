@@ -341,7 +341,12 @@ export default function App() {
     if (mockMode()) { setState(s => ({ ...s, settings })); return; }
     void run(() => api.saveSettings(settings));
   };
-  const setForceTerminal = (force_terminal_operations: boolean) => {
+  const migratePg0 = (app: AppState, toShared: boolean) => void run(async () => {
+    const target = toShared ? "Autark's shared folder" : `${app.name}'s own folder`;
+    if (!window.confirm(`Copy the pg0 PostgreSQL binaries into ${target}? The current copy is backed up and stays in place.`)) return;
+    if (mockMode()) return;
+    await api.migratePg0(app.id, toShared);
+  });  const setForceTerminal = (force_terminal_operations: boolean) => {
     const settings = { ...state().settings, force_terminal_operations };
     if (mockMode()) { setState(s => ({ ...s, settings })); return; }
     void run(() => api.saveSettings(settings));
@@ -817,6 +822,12 @@ export default function App() {
             <button class="back-button" onClick={() => { if (dirty(a()) && !confirm("Unsaved settings changes will be lost. Leave without saving?")) return; setAppSettingsOpen(null); }}>← back to app</button>
             <div class="view-heading"><div><span class="eyebrow">{a().name.toUpperCase()}</span><h1>Settings</h1></div><Show when={dirty(a())}><button class="button primary" disabled={busyApp()} onClick={() => saveDraft(a())}>Save</button></Show></div>
             <nav class="settings-tabs" role="tablist" aria-label="App settings sections"><For each={appTabs(a())}>{tab => <button class={`settings-tab ${currentTab(a()) === tab ? "active" : ""}`} role="tab" aria-selected={currentTab(a()) === tab} onClick={() => setAppSettingsTab(tab)}>{tabLabel(tab)}</button>}</For></nav>
+            <Show when={a().settings_schema.some(field => field.key === "pg0_installation_dir")}>
+              <section class="preference-section"><h2>pg0 binaries</h2>
+                <p class="settings-muted">PostgreSQL payload: {String(a().settings.pg0_installation_dir ?? "unknown")}. The databases stay in this app's folder either way.</p>
+                <div class="row-buttons"><button class="button" disabled={busyApp()} onClick={() => migratePg0(a(), true)}>Move to Autark</button><button class="button" disabled={busyApp()} onClick={() => migratePg0(a(), false)}>Move into the app</button></div>
+              </section>
+            </Show>
             <Show when={currentTab(a()) === PREVIEW_TAB} fallback={<Show when={tabFields(a(), currentTab(a())).length} fallback={<p class="quiet">No settings in this tab.</p>}><div class="fields"><For each={tabFields(a(), currentTab(a()))}>{field => <SettingField app={a()} field={field} value={draftValue(a(), field.key)} settings={drafts()[a().id] ?? a().settings} lock={a().settings_locked.find(lock => lock.key === field.key)} setValue={value => setDraftValue(a(), field.key, value)} choose={() => void chooseFolder(a(), field)} />}</For></div></Show>}>
               <section class="preference-section"><h2>Preview source</h2>
                 <Show when={state().settings.developer_mode} fallback={<><p class="settings-muted">Developer mode is off. Preview sources are hidden.</p><button class="button" onClick={() => { setAppSettingsOpen(null); setSettingsReturn(a().id); setSettingsOpen(true); setSettingsTab("Preview"); }}>Open settings</button></>}>
