@@ -81,8 +81,24 @@ fn find_app_pg0(root: &Path) -> Option<PathBuf> {
 /// A pg0 in Autark's bin is the shared copy; otherwise an app's copy is only a source.
 pub fn probe_pg0(root: &Path) -> Pg0Info {
     let own = pg0_exe(root);
-    let source = if own.exists() { None } else { find_app_pg0(root) };
-    let exe = if own.exists() { Some(own) } else { source.clone() };
+    let shim = root
+        .join("runtime")
+        .join("mise-data")
+        .join("shims")
+        .join("pg0.exe");
+    let installed = if own.exists() {
+        Some(own)
+    } else if shim.exists() {
+        Some(shim)
+    } else {
+        None
+    };
+    let source = if installed.is_none() {
+        find_app_pg0(root)
+    } else {
+        None
+    };
+    let exe = installed.or_else(|| source.clone());
     Pg0Info {
         available: exe.is_some(),
         version: exe.as_deref().and_then(|path| run_version(path, root)),
@@ -92,8 +108,35 @@ pub fn probe_pg0(root: &Path) -> Pg0Info {
     }
 }
 
-/// Copies pg0.exe from an app into Autark's bin, so it is not downloaded again.
-pub fn install_pg0(app: &AppHandle, id: &str, root: &Path) -> Result<()> {
+/// Installs pg0 with Autark's mise (github:vectorize-io/pg0). When mise cannot
+/// install it, an app's own pg0.exe is copied into Autark's bin instead.
+pub fn install_pg0(
+    app: &AppHandle,
+    id: &str,
+    settings: &Settings,
+    root: &Path,
+    force: bool,
+) -> Result<()> {
+    let resolved = resolve(settings, root);
+    if let Some(mise) = resolved {
+        for sub in ["mise-data", "mise-config", "mise-cache", "mise-state", "tmp"] {
+            fs::create_dir_all(root.join("runtime").join(sub))?;
+        }
+        fs::write(global_config(root), git_config(root))
+            .context("cannot write mise global config")?;
+        fs::write(git_postinstall(root), GIT_POSTINSTALL_PS)
+            .context("cannot write the git postinstall step")?;
+        let mut command = Command::new(&mise);
+        command.args(["install"]);
+        if force {
+            command.arg("--force");
+        }
+        command.arg("pg0");
+        apps::run_tool_streaming(app, id, "installing pg0".to_string(), command)?;
+        if pg0_shim(root).exists() {
+            return Ok(());
+        }
+    }
     let target = pg0_exe(root);
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent)?;
@@ -104,6 +147,13 @@ pub fn install_pg0(app: &AppHandle, id: &str, root: &Path) -> Result<()> {
         .with_context(|| format!("cannot copy {}", source.display()))?;
     apps::log(app, id, format!("pg0.exe installed from {}", source.display()));
     Ok(())
+}
+
+fn pg0_shim(root: &Path) -> PathBuf {
+    root.join("runtime")
+        .join("mise-data")
+        .join("shims")
+        .join("pg0.exe")
 }
 /// The shared pg0 installation: one PostgreSQL payload for every app.
 pub fn pg0_installation(root: &Path) -> PathBuf {
@@ -393,6 +443,7 @@ _.path = { path = [
 
 [tool_alias]
 git = "github:git-for-windows/git"
+pg0 = "github:vectorize-io/pg0"
 "##;
 
 /// The shells the terminal button can open. bash and sh are only usable when an exe exists.

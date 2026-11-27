@@ -1004,12 +1004,23 @@ async fn migrate_pg0(
 }
 
 #[tauri::command]
-fn install_pg0(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> CmdResult<State> {
-    let root = shared.plugin_settings().root_path();
-    crate::tools::install_pg0(&app, "pg0", &root)?;
+async fn install_pg0(
+    app: AppHandle,
+    shared: TauriState<'_, Arc<Shared>>,
+    force: bool,
+) -> CmdResult<State> {
+    let settings = shared.inner().plugin_settings();
+    let root = settings.root_path();
+    let after = root.clone();
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::tools::install_pg0(&handle, "pg0", &settings, &root, force)
+    })
+    .await
+    .map_err(|error| CmdError::new("internal", error.to_string()))??;
     {
         let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
-        core.pg0 = crate::tools::probe_pg0(&root);
+        core.pg0 = crate::tools::probe_pg0(&after);
     }
     Ok(apps::wire(&shared))
 }
