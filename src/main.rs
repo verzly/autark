@@ -958,9 +958,17 @@ fn main() {
                 }
             }
             if let Some(window) = app.get_webview_window("main") {
+                // Sleep can leave the WebView2 renderer blank. The wall clock keeps
+                // running across sleep, so a long gap means a resuming machine.
+                // The baseline is set now, so the first focus can already measure a gap.
+                static LAST_FOCUS: std::sync::Mutex<Option<std::time::SystemTime>> =
+                    std::sync::Mutex::new(None);
+                *LAST_FOCUS
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner()) = Some(std::time::SystemTime::now());
                 let handle = handle.clone();
-                window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                window.on_window_event(move |event| match event {
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
                         if let Some(shared) = handle.try_state::<Arc<Shared>>() {
                             let settings = apps::wire(&shared).settings;
                             if settings.close_to_tray && settings.tray_enabled {
@@ -972,6 +980,23 @@ fn main() {
                         }
                         handle.exit(0);
                     }
+                    tauri::WindowEvent::Focused(true) => {
+                        let now = std::time::SystemTime::now();
+                        let gap = {
+                            let mut last = LAST_FOCUS
+                                .lock()
+                                .unwrap_or_else(|error| error.into_inner());
+                            let gap = last.and_then(|then| now.duration_since(then).ok());
+                            *last = Some(now);
+                            gap
+                        };
+                        if gap.is_some_and(|gap| gap > std::time::Duration::from_secs(600)) {
+                            if let Some(window) = handle.get_webview_window("main") {
+                                let _ = window.reload();
+                            }
+                        }
+                    }
+                    _ => {}
                 });
             }
             Ok(())
