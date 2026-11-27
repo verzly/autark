@@ -17,39 +17,28 @@ function compareVersions(left: string, right: string) {
   return 0;
 }
 async function fetchUpstream(upstream: string): Promise<string | null> {
-  if (upstream.startsWith("npm:")) {
-    // Only the package path is encoded; the registry expects the slash encoded.
-    const pkg = upstream.slice(4).replace("/", "%2F");
-    try {
-      const response = await fetch(`https://registry.npmjs.org/${pkg}/latest`);
-      if (!response.ok) return null;
-      const version = (await response.json()).version;
-      return typeof version === "string" ? version : null;
-    } catch { return null; }
-  }
-  const [owner, repo] = upstream.split("/");
-  if (!owner || !repo) return null;
-  for (const endpoint of [`releases/latest`, `releases?per_page=1`, `tags?per_page=1`]) {
-    try {
-      const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/${endpoint}`);
-      if (!response.ok) continue;
-      const json = await response.json();
-      const tag = Array.isArray(json) ? json[0]?.tag_name ?? json[0]?.name : json.tag_name ?? json.name;
-      if (typeof tag === "string") return tag;
-    } catch { /* Try the next GitHub endpoint. */ }
-  }
-  return null;
+  if (!upstream.startsWith("npm:")) return null;
+  // Only the package path is encoded; the registry expects the slash encoded.
+  const pkg = upstream.slice(4).replace("/", "%2F");
+  try {
+    const response = await fetch(`https://registry.npmjs.org/${pkg}/latest`);
+    if (!response.ok) return null;
+    const version = (await response.json()).version;
+    return typeof version === "string" ? version : null;
+  } catch { return null; }
 }
 function upstreamNewer(app: AppState) {
-  if (!app.upstream || !app.version_app) return false;
-  if (!(app.id in upstreamVersions()) && !upstreamInFlight.has(app.id)) {
+  if (!app.version_app) return false;
+  const npmUpstream = app.upstream?.startsWith("npm:") ? app.upstream : null;
+  if (npmUpstream && !(app.id in upstreamVersions()) && !upstreamInFlight.has(app.id)) {
     upstreamInFlight.add(app.id);
-    void fetchUpstream(app.upstream).then(version => setUpstreamVersions(versions => ({ ...versions, [app.id]: version }))).finally(() => upstreamInFlight.delete(app.id));
+    void fetchUpstream(npmUpstream).then(version => setUpstreamVersions(versions => ({ ...versions, [app.id]: version }))).finally(() => upstreamInFlight.delete(app.id));
   }
-  const latest = upstreamVersions()[app.id];
+  const latest = npmUpstream ? upstreamVersions()[app.id] : app.latest_upstream;
   // version_check may append detail after " | "; compare the version alone.
   const installed = app.version_app.split(/\s*\|\s*/)[0];
-  return Boolean(latest && compareVersions(latest, installed) > 0);
+  const upstreamVersion = latest?.split(/\s*\|\s*/)[0];
+  return Boolean(upstreamVersion && compareVersions(upstreamVersion, installed) > 0);
 }
 import { previewLogs, previewState, previewVariants } from "./mock";
 import miseLogo from "./mise.png";
@@ -99,6 +88,7 @@ export default function App() {
   const [allConfirm, setAllConfirm] = createSignal(false);
   const [appTab, setAppTab] = createSignal<"output" | "faq">("output");
   const [sourceDrafts, setSourceDrafts] = createSignal<Record<string, string>>({});
+  const [sourceRefDrafts, setSourceRefDrafts] = createSignal<Record<string, string>>({});
   const [appSettingsTab, setAppSettingsTab] = createSignal("General");
   const [localAppsConfirm, setLocalAppsConfirm] = createSignal(false);
   const [binRemoveConfirm, setBinRemoveConfirm] = createSignal<string | null>(null);
@@ -434,6 +424,26 @@ export default function App() {
     if (mockMode()) setState(s => ({ ...s, apps: s.apps.map(a => a.id === app.id ? { ...a, prefs } : a) }));
     else void run(() => api.saveAppPrefs(app.id, prefs));
   };
+  const sourceRefValue = (app: AppState) => sourceRefDrafts()[app.id] ?? app.prefs.source_ref ?? "";
+  const clearSourceRefDraft = (id: string, submitted: string) => setSourceRefDrafts(d => {
+    if (d[id] !== submitted) return d;
+    const next = { ...d };
+    delete next[id];
+    return next;
+  });
+  const saveSourceRef = async (app: AppState, value: string) => {
+    const source_ref = value.trim() || null;
+    const submitted = source_ref ?? "";
+    setSourceRefDrafts(d => ({ ...d, [app.id]: submitted }));
+    const prefs = { ...app.prefs, source_ref };
+    if (mockMode()) {
+      const effectiveRef = source_ref ?? app.latest_upstream ?? app.source_branch;
+      setState(s => ({ ...s, apps: s.apps.map(a => a.id === app.id ? { ...a, prefs, source_ref: effectiveRef, source_reinstall_required: a.installed && effectiveRef !== a.installed_source_ref } : a) }));
+      clearSourceRefDraft(app.id, submitted);
+      return;
+    }
+    if (await run(() => api.saveAppPrefs(app.id, prefs))) clearSourceRefDraft(app.id, submitted);
+  };
   const saveDraft = (app: AppState) => {
     const settings = Object.fromEntries(Object.entries(drafts()[app.id] ?? app.settings).filter(([key]) => !app.settings_locked.some(lock => lock.key === key)));
     if (mockMode()) setState(s => ({ ...s, apps: s.apps.map(a => a.id === app.id ? { ...a, settings } : a) }));
@@ -675,13 +685,13 @@ export default function App() {
       <footer class="about"><span>Autark <b>v{version()}{import.meta.env.DEV ? " (dev)" : ""}</b></span><span>AGPL-3.0</span><button onClick={() => openUrl("https://github.com/verzly/autark")}>Source</button><button onClick={() => openUrl("https://github.com/verzly/autark-marketplace")}>Marketplace</button></footer>
     </section>;
   };
-  type AppMainAction = { id: string; label: () => string; className: () => string; visible: () => boolean; disabled: () => boolean; onClick: () => void };
+type AppMainAction = { id: string; label: () => string; className: () => string; visible: () => boolean; disabled: () => boolean; onClick: () => void; title?: () => string };
   type AppMainVersion =
     | { type: "builtin"; version: () => string | null; ownership: () => string }
     | { type: "marketplace"; appVersion: () => string | null; local: () => boolean; recipeVersion: () => string | null; updateAvailable: () => boolean; latestRecipeVersion: () => string | null; newerUpstream: () => boolean; upstreamVersion: () => string | null; preview: () => string | null };
   type AppMainMetadata =
     | { type: "builtin"; path: () => string | null; name: () => string }
-    | { type: "marketplace"; root: () => string; id: () => string; appVersion: () => string | null; updateAvailable: () => boolean; latestVersion: () => string | null; local: () => boolean; recipeVersion: () => string | null; revealPath: () => void; checkUpdates: () => void };
+    | { type: "marketplace"; root: () => string; id: () => string; appVersion: () => string | null; updateAvailable: () => boolean; latestVersion: () => string | null; upstreamVersion: () => string | null; local: () => boolean; recipeVersion: () => string | null; revealPath: () => void; checkUpdates: () => void };
   type AppMainLinks = { homepage?: () => string | null; license?: () => string | null; preview?: { visible: () => boolean; branch: () => string; disabled: () => boolean; appName: () => string; onRestore: () => void; onRefresh: () => void } };
   const AppMainPage = (props: {
     id: () => string;
@@ -716,7 +726,7 @@ export default function App() {
       </div>
       <Show when={props.status}>{status => <div class="status-line"><span class={`dot ${status().phase()}`} /><Show when={working(status().phase())}><span class="progress"><i /></span></Show><span class="phase-label">{status().step() ? `(${status().step()?.index}/${status().step()?.total}) ${status().step()?.name}` : status().phase().replace("_", " ")}</span><Show when={working(status().phase()) && status().elapsed() != null}><span class="elapsed">run {duration(status().elapsed()!)}</span></Show></div>}</Show>
       <div class="actions"><button class="button icon-only" aria-label={props.backLabel} title={props.backLabel} onClick={props.onBack}><Icon name="back" /></button><button class="button icon-only" aria-label={props.settingsLabel} title="Settings" onClick={props.onSettings}><Icon name="gear" /></button>
-        <For each={props.actions()}>{item => <Show when={item.visible()}><button class={`button ${item.className()}`} disabled={item.disabled()} onClick={item.onClick}>{item.label()}</button></Show>}</For>
+        <For each={props.actions()}>{item => <Show when={item.visible()}><button class={`button ${item.className()}`} disabled={item.disabled()} title={item.title?.()} onClick={item.onClick}>{item.label()}</button></Show>}</For>
       </div>
       {props.panels}
       <div class="app-tabs" role="tablist">
@@ -733,6 +743,7 @@ export default function App() {
       <footer class="metadata">{props.metadata.type === "builtin" ? <><span>{props.metadata.path() ?? "not resolved"}</span><code>{props.metadata.name()}</code></> : <>
         <button title={props.metadata.root() + "\\apps\\" + props.metadata.id()} onClick={props.metadata.revealPath}>{`${props.metadata.root()}\\apps\\${props.metadata.id()}`}</button>
         <span>{props.metadata.appVersion() ? `app ${props.metadata.appVersion()}` : "app version unknown"} {props.metadata.updateAvailable() ? `latest ${props.metadata.latestVersion() ?? "unknown"}` : "latest"}<button class="check-button" title="Check the marketplace for a newer version" onClick={props.metadata.checkUpdates}>(check)</button></span>
+        <Show when={props.metadata.upstreamVersion()}>{upstream => <span>upstream {upstream()}</span>}</Show>
         <span>{props.metadata.local() ? "local" : `recipe ${props.metadata.recipeVersion() ?? "not installed"} ${props.metadata.updateAvailable() ? `latest ${props.metadata.latestVersion() ?? "unknown"}` : "latest"}`}{props.metadata.local() ? null : <button class="check-button" title="Check the marketplace for a newer version" onClick={props.metadata.checkUpdates}>(check)</button>}</span>
         <code>{props.metadata.id()}</code>
       </>}</footer>
@@ -908,7 +919,7 @@ export default function App() {
                      <div class="market-requirements"><Show when={a.requirements.disk_gb != null}><span>{a.requirements.disk_gb} GB disk</span></Show><Show when={a.requirements.webview2}><span>WebView2</span></Show></div>
                      <div class="market-links"><Show when={a.license}><span>{a.license}</span></Show><Show when={a.homepage}><button onClick={() => openUrl(a.homepage!)}>Homepage ↗</button></Show></div>
                       <Show when={a.installed} fallback={<div class="market-actions"><button class="button market-view-action" disabled={working(a.phase)} onClick={() => openApp(a.id)}>View</button><button class="button primary market-action" disabled={working(a.phase)} aria-label={`Install ${a.name}`} title="Install" onClick={() => installMarketplaceApp(a)}><Icon name="download" /></button></div>}>
-                        <div class="market-actions"><Show when={a.local}><button class="button market-view-action" disabled={busy()} onClick={() => replaceLocalApp(a)}>Edit</button></Show><Show when={!a.local && (a.update_available || upstreamNewer(a))}><button class="icon-button update-button" disabled={working(a.phase)} aria-label={`Update ${a.name}`} title="Update" onClick={() => installMarketplaceApp(a)}><Icon name="download" /></button></Show><button class={`button market-action icon-only ${opened() ? "opened-action" : "primary"}`} disabled={!opened() && working(a.phase)} aria-label={opened() ? `Show ${a.name}` : `Open ${a.name}`} title={opened() ? "Show window" : "Open"} onClick={() => opened() ? openApp(a.id) : activateMarketplaceApp(a)}><Icon name="eye" /></button></div>
+                       <div class="market-actions"><Show when={a.local}><button class="button market-view-action" disabled={busy()} onClick={() => replaceLocalApp(a)}>Edit</button></Show><Show when={!a.local && (a.update_available || upstreamNewer(a) || a.source_reinstall_required)}><button class="icon-button update-button" disabled={working(a.phase)} aria-label={a.source_reinstall_required ? `Reinstall ${a.name} to apply selected source` : `Update ${a.name}`} title={a.source_reinstall_required ? "Reinstall required to apply selected source" : "Update"} onClick={() => installMarketplaceApp(a)}><Icon name="download" /></button></Show><button class={`button market-action icon-only ${opened() ? "opened-action" : "primary"}`} disabled={!opened() && working(a.phase)} aria-label={opened() ? `Show ${a.name}` : `Open ${a.name}`} title={opened() ? "Show window" : "Open"} onClick={() => opened() ? openApp(a.id) : activateMarketplaceApp(a)}><Icon name="eye" /></button></div>
                      </Show>
                    </article>;
                  }}</For></div>
@@ -1012,7 +1023,7 @@ export default function App() {
         const canStop = () => !busyApp() && a().can_start && (p() === "running" || p() === "starting");
         const confirmInstall = () => { setPanel(null); action(a().installed ? "update" : "install", a()); };
         const pageActions = (): AppMainAction[] => [
-          { id: "install", label: () => a().installed ? "Update" : "Install", className: () => `primary ${a().installed && (a().update_available || upstreamNewer(a())) ? "update-ready" : ""}`, visible: () => !a().local, disabled: busyApp, onClick: () => setPanel("install") },
+          { id: "install", label: () => a().installed ? "Update" : "Install", className: () => `primary ${a().installed && (a().update_available || upstreamNewer(a()) || a().source_reinstall_required) ? "update-ready" : ""}`, visible: () => !a().local, disabled: busyApp, onClick: () => setPanel("install"), title: () => a().source_reinstall_required ? "Reinstall required to apply selected source" : a().installed ? "Update" : "Install" },
           { id: "start", label: () => "Start", className: () => "", visible: () => a().can_start, disabled: () => !canStart(), onClick: () => action("start", a()) },
           { id: "stop", label: () => "Stop", className: () => "", visible: () => a().can_start, disabled: () => !canStop(), onClick: () => action("stop", a()) },
           { id: "open", label: () => "Open", className: () => "", visible: () => true, disabled: () => busyApp() || !a().url, onClick: () => action("open", a()) },
@@ -1021,16 +1032,30 @@ export default function App() {
         ];
         return <Show when={appSettingsOpen() === a().id} fallback={<AppMainPage id={() => a().id} name={() => a().name}
           badge={{ src: () => a().icon_data, fallback: () => a().id[0]?.toUpperCase() ?? "", hue: () => hue(a().id) }}
-          version={{ type: "marketplace", appVersion: () => a().version_app, local: () => a().local, recipeVersion: () => a().version_installed, updateAvailable: () => a().update_available, latestRecipeVersion: () => a().version_latest, newerUpstream: () => upstreamNewer(a()), upstreamVersion: () => upstreamVersions()[a().id], preview: () => a().preview }}
+          version={{ type: "marketplace", appVersion: () => a().version_app, local: () => a().local, recipeVersion: () => a().version_installed, updateAvailable: () => a().update_available, latestRecipeVersion: () => a().version_latest, newerUpstream: () => upstreamNewer(a()), upstreamVersion: () => a().latest_upstream, preview: () => a().preview }}
           links={{ homepage: () => a().homepage, license: () => a().license, preview: { visible: () => !!a().preview && a().installed && !a().local, branch: () => a().preview ?? "", disabled: busyApp, appName: () => a().name, onRestore: () => setPanel("restore"), onRefresh: () => reloadAppSource(a()) } }}
           status={{ phase: p, step: () => a().step, elapsed }}
           backLabel="Back" onBack={() => { setActive(null); setChooser(false); }} settingsLabel={`${a().name} settings`} onSettings={() => { setPanel(null); setAppSettingsTab("General"); setAppSettingsOpen(a().id); }}
           actions={pageActions}
           panels={<><Show when={panel() === "install"}><div class="inline-panel"><p>Setup may install system components through mise and requires network access.</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={confirmInstall}>Confirm</button></div></div></Show><Show when={panel() === "restore"}><div class="inline-panel"><p>Reinstall this app from the marketplace's default branch? The preview build is replaced. Settings and user data are preserved.</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={() => { setPanel(null); restoreApp(a()); }}>Restore</button></div></div></Show><For each={a().actions.filter(item => item.confirm && panel() === `action:${item.id}`)}>{item => <div class="inline-panel"><p>Run {item.label}?</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp() || !a().installed} onClick={() => { setPanel(null); void run(() => api.runAction(a().id, item.id)); }}>Confirm</button></div></div>}</For></>}
           faq={() => a().faq}
-          metadata={{ type: "marketplace", root: () => state().settings.root, id: () => a().id, appVersion: () => a().version_app, updateAvailable: () => a().update_available, latestVersion: () => a().version_latest, local: () => a().local, recipeVersion: () => a().version_installed, revealPath: () => reveal("app", a().id), checkUpdates: () => void run(() => api.checkUpdates()) }} />}>
+          metadata={{ type: "marketplace", root: () => state().settings.root, id: () => a().id, appVersion: () => a().version_app, updateAvailable: () => a().update_available, latestVersion: () => a().version_latest, upstreamVersion: () => a().latest_upstream, local: () => a().local, recipeVersion: () => a().version_installed, revealPath: () => reveal("app", a().id), checkUpdates: () => void run(() => api.checkUpdates()) }} />}>
           <AppSettingsPage name={() => a().name} targetId={() => a().id} backLabel={() => "← back to app"} onBack={() => { if (dirty(a()) && !confirm("Unsaved settings changes will be lost. Leave without saving?")) return; setAppSettingsOpen(null); }} tabs={() => appTabs(a())} currentTab={() => currentTab(a())} onTab={tab => setAppSettingsTab(tab)} tabLabel={tabLabel} save={{ visible: () => dirty(a()), disabled: busyApp, onSave: () => saveDraft(a()) }}
-            beforeFields={<Show when={a().settings_schema.some(field => field.key === "pg0_installation_dir")}><section class="preference-section"><h2>pg0 binaries</h2><p class="settings-muted">PostgreSQL payload: {String(a().settings.pg0_installation_dir ?? "unknown")}. The databases stay in this app's folder either way.</p><div class="row-buttons"><button class="button" disabled={busyApp() || dirty(a())} onClick={() => migratePg0(a(), true)}>Move to Autark</button><button class="button" disabled={busyApp() || dirty(a())} onClick={() => migratePg0(a(), false)}>Move into the app</button></div></section></Show>}
+            beforeFields={<>
+              <Show when={a().settings_schema.some(field => field.key === "pg0_installation_dir")}><section class="preference-section"><h2>pg0 binaries</h2><p class="settings-muted">PostgreSQL payload: {String(a().settings.pg0_installation_dir ?? "unknown")}. The databases stay in this app's folder either way.</p><div class="row-buttons"><button class="button" disabled={busyApp() || dirty(a())} onClick={() => migratePg0(a(), true)}>Move to Autark</button><button class="button" disabled={busyApp() || dirty(a())} onClick={() => migratePg0(a(), false)}>Move into the app</button></div></section></Show>
+              <Show when={!a().local && a().source_branch !== null}><section class="preference-section">
+                <h2>Source version</h2>
+                <p>Effective ref: <code>{a().source_ref ?? "unknown"}</code></p>
+                <Show when={a().latest_upstream}>{latest => <p>Latest release: <code>{latest()}</code></p>}</Show>
+                <p>Selected: {a().prefs.source_ref ?? "Latest release"}</p>
+                <div class="row-buttons">
+                  <button class="button" aria-pressed={a().prefs.source_ref === null} disabled={busy() || busyApp()} onClick={() => void saveSourceRef(a(), "")}>Latest release</button>
+                  <button class="button" aria-pressed={a().prefs.source_ref === a().source_branch} disabled={busy() || busyApp()} onClick={() => void saveSourceRef(a(), a().source_branch ?? "")}>Branch: {a().source_branch}</button>
+                </div>
+                <label class="field"><span>Tag, branch, or commit</span><div class="field-control"><input class="search" aria-label="Tag, branch, or commit" value={sourceRefValue(a())} disabled={busy() || busyApp()} onInput={e => setSourceRefDrafts(d => ({ ...d, [a().id]: e.currentTarget.value }))} /><button class="button" disabled={busy() || busyApp()} onClick={() => void saveSourceRef(a(), sourceRefValue(a()))}>Apply</button></div></label>
+                <Show when={a().source_reinstall_required}><p class="settings-muted">Reinstall is required to apply {a().source_ref ?? "the selected source"}.</p></Show>
+              </section></Show>
+            </>}
             fields={() => currentTab(a()) === PREVIEW_TAB ? [] : tabFields(a(), currentTab(a()))}
             renderField={field => <SettingField app={a()} field={field} value={draftValue(a(), field.key)} settings={drafts()[a().id] ?? a().settings} lock={a().settings_locked.find(lock => lock.key === field.key)} setValue={value => setDraftValue(a(), field.key, value)} choose={() => void chooseFolder(a(), field)} />}
             alternate={{ when: () => currentTab(a()) === PREVIEW_TAB, content: <section class="preference-section"><h2>Preview source</h2><Show when={state().settings.developer_mode} fallback={<><p class="settings-muted">Developer mode is off. Preview sources are hidden.</p><button class="button" onClick={() => { setAppSettingsOpen(null); setSettingsReturn(a().id); setSettingsOpen(true); setSettingsTab("Preview"); }}>Open settings</button></>}><p class="settings-muted">Load only this app's recipe from a branch or pull request. Every other app stays on the default branch. Leave empty for the default branch.</p><div class="field-control"><input class="search" aria-label="Branch or pull request for this app" placeholder="Default branch" value={sourceValue(a())} disabled={busyApp()} onInput={e => setSourceValue(a(), e.currentTarget.value)} /><button class="button" disabled={busyApp()} onClick={() => void applyAppSource(a())}>Apply</button><button class="icon-button" disabled={busyApp() || !a().preview} aria-label={`Refresh ${a().name} from its preview source`} title="Refresh the recipe from the current source" onClick={() => reloadAppSource(a())}><Icon name="reload" /></button></div><p class="settings-muted">Current source: {a().preview ? <span class="preview-pill">preview ({a().preview})</span> : "default branch"}</p><Show when={a().preview}><Show when={panel() !== "restore"}><button class="button" disabled={busyApp()} onClick={() => setPanel("restore")}>Restore to stable</button></Show><Show when={panel() === "restore"}><div class="inline-panel"><p>Reinstall this app from the marketplace's default branch? The preview build is replaced. Settings and user data are preserved.</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={() => { setPanel(null); restoreApp(a()); }}>Restore</button></div></div></Show></Show></Show><footer class="metadata"><button title={state().settings.root + "\\apps\\" + a().id} onClick={() => reveal("app", a().id)}>{`${state().settings.root}\\apps\\${a().id}`}</button><span>{a().version_app ? `app ${a().version_app}` : "app version unknown"}</span><code>{a().id}</code></footer></section> }}

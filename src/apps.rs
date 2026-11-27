@@ -22,6 +22,7 @@ use std::{
 use tauri::{AppHandle, Emitter};
 
 static CANCEL: Mutex<Vec<String>> = Mutex::new(Vec::new());
+static LAST_NOTIFIED_SET: Mutex<Option<(u64, Vec<String>)>> = Mutex::new(None);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -132,6 +133,11 @@ pub struct AppState {
     pub preview: Option<String>,
     /// True when the app came from a preview and the marketplace is back on its default branch.
     pub restore_available: bool,
+    pub latest_upstream: Option<String>,
+    pub source_ref: Option<String>,
+    pub source_branch: Option<String>,
+    pub installed_source_ref: Option<String>,
+    pub source_reinstall_required: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -184,6 +190,9 @@ pub struct AppRecord {
     pub started_at: Option<u64>,
     pub icon_data: Option<String>,
     pub preview: Option<String>,
+    pub latest_upstream: Option<String>,
+    pub installed_source_ref: Option<String>,
+    pub source_reinstall_required: bool,
 }
 
 impl AppRecord {
@@ -191,6 +200,7 @@ impl AppRecord {
         let app_dir = manifest::app_dir(root, &catalogue.id);
         let installed_record = manifest::read_installed(&app_dir);
         let installed_preview = installed_record.as_ref().and_then(|record| record.source.clone());
+        let installed_source_ref = installed_record.as_ref().and_then(|record| record.source_ref.clone());
         let version_latest = (in_catalogue && !local).then(|| catalogue.version.clone());
         // An installed app keeps its own recipe unless the catalogue is strictly
         // newer, so a source that points at an older branch cannot hide the
@@ -252,6 +262,9 @@ impl AppRecord {
             manifest_dir: manifest_dir.to_path_buf(),
             icon_data,
             preview: preview.filter(|_| installed),
+            latest_upstream: None,
+            installed_source_ref,
+            source_reinstall_required: false,
             manifest,
             local,
         }
@@ -269,6 +282,7 @@ impl AppRecord {
         let elapsed_secs = self
             .started_at
             .map(|started| now().saturating_sub(started));
+        let source_ref = resolve_source_ref(self.prefs.source_ref.as_deref(), self.latest_upstream.as_deref(), self.manifest.setup.source.as_ref().map(|source| source.branch.as_str()));
         AppState {
             id: self.manifest.id.clone(),
             local: self.local,
@@ -304,6 +318,57 @@ impl AppRecord {
             elapsed_secs,
             preview: self.preview.clone(),
             restore_available: self.preview.is_some(),
+            latest_upstream: self.latest_upstream.clone(),
+            source_ref,
+            source_branch: self.manifest.setup.source.as_ref().map(|source| source.branch.clone()),
+            installed_source_ref: self.installed_source_ref.clone(),
+            source_reinstall_required: self.source_reinstall_required,
+        }
+    }
+}
+
+fn resolve_source_ref(preference: Option<&str>, latest: Option<&str>, branch: Option<&str>) -> Option<String> {
+    preference.filter(|value| !value.trim().is_empty())
+        .or(latest)
+        .or(branch)
+        .map(str::to_string)
+}
+
+#[cfg(test)]
+mod source_ref_tests {
+    use super::*;
+
+    #[test]
+    fn source_ref_prefers_nonempty_preference_then_latest_then_manifest_branch() {
+        assert_eq!(resolve_source_ref(Some("v1.2"), Some("v3"), Some("main")).as_deref(), Some("v1.2"));
+        assert_eq!(resolve_source_ref(None, Some("v3"), Some("main")).as_deref(), Some("v3"));
+        assert_eq!(resolve_source_ref(Some(" "), None, Some("main")).as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn versions_file_requires_schema_one_and_reinstall_compares_refs() {
+        let versions: VersionsFile = serde_json::from_str(r#"{"schema":1,"updated":"2026-01-01","apps":{"demo":"v2"}}"#).unwrap();
+        assert_eq!(versions.apps.get("demo").map(String::as_str), Some("v2"));
+        let broken = serde_json::from_str::<VersionsFile>(r#"{"schema":2,"apps":{}}"#).unwrap();
+        assert_ne!(broken.schema, 1);
+        assert_ne!(Some("v1").map(str::to_string), resolve_source_ref(None, Some("v2"), Some("main")));
+    }
+
+    #[test]
+    fn upstream_comparison_normalizes_prefix_and_installed_detail_suffix() {
+        assert!(!upstream_newer("v0.11.1", "0.11.1"));
+        assert!(!upstream_newer("V0.11.1", "v0.11.1 | build detail"));
+        assert!(!upstream_newer("0.11.0", "0.11.1 | detail"));
+        assert!(upstream_newer("v0.11.2", "0.11.1 | detail"));
+    }
+
+    #[test]
+    fn source_ref_validation_allows_empty_and_common_refs_but_rejects_unsafe_values() {
+        for value in [None, Some(""), Some("v1.2.3"), Some("main"), Some("feature/foo"), Some("0123456789abcdef")] {
+            assert!(validate_source_ref(value).is_ok(), "{value:?}");
+        }
+        for value in [Some("-option"), Some("feature branch"), Some("bad\nref"), Some("path..ref")] {
+            assert!(validate_source_ref(value).is_err(), "{value:?}");
         }
     }
 }
@@ -330,6 +395,13 @@ fn newer(latest: &str, installed: &str) -> bool {
         }
     }
     left.len() > right.len()
+}
+
+fn upstream_newer(latest: &str, installed: &str) -> bool {
+    let installed = installed.split_once(" | ").map_or(installed, |(version, _)| version).trim();
+    let latest = latest.trim().trim_start_matches(['v', 'V']);
+    let installed = installed.trim_start_matches(['v', 'V']);
+    newer(latest, installed)
 }
 
 fn read_icon_data(manifest: &Manifest, manifest_dir: &Path) -> Option<String> {
@@ -359,7 +431,8 @@ fn icon_data_url(path: &Path) -> Option<String> {
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
-pub struct MarketplaceInfo {    pub path: String,
+pub struct MarketplaceInfo {
+    pub path: String,
     pub url: String,
     pub exists: bool,
     pub refreshing: bool,
@@ -367,6 +440,8 @@ pub struct MarketplaceInfo {    pub path: String,
     pub error: Option<ErrorInfo>,
     /// The session's preview branch or pull request; empty means the default branch.
     pub source: String,
+    #[serde(skip)]
+    pub latest_versions: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -431,6 +506,7 @@ impl Shared {
                 last_refresh: settings.marketplace_last_refresh,
                 error: None,
                 source: String::new(),
+                latest_versions: HashMap::new(),
             },
         };
         // Preview sources are picked per app now; the shared clone always follows
@@ -543,6 +619,12 @@ pub fn load_catalogue(core: &mut Core) -> Vec<String> {
     core.marketplace.path = market_dir.to_string_lossy().to_string();
     core.marketplace.url = settings::MARKETPLACE_URL.to_string();
     core.marketplace.exists = market_dir.join("marketplace.json").exists();
+    core.marketplace.latest_versions = fs::read_to_string(market_dir.join("versions.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<VersionsFile>(&text).ok())
+        .filter(|versions| versions.schema == 1)
+        .map(|versions| versions.apps)
+        .unwrap_or_default();
 
     let mut warnings = Vec::new();
     let mut discovered: Vec<(PathBuf, Manifest, bool, bool)> = Vec::new();
@@ -611,6 +693,9 @@ pub fn load_catalogue(core: &mut Core) -> Vec<String> {
     let mut records = Vec::with_capacity(discovered.len() + previous.len());
     for (dir, manifest, in_catalogue, local) in discovered {
         let mut record = AppRecord::from_manifest(&root, &dir, manifest, in_catalogue, local);
+        record.latest_upstream = core.marketplace.latest_versions.get(&record.manifest.id).cloned();
+        record.source_reinstall_required = record.installed && record.installed_source_ref
+            != resolve_source_ref(record.prefs.source_ref.as_deref(), record.latest_upstream.as_deref(), record.manifest.setup.source.as_ref().map(|source| source.branch.as_str()));
         if let Some(old) = previous.remove(&record.manifest.id) {
             if old.phase.is_busy() || old.phase == Phase::Running {
                 record.phase = old.phase;
@@ -644,6 +729,13 @@ pub fn load_catalogue(core: &mut Core) -> Vec<String> {
     });
     core.records = records;
     warnings
+}
+
+#[derive(Deserialize)]
+struct VersionsFile {
+    schema: u32,
+    #[serde(default)]
+    apps: HashMap<String, String>,
 }
 
 pub fn wire(shared: &Shared) -> State {
@@ -955,6 +1047,11 @@ pub fn setup(app: &AppHandle, shared: &Shared, id: &str, kind: SetupKind) -> Res
             }
         }
     }
+    let target_source_ref = resolve_source_ref(
+        snapshot.prefs.source_ref.as_deref(),
+        snapshot.latest_upstream.as_deref(),
+        manifest.setup.source.as_ref().map(|source| source.branch.as_str()),
+    );
 
     set_phase(app, shared, id, kind.phase());
     mutate(app, shared, id, |record| {
@@ -1029,7 +1126,7 @@ pub fn setup(app: &AppHandle, shared: &Shared, id: &str, kind: SetupKind) -> Res
     if let Some(source) = manifest.setup.source.clone() {
         index += 1;
         step_begin(app, shared, id, index, total, "Fetching source");
-        sync_source(app, id, &root, &app_dir, &manifest, &values, &source)?;
+        sync_source(app, id, &root, &app_dir, &manifest, &values, &source, target_source_ref.as_deref())?;
     }
 
     for step in manifest.setup.steps.clone() {
@@ -1076,6 +1173,7 @@ pub fn setup(app: &AppHandle, shared: &Shared, id: &str, kind: SetupKind) -> Res
         &manifest.version,
         app_version.as_deref(),
         preview.as_deref().unwrap_or(""),
+        target_source_ref.as_deref(),
     )?;
     let version = manifest.version.clone();
     mutate(app, shared, id, |record| {
@@ -1084,6 +1182,8 @@ pub fn setup(app: &AppHandle, shared: &Shared, id: &str, kind: SetupKind) -> Res
         record.installed_version = Some(version);
         record.app_version = app_version;
         record.preview = preview;
+        record.installed_source_ref = target_source_ref.clone();
+        record.source_reinstall_required = false;
         record.phase = Phase::Installed;
         record.step = None;
         record.last_error = None;
@@ -1162,6 +1262,7 @@ fn sync_source(
     manifest: &Manifest,
     values: &Map<String, Value>,
     source: &manifest::Source,
+    target_ref: Option<&str>,
 ) -> Result<()> {
     let dir = app_dir.join("source");
     if dir.join(".git").exists() {
@@ -1192,6 +1293,18 @@ fn sync_source(
         ]);
         apply_environment(&mut command, root, app_dir, manifest, values)?;
         run_streaming(app, id, "git clone".to_string(), command)?;
+    }
+    if let Some(target_ref) = target_ref.filter(|target_ref| *target_ref != source.branch) {
+        for args in [
+            vec!["fetch", "--depth", "1", "origin", target_ref],
+            vec!["checkout", "--detach", "FETCH_HEAD"],
+            vec!["clean", "-fd"],
+        ] {
+            let mut command = tools::new_command("git");
+            command.arg("-C").arg(&dir).args(&args);
+            apply_environment(&mut command, root, app_dir, manifest, values)?;
+            run_streaming(app, id, format!("git {}", args.join(" ")), command)?;
+        }
     }
     Ok(())
 }
@@ -1902,9 +2015,32 @@ pub fn save_app_settings(
 
 pub fn save_app_prefs(app: &AppHandle, shared: &Shared, id: &str, prefs: Prefs) -> Result<()> {
     find_record(shared, id)?;
+    validate_source_ref(prefs.source_ref.as_deref())?;
     let app_dir = manifest::app_dir(&shared.root(), id);
     prefs::save(&app_dir, &prefs)?;
-    mutate(app, shared, id, |record| record.prefs = prefs);
+    mutate(app, shared, id, |record| {
+        record.prefs = prefs;
+        record.source_reinstall_required = record.installed
+            && record.installed_source_ref != resolve_source_ref(
+                record.prefs.source_ref.as_deref(),
+                record.latest_upstream.as_deref(),
+                record.manifest.setup.source.as_ref().map(|source| source.branch.as_str()),
+            );
+    });
+    Ok(())
+}
+
+fn validate_source_ref(value: Option<&str>) -> Result<()> {
+    let Some(value) = value.filter(|value| !value.is_empty()) else {
+        return Ok(());
+    };
+    if value.starts_with('-')
+        || value.contains("..")
+        || value.chars().any(char::is_whitespace)
+        || value.chars().any(char::is_control)
+    {
+        bail!("invalid_argument: source_ref must not start with '-', contain whitespace/control characters, or contain '..'");
+    }
     Ok(())
 }
 
@@ -2021,6 +2157,47 @@ pub fn check_updates(app: &AppHandle, shared: &Shared) -> Result<()> {
     Ok(())
 }
 
+pub fn daily_update_check(app: &AppHandle, shared: &Shared) -> Result<()> {
+    let (root, last_refresh) = {
+        let core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
+        (core.settings.root_path(), core.settings.marketplace_last_refresh)
+    };
+    if last_refresh.is_none_or(|timestamp| now().saturating_sub(timestamp) >= 24 * 60 * 60) {
+        if marketplace::dir(&root).join("marketplace.json").exists() {
+            refresh_inner(app, shared)?;
+        }
+    } else {
+        check_updates(app, shared)?;
+    }
+    let names = {
+        let core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
+        let mut names: Vec<_> = core.records.iter().filter(|record| {
+            record.installed && (
+                matches!((&record.installed_version, &record.version_latest), (Some(installed), Some(latest)) if newer(latest, installed))
+                || matches!((&record.app_version, &record.latest_upstream), (Some(installed), Some(latest)) if upstream_newer(latest, installed))
+            )
+        }).map(|record| record.manifest.name.clone()).collect();
+        names.sort();
+        names.dedup();
+        names
+    };
+    if !names.is_empty() {
+        let window = now() / (24 * 60 * 60);
+        let mut last = LAST_NOTIFIED_SET.lock().unwrap_or_else(|error| error.into_inner());
+        if last.as_ref().is_some_and(|(previous, _)| *previous == window) {
+            return Ok(());
+        }
+        use tauri_plugin_notification::NotificationExt;
+        app.notification().builder()
+            .title("Autark updates available")
+            .body(format!("Updates available for: {}", names.join(", ")))
+            .show()?;
+        *last = Some((window, names));
+    }
+    emit_state(app, shared);
+    Ok(())
+}
+
 pub fn add_local_app(app: &AppHandle, shared: &Arc<Shared>, path: &str) -> Result<()> {
     let (root, enabled) = {
         let core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
@@ -2120,7 +2297,7 @@ fn refresh_app_source_inner(
     };
     let installed = manifest::read_installed(app_dir)
         .context("cannot read the installed record of this app")?;
-    manifest::write_installed(app_dir, &installed.version, installed.app_version.as_deref(), &label)?;
+    manifest::write_installed(app_dir, &installed.version, installed.app_version.as_deref(), &label, installed.source_ref.as_deref())?;
     let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
     load_catalogue(&mut core);
     drop(core);

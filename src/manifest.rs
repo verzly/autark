@@ -544,6 +544,8 @@ pub struct InstalledRecord {
     /// The preview branch or pull request the app was installed from; empty means stable.
     #[serde(default)]
     pub source: Option<String>,
+    #[serde(default)]
+    pub source_ref: Option<String>,
 }
 
 pub fn read_installed(app: &Path) -> Option<InstalledRecord> {
@@ -551,7 +553,7 @@ pub fn read_installed(app: &Path) -> Option<InstalledRecord> {
     serde_json::from_str(&text).ok()
 }
 
-pub fn write_installed(app: &Path, version: &str, app_version: Option<&str>, source: &str) -> Result<()> {
+pub fn write_installed(app: &Path, version: &str, app_version: Option<&str>, source: &str, source_ref: Option<&str>) -> Result<()> {
     let installed_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())
@@ -561,6 +563,7 @@ pub fn write_installed(app: &Path, version: &str, app_version: Option<&str>, sou
         app_version: app_version.map(str::to_string),
         installed_at,
         source: (!source.is_empty()).then(|| source.to_string()),
+        source_ref: source_ref.map(str::to_string),
     };
     fs::create_dir_all(app)?;
     fs::write(

@@ -887,6 +887,7 @@ fn main() {
             }
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(Arc::new(Shared::new()))
         .invoke_handler(tauri::generate_handler![
             get_state,
@@ -933,6 +934,13 @@ fn main() {
             exit_app
         ])
         .setup(|app| {
+            let startup_handle = app.handle().clone();
+            let startup_shared = app.state::<Arc<Shared>>().inner().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                if let Err(error) = apps::daily_update_check(&startup_handle, &startup_shared) {
+                    apps::log(&startup_handle, "marketplace", format!("startup update check failed: {error:#}"));
+                }
+            });
             let handle = app.handle().clone();
             let settings = apps::wire(&app.state::<Arc<Shared>>()).settings;
             reconcile_tray(&handle, &settings);
@@ -977,6 +985,15 @@ fn main() {
                     }
                 });
             }
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn_blocking(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(24 * 60 * 60));
+                if let Some(shared) = handle.try_state::<Arc<Shared>>() {
+                    if let Err(error) = apps::daily_update_check(&handle, &shared) {
+                        apps::log(&handle, "marketplace", format!("daily update check failed: {error:#}"));
+                    }
+                }
+            });
             Ok(())
         })
         .run(tauri::generate_context!())
