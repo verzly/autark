@@ -909,6 +909,9 @@ fn main() {
             close_tab,
             refresh_marketplace,
             refresh_app_source,
+            migrate_pg0,
+            install_pg0,
+            uninstall_pg0,
             check_updates,
             install_app,
             update_app,
@@ -1008,4 +1011,75 @@ fn main() {
 #[allow(dead_code)]
 fn _phase_marker(phase: Phase) -> Phase {
     phase
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn migrate_pg0(
+    app: AppHandle,
+    shared: TauriState<'_, Arc<Shared>>,
+    app_id: String,
+    to_shared: bool,
+) -> CmdResult<State> {
+    let inner = shared.inner().clone();
+    let handle = app.clone();
+    let id = app_id.clone();
+    tauri::async_runtime::spawn_blocking(move || apps::migrate_pg0(&handle, &inner, &id, to_shared))
+        .await
+        .map_err(|error| CmdError::new("internal", error.to_string()))??;
+    Ok(apps::wire(&shared))
+}
+
+#[tauri::command]
+async fn install_pg0(
+    app: AppHandle,
+    shared: TauriState<'_, Arc<Shared>>,
+    force: bool,
+) -> CmdResult<State> {
+    apps::reserve(&shared, "pg0.exe", "install")?;
+    let settings = shared.inner().plugin_settings();
+    let root = settings.root_path();
+    let handle = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        crate::tools::install_pg0(&handle, "pg0.exe", &settings, &root, force)
+    })
+    .await
+    .map_err(|error| CmdError::new("internal", error.to_string()))
+    .and_then(|result| result.map_err(CmdError::from));
+    if result.is_ok() {
+        let root = shared.inner().plugin_settings().root_path();
+        let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
+        core.pg0 = crate::tools::probe_pg0(&root);
+    }
+    apps::release(&shared, "pg0.exe");
+    result?;
+    Ok(apps::wire(&shared))
+}
+
+#[tauri::command]
+async fn uninstall_pg0(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> CmdResult<State> {
+    apps::reserve_pg0_removal(&shared)?;
+    if let Err(error) = apps::pg0_removal_preflight(&shared) {
+        return Err(error.into());
+    }
+    let settings = shared.inner().plugin_settings();
+    let root = settings.root_path();
+    let handle = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        crate::tools::uninstall_pg0(&handle, "pg0.exe", &settings, &root)
+    })
+    .await
+    .map_err(|error| CmdError::new("internal", error.to_string()))
+    .and_then(|result| result.map_err(CmdError::from));
+    {
+        let current_root = shared.inner().plugin_settings().root_path();
+        let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
+        core.pg0 = crate::tools::probe_pg0(&current_root);
+    }
+    let state = apps::wire(&shared);
+    apps::release(&shared, "pg0.exe");
+    if result.is_err() {
+        apps::emit_state(&app, &shared);
+    }
+    result?;
+    Ok(state)
 }

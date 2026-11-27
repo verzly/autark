@@ -45,6 +45,162 @@ pub struct MiseInfo {
     pub force_local: bool,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct Pg0Info {
+    pub available: bool,
+    pub version: Option<String>,
+    pub path: Option<String>,
+    pub installation: String,
+    pub source: Option<String>,
+    #[serde(default)]
+    pub used_by: Vec<String>,
+}
+
+pub fn pg0_exe(root: &Path) -> PathBuf {
+    root.join("bin").join("pg0.exe")
+}
+
+/// Finds a pg0.exe that an app installed into its own Python environment.
+fn find_app_pg0(root: &Path) -> Option<PathBuf> {
+    let apps = root.join("apps");
+    for entry in fs::read_dir(apps).ok()?.flatten() {
+        let base = entry.path().join("venv");
+        for lib in ["Lib", "lib"] {
+            let candidate = base
+                .join(lib)
+                .join("site-packages")
+                .join("pg0")
+                .join("bin")
+                .join("pg0.exe");
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+/// A pg0 in Autark's bin is the shared copy; otherwise an app's copy is only a source.
+pub fn probe_pg0(root: &Path) -> Pg0Info {
+    let own = pg0_exe(root);
+    let shim = root
+        .join("runtime")
+        .join("mise-data")
+        .join("shims")
+        .join("pg0.exe");
+    let installed = if own.exists() {
+        Some(own)
+    } else if shim.exists() {
+        Some(shim)
+    } else {
+        None
+    };
+    let source = if installed.is_none() {
+        find_app_pg0(root)
+    } else {
+        None
+    };
+    Pg0Info {
+        available: installed.is_some(),
+        version: installed.as_deref().and_then(|path| run_version(path, root)),
+        path: installed.map(|path| path.to_string_lossy().to_string()),
+        installation: pg0_installation(root).to_string_lossy().to_string(),
+        source: source.map(|path| path.to_string_lossy().to_string()),
+        used_by: Vec::new(),
+    }
+}
+
+/// Installs pg0 with Autark's mise (github:vectorize-io/pg0). When mise cannot
+/// install it, an app's own pg0.exe is copied into Autark's bin instead.
+pub fn install_pg0(
+    app: &AppHandle,
+    id: &str,
+    settings: &Settings,
+    root: &Path,
+    force: bool,
+) -> Result<()> {
+    let resolved = resolve(settings, root);
+    if resolved.is_some() {
+        for sub in ["mise-data", "mise-config", "mise-cache", "mise-state", "tmp"] {
+            fs::create_dir_all(root.join("runtime").join(sub))?;
+        }
+        fs::write(global_config(root), git_config(root))
+            .context("cannot write mise global config")?;
+        fs::write(git_postinstall(root), GIT_POSTINSTALL_PS)
+            .context("cannot write the git postinstall step")?;
+        let mut command = git_command(settings, root);
+        command.args(["install"]);
+        if force {
+            command.arg("--force");
+        }
+        command.arg("pg0");
+        if let Err(error) = apps::run_tool_streaming(app, id, "installing pg0".to_string(), command) {
+            if error.to_string().starts_with("cancelled") {
+                return Err(error);
+            }
+            apps::log(app, id, format!("mise pg0 install failed; trying app-local fallback: {error:#}"));
+        }
+        if pg0_shim(root).exists() {
+            match fs::remove_file(pg0_exe(root)) {
+                Ok(()) => apps::log(app, id, "removed stale app-local pg0.exe".to_string()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error).context("cannot remove stale app-local pg0.exe"),
+            }
+            return Ok(());
+        }
+    }
+    let target = pg0_exe(root);
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let source = find_app_pg0(root)
+        .context("no pg0.exe found in an app; install an app that uses pg0 first")?;
+    fs::copy(&source, &target)
+        .with_context(|| format!("cannot copy {}", source.display()))?;
+    apps::log(app, id, format!("pg0.exe installed from {}", source.display()));
+    Ok(())
+}
+
+/// Removes pg0 from Autark's mise and drops the shim. The tool entry stays in
+/// the generated config, so a later install puts it back.
+pub fn uninstall_pg0(app: &AppHandle, id: &str, settings: &Settings, root: &Path) -> Result<()> {
+    if resolve(settings, root).is_some() {
+        let mut command = git_command(settings, root);
+        command.args(["uninstall", "pg0"]);
+        let output = command.output().context("cannot run mise uninstall pg0")?;
+        if !output.status.success() {
+            let tail = |bytes: &[u8]| {
+                String::from_utf8_lossy(bytes).lines().rev().take(4).collect::<Vec<_>>()
+                    .into_iter().rev().collect::<Vec<_>>().join("\n")
+            };
+            bail!("mise uninstall pg0 failed ({}): {}", output.status, tail(if output.stderr.is_empty() { &output.stdout } else { &output.stderr }));
+        }
+    }
+    let mut errors = Vec::new();
+    for path in [pg0_exe(root), pg0_shim(root)] {
+        if let Err(error) = fs::remove_file(&path) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                errors.push(format!("{}: {error}", path.display()));
+            }
+        }
+    }
+    if !errors.is_empty() {
+        bail!("failed to remove pg0 files: {}", errors.join("; "));
+    }
+    apps::log(app, id, "pg0 removed from Autark".to_string());
+    Ok(())
+}
+fn pg0_shim(root: &Path) -> PathBuf {
+    root.join("runtime")
+        .join("mise-data")
+        .join("shims")
+        .join("pg0.exe")
+}
+/// The shared pg0 installation: one PostgreSQL payload for every app.
+pub fn pg0_installation(root: &Path) -> PathBuf {
+    root.join("runtime").join("pg0").join("installation")
+}
+
 pub fn bin_dir(root: &Path) -> PathBuf {
     root.join("bin")
 }
@@ -320,6 +476,11 @@ bin_path = "cmd"
 
 postinstall = '''powershell -NoProfile -ExecutionPolicy Bypass -File "@@POSTINSTALL@@"'''
 
+[tools."pg0"]
+version = "latest"
+asset_pattern = "pg0-windows-x86_64.exe"
+format = "raw"
+
 [env]
 _.path = { path = [
     "{{ tools.git.path }}/usr/bin",
@@ -328,6 +489,7 @@ _.path = { path = [
 
 [tool_alias]
 git = "github:git-for-windows/git"
+pg0 = "github:vectorize-io/pg0"
 "##;
 
 /// The shells the terminal button can open. bash and sh are only usable when an exe exists.

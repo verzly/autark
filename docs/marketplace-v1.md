@@ -80,7 +80,7 @@ README.md
 | `upstream` | no | Version source for the update check: GitHub `owner/repository`, or `npm:<package>` for the registry's `latest` tag. Compared against the installed version from `setup.version_check`. |
 | `license` | no | SPDX id of the app itself |
 | `icon` | no | File next to `app.json`; png, 256x256 |
-| `requirements` | no | `disk_gb` (number), `webview2` (bool); informational only, shown before install |
+| `requirements` | no | `disk_gb` (number) and `webview2` (bool) are informational; `pg0` (bool, default false) declares use of Autark's pg0 executable |
 | `faq` | no | Array of `{ "question", "answer" }`; shown on the app page. An empty or missing list hides the FAQ section. |
 | `settings` | no | Per-app user settings, see below |
 | `setup` | yes | Everything needed to make the app runnable, see below |
@@ -95,6 +95,12 @@ README.md
 | `env_keep_parent` | no | Env names that keep the parent process value when the machine already sets any of them |
 
 Hindsight settings provide **Test** for endpoint reachability (`OK: HTTP <status>`, including 401/403; `FAIL` if the request cannot complete) and **Check** for the configured model. Model Check requests `${llm_base_url}/models` and returns `OK: Model available`, `FAIL: Model not found: <id>`, or the first line of an HTTP error body. **Models** lists the model IDs that endpoint reports; click one to use it as the model ID. Checks use current on-screen settings and Windows `curl.exe`; the base URL must include its OpenAI-compatible path, such as `/v1` (the recipe default does).
+
+### Host pg0 dependency
+
+Set `"requirements": { "pg0": true }` when an app uses Autark's pg0 executable. While the app is installed, even if stopped, Autark blocks pg0 removal in both the settings UI and backend and lists the dependent apps. Apps that exclusively use their own pg0 executable must omit this flag or set it to `false`.
+
+This declaration does not install pg0, select a shared PostgreSQL binaries folder or move database instances. Recipes without the flag stay compatible but do not block removal. Bump the recipe version when adding the declaration: a strictly newer catalogue recipe is selected on marketplace refresh, unless the installed app has a pinned preview source.
 
 ### Settings
 

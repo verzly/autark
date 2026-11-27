@@ -1,4 +1,5 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import type { JSX } from "solid-js";
 import type { AppSetting, AppState, Phase, State } from "./bridge";
 import { api, mockMode } from "./bridge";
 
@@ -53,8 +54,9 @@ function upstreamNewer(app: AppState) {
 import { previewLogs, previewState, previewVariants } from "./mock";
 import miseLogo from "./mise.png";
 import gitLogo from "./git.svg";
+import pg0Logo from "./pg0.svg";
 
-type InlineAction = "install" | "restore" | "reinstall" | "remove" | `action:${string}` | null;
+type InlineAction = "install" | "restore" | `action:${string}` | null;
 const working = (p: Phase) => ["installing", "starting", "stopping", "updating", "removing"].includes(p);
 const errText = (e: unknown) => {
   if (e instanceof Error) return e.message;
@@ -69,7 +71,7 @@ const AUTARK_TAB = "__autark__";
 // Built-in tools with a real logo; everything else falls back to its first letter.
 const builtinLogo = (name: string) => {
   const lower = name.toLowerCase();
-  return lower === "mise.exe" ? miseLogo : lower === "git.exe" ? gitLogo : null;
+  return lower === "mise.exe" ? miseLogo : lower === "git.exe" ? gitLogo : lower === "pg0.exe" ? pg0Logo : null;
 };
 
 export default function App() {
@@ -84,7 +86,6 @@ export default function App() {
   const [search, setSearch] = createSignal("");
   const [selected, setSelected] = createSignal(0);
   const [panel, setPanel] = createSignal<InlineAction>(null);
-  const [removeText, setRemoveText] = createSignal("");
   const [requestError, setRequestError] = createSignal("")
   const [terminalNotice, setTerminalNotice] = createSignal("")
   // The shell picker hangs off the terminal button, opened with a right click.
@@ -112,7 +113,11 @@ export default function App() {
     if (!hasLocalMise) entries.unshift({ name: "mise.exe", path: "", version: null, size: 0 });
     // git lives in Autark's mise installs, not in bin, so its card is added here.
     if (!entries.some(entry => entry.name.toLowerCase() === "git.exe")) entries.push({ name: "git.exe", path: state().git.path ?? "", version: state().git.version, size: 0 });
-    return entries.filter(entry => `${entry.name} ${entry.version ?? ""}`.toLowerCase().includes(search().toLowerCase()));
+    // pg0 ships inside an app Python environment until it is copied into Autark bin.
+    if (!entries.some(entry => entry.name.toLowerCase() === "pg0.exe")) entries.push({ name: "pg0.exe", path: state().pg0.path ?? "", version: state().pg0.version, size: 0 });
+    // The detail page reads state().pg0.version, so a bin copy must not report a different one.
+    return entries.map(entry => entry.name.toLowerCase() === "pg0.exe" ? { ...entry, version: state().pg0.version } : entry)
+      .filter(entry => `${entry.name} ${entry.version ?? ""}`.toLowerCase().includes(search().toLowerCase()));
   });
   const isResolvedMise = (name: string) => name.toLowerCase() === "mise.exe" && !state().mise.bin.some(entry => entry.name.toLowerCase() === "mise.exe");
   const [marketFilter, setMarketFilter] = createSignal<"builtin" | "marketplace" | "local">("marketplace");
@@ -125,6 +130,8 @@ export default function App() {
   // Settings can reopen the mise screen instead of duplicating the picker.
   const [miseScreen, setMiseScreen] = createSignal(false);
   const [builtinTabs, setBuiltinTabs] = createSignal<string[]>([]);
+  const [builtinSettings, setBuiltinSettings] = createSignal(false);
+  const [builtinSettingsTab, setBuiltinSettingsTab] = createSignal("General");
   const [shortcutDone, setShortcutDone] = createSignal<string[]>([]);
   const [shortcutBusy, setShortcutBusy] = createSignal<string[]>([]);
   const available = createMemo(() => state().apps.filter(a => `${a.name} ${a.description} ${a.id}`.toLowerCase().includes(search().toLowerCase())));
@@ -181,6 +188,13 @@ export default function App() {
   createEffect(() => { if (!busy()) { setMiseInstalling(false); setResetting(false); } });
   createEffect(() => document.body.classList.toggle("is-loading", miseInstalling() || misePicking() || resetting()));
   const localInstalled = () => state().mise.bin.some(entry => entry.name.toLowerCase() === "mise.exe");
+  const builtinInstalled = (id: string | null) => {
+    const name = id?.toLowerCase();
+    if (!name) return false;
+    if (name === "git.exe") return state().git.installed;
+    if (name === "pg0.exe") return state().pg0.available && !!state().pg0.path?.startsWith(state().settings.root);
+    return state().mise.bin.some(entry => entry.name.toLowerCase() === name);
+  };
   const localSelected = () => {
     const selected = state().mise.path;
     return !!selected && selected.toLowerCase() === state().mise.local_path.toLowerCase();
@@ -208,19 +222,16 @@ export default function App() {
       setMiseScreen(false);
     }
   };
-  const logEntries = () => {
-    const lines = logs();
-    return lines.flatMap((line, index) => {
+  const logEntriesFor = (lines: string[]) => lines.flatMap((line, index) => {
       const notice = lineTone(line) === "tone-error" || lineTone(line) === "tone-warning" || /\btip\b/i.test(line);
       const previous = lines[index - 1] ?? "";
       const previousNotice = lineTone(previous) === "tone-error" || lineTone(previous) === "tone-warning" || /\btip\b/i.test(previous);
       const spacer = index > 0 && (/^\$ /.test(line) || (notice && !previousNotice));
       return [...(spacer ? [{ id: `${index}-spacer`, line: "", spacer: true }] : []), { id: `${index}-line`, line, spacer: false }];
     });
-  };
-  const run = async (fn: () => Promise<State | void>) => {
+  const run = async (fn: () => Promise<State | void>, updateActive = true) => {
     setBusy(true); setRequestError("");
-    try { const next = await fn(); if (next) { const current = active(); setState(next); if (!isBuiltin(current) && current !== AUTARK_TAB) setActive(next.settings.active_tab ?? (current === null ? null : AUTARK_TAB)); } return true; }
+    try { const next = await fn(); if (next) { const current = active(); setState(next); if (updateActive && !isBuiltin(current) && current !== AUTARK_TAB) setActive(next.settings.active_tab ?? (current === null ? null : AUTARK_TAB)); } return true; }
     catch (e) { setRequestError(errText(e)); return false; }
     finally { setBusy(false); }
   };
@@ -228,7 +239,7 @@ export default function App() {
     if (id === AUTARK_TAB) { setActive(AUTARK_TAB); setChooser(false); }
     else { setActive(id); setChooser(false); }
     setSettingsOpen(false);
-    if (!mockMode()) void run(() => api.setActiveTab(id === AUTARK_TAB ? null : id));
+    if (!mockMode()) persistActiveTab();
   };
   const openApp = (id: string) => {
     if (openIds().includes(id)) {
@@ -243,43 +254,80 @@ export default function App() {
     setAutarkTab(false);
     setChooser(false);
   };
+  const visibleTabs = () => [...openIds(), ...builtinTabs(), ...(autarkTab() ? [AUTARK_TAB] : [])];
+  // Browsers activate the tab that takes the closed one's place, then the one before it.
+  const neighborAfterClose = (id: string) => {
+    const list = visibleTabs(), rest = list.filter(tab => tab !== id);
+    return list[list.indexOf(id) + 1] ?? rest[rest.length - 1] ?? AUTARK_TAB;
+  };
+  const activate = (id: string) => {
+    setActive(id);
+    setChooser(false);
+    if (id === AUTARK_TAB) setAutarkTab(true);
+  };
+  const persistTab = (chosen: string) => chosen !== AUTARK_TAB && !isBuiltin(chosen) ? chosen : null;
+  const persistedActive = () => {
+    const id = active();
+    return id && id !== AUTARK_TAB && !isBuiltin(id) ? id : null;
+  };
+  let activeTabWrite = Promise.resolve();
+  const persistActiveTab = () => {
+    if (mockMode()) return;
+    const id = persistedActive();
+    activeTabWrite = activeTabWrite.then(() => api.setActiveTab(id)).then(() => {
+      if (persistedActive() !== id) persistActiveTab();
+    }).catch(() => undefined);
+  };
   const closeTab = (id: string, event: MouseEvent) => {
     event.stopPropagation();
+    const wasActive = active() === id;
+    const chosen = wasActive ? neighborAfterClose(id) : active();
+    // Activate before removing, so the empty-window guard never sees a gap.
+    if (wasActive && chosen) activate(chosen);
     if (mockMode()) {
-      const tabs = openIds().filter(x => x !== id), nextActive = active() === id ? tabs[tabs.length - 1] ?? AUTARK_TAB : active();
-      setState(s => ({ ...s, settings: { ...s.settings, open_tabs: tabs, active_tab: nextActive === AUTARK_TAB ? null : nextActive } }));
-      if (active() === id) { setActive(nextActive); setChooser(false); }
-      if (tabs.length === 0) { setAutarkTab(true); setActive(AUTARK_TAB); }
-    } else void run(async () => {
-      const next = await api.closeTab(id);
-      if (active() === id) { const nextActive = next.settings.active_tab ?? AUTARK_TAB; setActive(nextActive); setChooser(false); }
-      if (next.settings.open_tabs.length === 0) { setAutarkTab(true); setActive(AUTARK_TAB); }
-      return next;
-    });
+      setState(s => ({ ...s, settings: { ...s.settings, open_tabs: openIds().filter(x => x !== id), active_tab: chosen && persistTab(chosen) } }));
+      return;
+    }
+    void run(async () => {
+      const closed = await api.closeTab(id);
+      if (wasActive && active() === chosen) persistActiveTab();
+      return closed;
+    }, false);
   };
   const builtinName = (id: string | null) => (id ?? "").replace(/\.exe$/i, "");
   const isBuiltin = (id: string | null) => builtinTabs().includes(id ?? "");
-  const openBuiltin = (name: string) => {
+  // Leaving the tool closes its settings page, so it never reopens by itself.
+  createEffect(() => { active(); setBuiltinSettings(false); });  const openBuiltin = (name: string) => {
     if (!builtinTabs().includes(name)) setBuiltinTabs(tabs => [...tabs, name]);
-    setActive(name); setAutarkTab(false); setChooser(false); setSettingsOpen(false); setAppSettingsOpen(null);
+    setActive(name); setAutarkTab(false); setChooser(false); setSettingsOpen(false); setAppSettingsOpen(null); setBuiltinSettings(false);
   };
   const closeBuiltin = (name: string, event: MouseEvent) => {
     event.stopPropagation();
+    const wasActive = active() === name;
+    const chosen = wasActive ? neighborAfterClose(name) : active();
+    // Activate before removing, so the empty-window guard never sees a gap.
+    if (wasActive && chosen) activate(chosen);
     setBuiltinTabs(tabs => tabs.filter(x => x !== name));
-    if (active() !== name) return;
-    const last = openIds()[openIds().length - 1];
-    if (last) { setActive(last); if (!mockMode()) void run(() => api.setActiveTab(last)); }
-    else { setAutarkTab(true); setActive(AUTARK_TAB); }
+    if (!wasActive || !chosen) return;
+    if (mockMode()) {
+      setState(s => ({ ...s, settings: { ...s.settings, active_tab: persistTab(chosen) } }));
+      return;
+    }
+    persistActiveTab();
   };
   const closeAutarkTab = (event: MouseEvent) => {
     event.stopPropagation();
+    const wasActive = active() === AUTARK_TAB;
+    const chosen = wasActive ? neighborAfterClose(AUTARK_TAB) : active();
+    if (!wasActive) { setAutarkTab(false); return; }
+    if (!chosen || chosen === AUTARK_TAB) { setAutarkTab(true); setActive(AUTARK_TAB); return; }
+    activate(chosen);
     setAutarkTab(false);
-    if (openIds().length === 0) { setAutarkTab(true); setActive(AUTARK_TAB); return; }
-    if (active() === AUTARK_TAB) {
-      const last = openIds()[openIds().length - 1];
-      setActive(last);
-      if (!mockMode()) void run(() => api.setActiveTab(last));
+    if (mockMode()) {
+      setState(s => ({ ...s, settings: { ...s.settings, active_tab: persistTab(chosen) } }));
+      return;
     }
+    persistActiveTab();
   };
   // Never leave the window empty: a closed or unknown tab opens the Autark tab again.
   createEffect(() => {
@@ -341,7 +389,12 @@ export default function App() {
     if (mockMode()) { setState(s => ({ ...s, settings })); return; }
     void run(() => api.saveSettings(settings));
   };
-  const setForceTerminal = (force_terminal_operations: boolean) => {
+  const migratePg0 = (app: AppState, toShared: boolean) => void run(async () => {
+    const target = toShared ? "Autark's shared folder" : `${app.name}'s own folder`;
+    if (!window.confirm(`Copy the pg0 PostgreSQL binaries into ${target}? The current copy is backed up and stays in place.`)) return;
+    if (mockMode()) return;
+    return api.migratePg0(app.id, toShared);
+  });  const setForceTerminal = (force_terminal_operations: boolean) => {
     const settings = { ...state().settings, force_terminal_operations };
     if (mockMode()) { setState(s => ({ ...s, settings })); return; }
     void run(() => api.saveSettings(settings));
@@ -530,6 +583,160 @@ export default function App() {
       <Show when={!state().git.installed && state().git.external}>{external => <p class="market-unavailable">Autark keeps its own copy. The git at <button class="inline-link" onClick={() => revealFile(external().path)}>{external().path}</button> stays untouched.</p>}</Show>
       <button class="button primary" disabled={busy() || (!state().git.installed && !state().git.external)} onClick={() => { if (mockMode()) { setState(s => ({ ...s, settings: { ...s.settings, wizard_complete: true } })); return; } void run(() => api.saveSettings({ ...state().settings, wizard_complete: true }, false)); }}>Next</button>
     </>
+  );
+  type AppSettingsOperation = {
+    description: string;
+    applicable?: () => boolean;
+    disabled: () => boolean;
+    unavailableReason?: () => string | undefined;
+    onConfirm: () => void;
+  };
+  const AppSettingsPage = (props: {
+    name: () => string;
+    targetId: () => string;
+    backLabel: () => string;
+    onBack: () => void;
+    tabs: () => string[];
+    currentTab: () => string;
+    onTab: (tab: string) => void;
+    tabLabel: (tab: string) => string;
+    save?: { label?: string; visible: () => boolean; disabled: () => boolean; onSave: () => void };
+    fields?: () => AppSetting[];
+    renderField?: (field: AppSetting) => JSX.Element;
+    beforeFields?: JSX.Element;
+    alternate?: { when: () => boolean; content: JSX.Element };
+    preferences?: {
+      shortcut?: {
+        description: string;
+        disabled: () => boolean;
+        busy: () => boolean;
+        created: () => boolean;
+        onCreate: () => void;
+        autostart: () => boolean;
+        setAutostart: (value: boolean) => void;
+        background: () => boolean;
+        setBackground: (value: boolean) => void;
+      };
+      startup?: { checked: () => boolean; onChange: (value: boolean) => void };
+    };
+    reinstall: AppSettingsOperation;
+    uninstall: AppSettingsOperation;
+  }) => {
+    const [pending, setPending] = createSignal<{ operation: "reinstall" | "uninstall"; target: string } | null>(null);
+    const [removeText, setRemoveText] = createSignal("");
+    const cancelOperation = () => { setPending(null); setRemoveText(""); };
+    const operationFor = (key: "reinstall" | "uninstall") => key === "reinstall" ? props.reinstall : props.uninstall;
+    createEffect(() => {
+      const target = props.targetId();
+      const active = pending();
+      if (active) {
+        const operation = operationFor(active.operation);
+        if (active.target !== target || operation.applicable?.() === false || operation.disabled() || operation.unavailableReason?.()) cancelOperation();
+      }
+    });
+    const operationSection = (key: "reinstall" | "uninstall", title: string, label: string, operation: AppSettingsOperation, danger = false) => {
+      const isPending = () => pending()?.operation === key && pending()?.target === props.targetId();
+      const applicable = () => operation.applicable?.() ?? true;
+      const unavailableReason = () => operation.unavailableReason?.();
+      const confirm = () => {
+        if (!isPending() || !applicable() || operation.disabled() || unavailableReason() || key === "uninstall" && removeText() !== "REMOVE") return;
+        cancelOperation();
+        operation.onConfirm();
+      };
+      return <Show when={applicable()}><section class="uninstall-section"><h2>{title}</h2><Show when={operation.description}><p>{operation.description}</p></Show>
+        <button class={`button ${danger ? "danger-quiet" : ""}`} disabled={operation.disabled() || !!unavailableReason()} onClick={() => { if (applicable() && !operation.disabled() && !unavailableReason()) { setRemoveText(""); setPending({ operation: key, target: props.targetId() }); } }}>{label}</button>
+        <Show when={unavailableReason()}>{reason => <p class="settings-muted">{reason()}</p>}</Show>
+        <Show when={isPending() && applicable() && !unavailableReason()}>
+          <div class={key === "uninstall" ? "inline-panel remove-panel" : "inline-panel"}>
+            <p>Are you sure you want to {key === "reinstall" ? "reinstall" : "uninstall"} {props.name()}?</p>
+            {key === "uninstall" && <label>Type REMOVE<input value={removeText()} onInput={e => setRemoveText(e.currentTarget.value)} /></label>}
+            <div><button class="button" onClick={cancelOperation}>Cancel</button><button class={`button ${danger ? "danger" : "primary"}`} disabled={!applicable() || operation.disabled() || key === "uninstall" && removeText() !== "REMOVE"} onClick={confirm}>{key === "reinstall" ? "Reinstall" : "Remove"}</button></div>
+          </div>
+        </Show>
+      </section></Show>;
+    };
+    return <section class="app-settings-page">
+      <button class="back-button" onClick={props.onBack}>{props.backLabel()}</button>
+      <div class="view-heading"><div><span class="eyebrow">{props.name().toUpperCase()}</span><h1>Settings</h1></div><Show when={props.save?.visible()}><button class="button primary" disabled={props.save?.disabled()} onClick={() => props.save?.onSave()}>{props.save?.label ?? "Save"}</button></Show></div>
+      <nav class="settings-tabs" role="tablist" aria-label="App settings sections"><For each={props.tabs()}>{tab => <button class={`settings-tab ${props.currentTab() === tab ? "active" : ""}`} role="tab" aria-selected={props.currentTab() === tab} onClick={() => props.onTab(tab)}>{props.tabLabel(tab)}</button>}</For></nav>
+      {props.beforeFields}
+      <Show when={props.alternate?.when() ?? false} fallback={<Show when={props.fields?.().length ?? false} fallback={<p class="quiet">No settings in this tab.</p>}>
+        <div class="fields"><For each={props.fields?.() ?? []}>{field => props.renderField?.(field)}</For></div>
+      </Show>}>{props.alternate?.content}</Show>
+      <Show when={props.preferences?.shortcut}>{shortcut => <section class="preference-section"><h2>Shortcut</h2><p>{shortcut().description}</p>
+        <button class="button" disabled={shortcut().disabled() || shortcut().busy()} onClick={shortcut().onCreate}>Create shortcut</button>
+        <Show when={shortcut().created()}><small class="preference-note">Shortcut created on the desktop. The start options apply every time you open it.</small></Show>
+        <label class="preference-toggle"><input type="checkbox" role="switch" checked={shortcut().autostart()} onChange={e => shortcut().setAutostart(e.currentTarget.checked)} /><span><b>Also start the app</b></span></label>
+        <label class="preference-toggle"><input type="checkbox" role="switch" checked={shortcut().background()} onChange={e => shortcut().setBackground(e.currentTarget.checked)} /><span><b>Run hidden in the background</b></span></label>
+      </section>}</Show>
+      <Show when={props.preferences?.startup}>{startup => <section class="preference-section"><h2>Startup</h2><label class="preference-toggle"><input type="checkbox" role="switch" checked={startup().checked()} onChange={e => startup().onChange(e.currentTarget.checked)} /><span><b>Start when Autark starts</b></span></label></section>}</Show>
+      {operationSection("reinstall", "Reinstall app", "Reinstall", props.reinstall)}
+      {operationSection("uninstall", "Uninstall app", "Uninstall", props.uninstall, true)}
+      <footer class="about"><span>Autark <b>v{version()}{import.meta.env.DEV ? " (dev)" : ""}</b></span><span>AGPL-3.0</span><button onClick={() => openUrl("https://github.com/verzly/autark")}>Source</button><button onClick={() => openUrl("https://github.com/verzly/autark-marketplace")}>Marketplace</button></footer>
+    </section>;
+  };
+  type AppMainAction = { id: string; label: () => string; className: () => string; visible: () => boolean; disabled: () => boolean; onClick: () => void };
+  type AppMainVersion =
+    | { type: "builtin"; version: () => string | null; ownership: () => string }
+    | { type: "marketplace"; appVersion: () => string | null; local: () => boolean; recipeVersion: () => string | null; updateAvailable: () => boolean; latestRecipeVersion: () => string | null; newerUpstream: () => boolean; upstreamVersion: () => string | null; preview: () => string | null };
+  type AppMainMetadata =
+    | { type: "builtin"; path: () => string | null; name: () => string }
+    | { type: "marketplace"; root: () => string; id: () => string; appVersion: () => string | null; updateAvailable: () => boolean; latestVersion: () => string | null; local: () => boolean; recipeVersion: () => string | null; revealPath: () => void; checkUpdates: () => void };
+  type AppMainLinks = { homepage?: () => string | null; license?: () => string | null; preview?: { visible: () => boolean; branch: () => string; disabled: () => boolean; appName: () => string; onRestore: () => void; onRefresh: () => void } };
+  const AppMainPage = (props: {
+    id: () => string;
+    name: () => string;
+    badge: { src: () => string | null; fallback: () => string; hue?: () => number };
+    version: AppMainVersion;
+    links?: AppMainLinks;
+    status?: { phase: () => Phase; step: () => { index: number; total: number; name: string } | null; elapsed: () => number | null };
+    backLabel: string;
+    onBack: () => void;
+    settingsLabel: string;
+    onSettings: () => void;
+    actions: () => AppMainAction[];
+    panels?: JSX.Element;
+    faq: () => AppState["faq"];
+    metadata: AppMainMetadata;
+  }) => (
+    <section class="app-view">
+      <div class="app-header"><div class="app-title"><span class="badge large" style={props.badge.hue ? { "--hue": props.badge.hue() } : undefined}><Show when={props.badge.src()} fallback={props.badge.fallback()}>{src => <img src={src()} alt="" />}</Show></span><div><h1>{props.name()}</h1><div class="version-line">
+        {props.version.type === "builtin" ? <>version {props.version.version() ?? "unknown"} · {props.version.ownership()}</> : <>
+          {props.version.appVersion() ? `app ${props.version.appVersion()}` : "app version unknown"} · {props.version.local() ? "local" : `recipe ${props.version.recipeVersion() ?? "not installed"}`}
+          <Show when={!props.version.local() && props.version.updateAvailable()}> · latest recipe {props.version.latestRecipeVersion() ?? "unknown"} <Show when={!props.version.newerUpstream()}><span class="update-pill">update</span></Show></Show>
+          <Show when={!props.version.local() && props.version.newerUpstream()}> · upstream release {props.version.upstreamVersion()}</Show>
+          <Show when={props.version.preview()}>{preview => <> · <span class="preview-pill">preview ({preview()})</span></>}</Show>
+        </>}
+      </div></div></div>
+       <Show when={props.links}><div class="links">
+        <Show when={props.links?.homepage?.()}>{homepage => <button onClick={() => openUrl(homepage()!)}>Homepage ↗</button>}</Show>
+        <Show when={props.links?.license?.()}>{license => <span>{license()}</span>}</Show>
+        <Show when={props.links?.preview?.visible()}><div class="preview-actions"><button class="button" disabled={props.links?.preview?.disabled()} onClick={() => props.links?.preview?.onRestore()}>Restore to stable</button><button class="reload-button" disabled={props.links?.preview?.disabled()} aria-label={`Refresh ${props.links?.preview?.appName()} from ${props.links?.preview?.branch()}`} title={`Refresh the recipe from ${props.links?.preview?.branch()} without running setup`} onClick={() => props.links?.preview?.onRefresh()}><Icon name="reload" /></button></div></Show>
+       </div></Show>
+      </div>
+      <Show when={props.status}>{status => <div class="status-line"><span class={`dot ${status().phase()}`} /><Show when={working(status().phase())}><span class="progress"><i /></span></Show><span class="phase-label">{status().step() ? `(${status().step()?.index}/${status().step()?.total}) ${status().step()?.name}` : status().phase().replace("_", " ")}</span><Show when={working(status().phase()) && status().elapsed() != null}><span class="elapsed">run {duration(status().elapsed()!)}</span></Show></div>}</Show>
+      <div class="actions"><button class="button icon-only" aria-label={props.backLabel} title={props.backLabel} onClick={props.onBack}><Icon name="back" /></button><button class="button icon-only" aria-label={props.settingsLabel} title="Settings" onClick={props.onSettings}><Icon name="gear" /></button>
+        <For each={props.actions()}>{item => <Show when={item.visible()}><button class={`button ${item.className()}`} disabled={item.disabled()} onClick={item.onClick}>{item.label()}</button></Show>}</For>
+      </div>
+      {props.panels}
+      <div class="app-tabs" role="tablist">
+        <button class={`app-tab ${props.faq().length === 0 || appTab() === "output" ? "active" : ""}`} role="tab" aria-selected={props.faq().length === 0 || appTab() === "output"} onClick={() => setAppTab("output")}>Output</button>
+        <Show when={props.faq().length > 0}><button class={`app-tab ${appTab() === "faq" ? "active" : ""}`} role="tab" aria-selected={appTab() === "faq"} onClick={() => setAppTab("faq")}>FAQ</button></Show>
+        <Show when={props.faq().length === 0 || appTab() === "output"}><button class="app-tab app-tab-end" onClick={() => void run(() => navigator.clipboard.writeText(logs().join("\n")))}>Copy</button><button class="app-tab app-tab-clear" onClick={() => { setBuffers(b => ({ ...b, [props.id()]: [] })); setFollow(true); }}>Clear</button></Show>
+      </div>
+      <Show when={props.faq().length > 0 && appTab() === "faq"}><section class="faq"><For each={props.faq()}>{item => <details class="faq-item"><summary>{item.question}</summary><p>{item.answer}</p></details>}</For></section></Show>
+      <Show when={props.faq().length === 0 || appTab() === "output"}>
+        <section class="output-section"><div class="output-wrap"><div class="output" ref={output} onScroll={() => output && setFollow(output.scrollHeight - output.scrollTop - output.clientHeight < 24)}>
+          <Show when={logs().length} fallback={<span class="quiet">Operation output will appear here.</span>}><For each={logEntriesFor(logs())}>{entry => entry.spacer ? <div class="log-spacer" aria-hidden="true" /> : <div class={`log ${lineTone(entry.line)}`}><LogText line={entry.line} /></div>}</For></Show>
+        </div><Show when={!follow() && logs().length}><button class="jump" onClick={() => { if (output) output.scrollTop = output.scrollHeight; setFollow(true); }}>Jump to latest</button></Show></div></section>
+      </Show>
+      <footer class="metadata">{props.metadata.type === "builtin" ? <><span>{props.metadata.path() ?? "not resolved"}</span><code>{props.metadata.name()}</code></> : <>
+        <button title={props.metadata.root() + "\\apps\\" + props.metadata.id()} onClick={props.metadata.revealPath}>{`${props.metadata.root()}\\apps\\${props.metadata.id()}`}</button>
+        <span>{props.metadata.appVersion() ? `app ${props.metadata.appVersion()}` : "app version unknown"} {props.metadata.updateAvailable() ? `latest ${props.metadata.latestVersion() ?? "unknown"}` : "latest"}<button class="check-button" title="Check the marketplace for a newer version" onClick={props.metadata.checkUpdates}>(check)</button></span>
+        <span>{props.metadata.local() ? "local" : `recipe ${props.metadata.recipeVersion() ?? "not installed"} ${props.metadata.updateAvailable() ? `latest ${props.metadata.latestVersion() ?? "unknown"}` : "latest"}`}{props.metadata.local() ? null : <button class="check-button" title="Check the marketplace for a newer version" onClick={props.metadata.checkUpdates}>(check)</button>}</span>
+        <code>{props.metadata.id()}</code>
+      </>}</footer>
+    </section>
   );
   return <div class={`app ${state().settings.animations ? "" : "no-animation"}`}>
     <header class="chrome" data-tauri-drag-region>
@@ -732,19 +939,22 @@ export default function App() {
                 <div class="marketplace-grid" role="list" aria-label="Built-in apps"><For each={builtinApps()}>{(entry, i) => {
                   const title = entry.name.replace(/\.exe$/i, "");
                   const isGit = entry.name.toLowerCase() === "git.exe";
+                  const isPg0 = entry.name.toLowerCase() === "pg0.exe";
                   const git = state().git;
                   const systemMise = isResolvedMise(entry.name);
-                  const tag = isGit ? (git.installed ? "By Autark" : git.external?.from_mise ? "By mise" : git.external ? "By your machine" : "Not installed") : systemMise ? "Not installed" : "By Autark";
-                  const external = isGit ? git.external?.path ?? null : state().mise.path;
+                  const tag = isGit ? (git.installed ? "By Autark" : git.external?.from_mise ? "By mise" : git.external ? "By your machine" : "Not installed") : isPg0 ? (state().pg0.available && state().pg0.path?.startsWith(state().settings.root) ? "By Autark" : "Not installed") : systemMise ? "Not installed" : "By Autark";
+                  const external = isGit ? git.external?.path ?? null : isPg0 ? state().pg0.source ?? state().pg0.path ?? null : state().mise.path;
                   return <article role="listitem" class={`market-card ${selected() === i() ? "market-selected" : ""}`} onMouseEnter={() => setSelected(i())}>
                     <div class="market-card-head"><span class="badge large" style={{ "--hue": hue(entry.name) }}><Show when={builtinLogo(entry.name)} fallback={title[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><div><h2>{title}</h2><code>{entry.name}</code></div><span class="local-tag">{tag}</span></div>
-                    <p class="market-description">{isGit ? "Installed once by Autark's mise, next to the rest of its runtime." : systemMise ? "Autark runs every app through this mise." : "Managed in Autark's own bin folder."}</p>
-                    <Show when={isGit ? git.installed : !systemMise}><div class="market-versions"><span>Version <b>{entry.version ?? "unknown"}</b></span><span>By <b>{isGit ? "Autark" : state().mise.source}</b></span></div>
-                      <div class="market-links"><span>{isGit ? git.path : state().mise.bin_path}</span></div></Show>
+                    <p class="market-description">{isGit ? "Installed once by Autark's mise, next to the rest of its runtime." : isPg0 ? "Installed by Autark's mise. Apps share the payload only after you move it into Autark." : systemMise ? "Autark runs every app through this mise." : "Managed in Autark's own bin folder."}</p>
+                    <Show when={isGit ? git.installed : isPg0 ? state().pg0.available : !systemMise}><div class="market-versions"><span>Version <b>{entry.version ?? "unknown"}</b></span><span>By <b>{isGit ? "Autark" : isPg0 ? "Autark" : state().mise.source}</b></span></div>
+                      <div class="market-links"><span>{isGit ? git.path : isPg0 ? state().pg0.path ?? "not resolved" : state().mise.bin_path}</span></div></Show>
                     <div class="market-actions">
-                      <Show when={!isGit && !systemMise}><button class="button primary market-action" disabled={busy()} onClick={() => { openBuiltin(entry.name); void run(() => api.updateMise()); }}>Update</button></Show>
+                      <Show when={!systemMise}><button class="button market-action icon-only" aria-label={`Show ${title}`} title="Show" onClick={() => openBuiltin(entry.name)}><Icon name="eye" /></button></Show>
+                      <Show when={!isGit && !isPg0 && !systemMise}><button class="button primary market-action" disabled={busy()} onClick={() => { openBuiltin(entry.name); void run(() => api.updateMise()); }}>Update</button></Show>
                       <Show when={isGit}><Show when={git.installed} fallback={<button class="button primary market-action" disabled={busy() || !state().mise.available} onClick={() => { openBuiltin(entry.name); void run(() => api.installGit()); }}>Install</button>}><button class="button primary market-action" disabled={busy()} onClick={() => { openBuiltin(entry.name); void run(() => api.updateGit()); }}>Update</button></Show></Show>
-                      <Show when={!systemMise && !isGit}>
+                      <Show when={isPg0}><Show when={state().pg0.available} fallback={<button class="button primary market-action" disabled={busy()} title="Install pg0 with Autark's mise" onClick={() => { openBuiltin(entry.name); void run(() => api.installPg0(false)); }}>Install</button>}><button class="button primary market-action" disabled={busy()} title="Install the latest pg0 with Autark's mise" onClick={() => { openBuiltin(entry.name); void run(() => api.installPg0(true)); }}>Update</button></Show></Show>
+                      <Show when={!systemMise && !isGit && !isPg0}>
                         <Show when={binRemoveConfirm() !== entry.name}><button class="button market-view-action" onClick={() => setBinRemoveConfirm(entry.name)}>Remove</button></Show>
                         <Show when={binRemoveConfirm() === entry.name}><div class="confirm-strip"><span>Remove {entry.name} from Autark's bin folder?</span><button class="button" onClick={() => setBinRemoveConfirm(null)}>Cancel</button><button class="button" disabled={busy()} onClick={() => { setBinRemoveConfirm(null); void run(() => api.removeBinEntry(entry.name)); }}>Remove</button></div></Show>
                       </Show>
@@ -757,14 +967,32 @@ export default function App() {
             </section>
           </Show>
        </section></Show>
-      <Show when={!chooser() && !settingsOpen() && isBuiltin(active())}><section class="app-view">
-        <div class="app-header"><div class="app-title"><span class="badge large"><Show when={builtinLogo(active() ?? "")} fallback={builtinName(active())[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><div><h1>{builtinName(active())}</h1><div class="version-line">version {active()?.toLowerCase() === "git.exe" ? state().git.version ?? "unknown" : state().mise.version ?? "unknown"} · {active()?.toLowerCase() === "git.exe" ? (state().git.installed ? "By Autark" : state().git.external?.from_mise ? "By mise" : state().git.external ? "By your machine" : "Not installed") : (state().mise.source === "local" ? "By Autark" : "By your machine")}</div></div></div></div>
-        <div class="actions"><button class="button" onClick={() => { setMarketFilter("builtin"); showChooser(); }}>Back to built-in apps</button><Show when={active()?.toLowerCase() !== "git.exe"}><Show when={localInstalled()}><button class="button primary" disabled={busy()} onClick={() => void run(() => api.updateMise())}>Update</button></Show><button class="button" disabled={busy()} onClick={() => setMiseScreen(true)}>Change mise.exe</button><Show when={localInstalled()}><button class="button danger" disabled={busy()} onClick={() => void run(() => api.removeBinEntry("mise.exe"))}>Remove</button></Show></Show><Show when={active()?.toLowerCase() === "git.exe"}><Show when={state().git.installed} fallback={<button class="button primary" disabled={busy()} onClick={() => void run(() => api.installGit())}>Install</button>}><button class="button primary" disabled={busy()} onClick={() => void run(() => api.updateGit())}>Update</button></Show></Show></div>
-        <div class="output-wrap"><div class="output" ref={output} onScroll={() => output && setFollow(output.scrollHeight - output.scrollTop - output.clientHeight < 24)}>
-          <For each={logEntries()}>{entry => entry.spacer ? <div class="log-spacer" aria-hidden="true" /> : <div class={`log ${lineTone(entry.line)}`}><LogText line={entry.line} /></div>}</For>
-        </div></div>
-        <footer class="metadata"><span>{active()?.toLowerCase() === "git.exe" ? state().git.path ?? "not resolved" : state().mise.path ?? "not resolved"}</span><code>{builtinName(active())}</code></footer>
-      </section></Show>
+      <Show when={!chooser() && !settingsOpen() && isBuiltin(active())}>
+          <Show when={builtinSettings()}>
+          <AppSettingsPage name={() => builtinName(active())} targetId={() => active() ?? ""} backLabel={() => `← back to ${builtinName(active())} app`} onBack={() => setBuiltinSettings(false)} tabs={() => ["General"]} currentTab={builtinSettingsTab} onTab={setBuiltinSettingsTab} tabLabel={tab => tab} fields={() => []}
+            reinstall={{ description: "Reinstall this tool for Autark.", applicable: () => ["git.exe", "pg0.exe", "mise.exe"].includes(active()?.toLowerCase() ?? "") && builtinInstalled(active()), disabled: () => busy(), onConfirm: () => { const id = active()?.toLowerCase(); setBuiltinSettings(false); if (id === "pg0.exe") { openBuiltin("pg0.exe"); void run(() => api.installPg0(true)); } else if (id === "git.exe") { void run(() => api.updateGit()); } else { void run(() => api.updateMise()); } } }}
+            uninstall={{ description: "", applicable: () => builtinInstalled(active()), unavailableReason: () => active()?.toLowerCase() === "git.exe" ? "Autark needs git for marketplace updates." : active()?.toLowerCase() === "pg0.exe" && state().pg0.used_by.length > 0 ? `Uninstall these apps before removing pg0: ${state().pg0.used_by.join(", ")}.` : undefined, disabled: () => busy() || active()?.toLowerCase() === "git.exe" || active()?.toLowerCase() === "mise.exe" && !localInstalled() || active()?.toLowerCase() === "pg0.exe" && state().pg0.used_by.length > 0, onConfirm: () => { const id = active(); if (!id) return; setBuiltinSettings(false); void run(() => id.toLowerCase() === "pg0.exe" ? api.uninstallPg0() : api.removeBinEntry(id)); } }} />
+        </Show>
+        <Show when={!builtinSettings()}>
+          <AppMainPage id={() => active() ?? ""} name={() => builtinName(active())}
+            badge={{ src: () => builtinLogo(active() ?? ""), fallback: () => builtinName(active())[0]?.toUpperCase() ?? "", hue: () => hue(active() ?? "") }}
+            version={{ type: "builtin", version: () => active()?.toLowerCase() === "git.exe" ? state().git.version : active()?.toLowerCase() === "pg0.exe" ? state().pg0.version : state().mise.version, ownership: () => active()?.toLowerCase() === "git.exe" ? (state().git.installed ? "By Autark" : state().git.external?.from_mise ? "By mise" : state().git.external ? "By your machine" : "Not installed") : active()?.toLowerCase() === "pg0.exe" ? (state().pg0.available ? "By Autark" : "Not installed") : state().mise.source === "local" ? "By Autark" : "By your machine" }}
+            backLabel="Back to built-in apps" onBack={() => { setMarketFilter("builtin"); showChooser(); }} settingsLabel="Settings" onSettings={() => { setBuiltinSettingsTab("General"); setBuiltinSettings(true); }}
+            actions={() => {
+              const id = active()?.toLowerCase();
+              return [
+                { id: "mise-update", label: () => "Update", className: () => "primary", visible: () => id === "mise.exe" && localInstalled(), disabled: busy, onClick: () => void run(() => api.updateMise()) },
+                { id: "mise-change", label: () => "Change mise.exe", className: () => "", visible: () => id === "mise.exe", disabled: () => false, onClick: () => setMiseScreen(true) },
+                { id: "mise-remove", label: () => "Remove", className: () => "danger", visible: () => id === "mise.exe" && localInstalled(), disabled: busy, onClick: () => void run(() => api.removeBinEntry("mise.exe")) },
+                { id: "git-install", label: () => "Install", className: () => "primary", visible: () => id === "git.exe" && !state().git.installed, disabled: busy, onClick: () => void run(() => api.installGit()) },
+                { id: "git-update", label: () => "Update", className: () => "primary", visible: () => id === "git.exe" && state().git.installed, disabled: busy, onClick: () => void run(() => api.updateGit()) },
+                { id: "pg0-install", label: () => "Install", className: () => "primary", visible: () => id === "pg0.exe" && !state().pg0.available, disabled: busy, onClick: () => void run(() => api.installPg0(false)) },
+                { id: "pg0-update", label: () => "Update", className: () => "primary", visible: () => id === "pg0.exe" && state().pg0.available, disabled: busy, onClick: () => void run(() => api.installPg0(true)) },
+              ];
+            }}
+            faq={() => []} metadata={{ type: "builtin", path: () => active()?.toLowerCase() === "git.exe" ? state().git.path ?? "not resolved" : active()?.toLowerCase() === "pg0.exe" ? state().pg0.path ?? "not resolved" : state().mise.path ?? "not resolved", name: () => builtinName(active()) }} />
+        </Show>
+      </Show>
       <Show when={!chooser() && !settingsOpen() && active() === AUTARK_TAB}><section class="empty-state"><div class="empty-mark">autark</div>
         <div class="landing-app-list" role="list" aria-label="Installed apps">
           <Show when={state().apps.some(a => a.installed)} fallback={<p class="landing-empty" role="listitem">No apps are installed yet.</p>}>
@@ -783,67 +1011,32 @@ export default function App() {
         const canStart = () => !busyApp() && a().installed && a().can_start && p() === "installed";
         const canStop = () => !busyApp() && a().can_start && (p() === "running" || p() === "starting");
         const confirmInstall = () => { setPanel(null); action(a().installed ? "update" : "install", a()); };
-        return <Show when={appSettingsOpen() === a().id} fallback={<section class="app-view">
-          <div class="app-header"><div class="app-title"><span class="badge large" style={{ "--hue": hue(a().id) }}><Show when={a().icon_data} fallback={a().id[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><div><h1>{a().name}</h1><div class="version-line">{a().version_app ? `app ${a().version_app}` : "app version unknown"} · {a().local ? "local" : `recipe ${a().version_installed ?? "not installed"}`}<Show when={!a().local && a().update_available}> · latest recipe {a().version_latest ?? "unknown"} <Show when={!upstreamNewer(a())}><span class="update-pill">update</span></Show></Show><Show when={!a().local && upstreamNewer(a())}> · upstream release {upstreamVersions()[a().id]}</Show><Show when={a().preview}>{(preview) => <> · <span class="preview-pill">preview ({preview()})</span></>}</Show></div></div></div>
-            <div class="links"><Show when={a().homepage}><button onClick={() => openUrl(a().homepage!)}>Homepage ↗</button></Show><Show when={a().license}><span>{a().license}</span></Show><Show when={a().preview && a().installed && !a().local}>{(preview) => <div class="preview-actions"><button class="button" disabled={busyApp()} onClick={() => setPanel("restore")}>Restore to stable</button><button class="reload-button" disabled={busyApp()} aria-label={`Refresh ${a().name} from ${preview()}`} title={`Refresh the recipe from ${preview()} without running setup`} onClick={() => reloadAppSource(a())}><Icon name="reload" /></button></div>}</Show></div></div>
-          <div class="status-line"><span class={`dot ${p()}`} /><Show when={working(p())}><span class="progress"><i /></span></Show><span class="phase-label">{a().step ? `(${a().step?.index}/${a().step?.total}) ${a().step?.name}` : p().replace("_", " ")}</span><Show when={working(p()) && elapsed() != null}><span class="elapsed">run {duration(elapsed()!)}</span></Show></div>
-          <div class="actions">
-              <Show when={!a().local}><button class={`button primary ${a().installed && (a().update_available || upstreamNewer(a())) ? "update-ready" : ""}`} disabled={busyApp()} onClick={() => setPanel("install")}>{a().installed ? "Update" : "Install"}</button></Show>
-
-            <Show when={a().can_start}>
-              <button class="button" disabled={!canStart()} onClick={() => action("start", a())}>Start</button>
-              <button class="button" disabled={!canStop()} onClick={() => action("stop", a())}>Stop</button>
-            </Show>
-            <button class="button" disabled={busyApp() || !a().url} onClick={() => action("open", a())}>Open</button>
-             <button class="button" aria-label={`${a().name} settings`} onClick={() => { setPanel(null); setAppSettingsTab("General"); setAppSettingsOpen(a().id); }}><Icon name="menu" /> Settings</button>
-             <For each={a().actions}>{item => <button class="button" disabled={busyApp() || !a().installed} onClick={() => item.confirm ? setPanel(`action:${item.id}`) : void run(() => api.runAction(a().id, item.id))}>{item.label}</button>}</For>
-             <Show when={working(p())}><button class="button" onClick={() => action("cancel", a())}>Cancel operation</button></Show>
-           </div>
-           <Show when={panel() === "install"}><div class="inline-panel"><p>Setup may install system components through mise and requires network access.</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={confirmInstall}>Confirm</button></div></div></Show>
-           <Show when={panel() === "restore"}><div class="inline-panel"><p>Reinstall this app from the marketplace's default branch? The preview build is replaced. Settings and user data are preserved.</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={() => { setPanel(null); restoreApp(a()); }}>Restore</button></div></div></Show>
-           <For each={a().actions.filter(item => item.confirm && panel() === `action:${item.id}`)}>{item => <div class="inline-panel"><p>Run {item.label}?</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp() || !a().installed} onClick={() => { setPanel(null); void run(() => api.runAction(a().id, item.id)); }}>Confirm</button></div></div>}</For>
-          <div class="app-tabs" role="tablist"><button class={`app-tab ${appTab() === "output" ? "active" : ""}`} role="tab" aria-selected={appTab() === "output"} onClick={() => setAppTab("output")}>Output</button><Show when={a().faq.length}><button class={`app-tab ${appTab() === "faq" ? "active" : ""}`} role="tab" aria-selected={appTab() === "faq"} onClick={() => setAppTab("faq")}>FAQ</button></Show><Show when={!a().faq.length || appTab() === "output"}><button class="app-tab app-tab-end" onClick={() => void run(() => navigator.clipboard.writeText(logs().join("\n") as string))}>Copy</button><button class="app-tab app-tab-clear" onClick={() => { setBuffers(b => ({ ...b, [a().id]: [] })); setFollow(true); }}>Clear</button></Show></div>
-          <Show when={a().faq.length && appTab() === "faq"}><section class="faq"><For each={a().faq}>{item => <details class="faq-item"><summary>{item.question}</summary><p>{item.answer}</p></details>}</For></section></Show>
-          <Show when={!a().faq.length || appTab() === "output"}>
-          <section class="output-section">
-            <div class="output-wrap"><div class="output" ref={output} onScroll={() => output && setFollow(output.scrollHeight - output.scrollTop - output.clientHeight < 24)}>
-              <Show when={logs().length} fallback={<span class="quiet">Operation output will appear here.</span>}><For each={logEntries()}>{entry => <div class={entry.spacer ? "log-spacer" : `log ${lineTone(entry.line)}`} aria-hidden={entry.spacer || undefined}>{entry.spacer ? "\u00a0" : <LogText line={entry.line} />}</div>}</For></Show>
-            </div><Show when={!follow() && logs().length}><button class="jump" onClick={() => { if (output) output.scrollTop = output.scrollHeight; setFollow(true); }}>Jump to latest</button></Show></div>
-          </section>
-          </Show>
-          <footer class="metadata"><button title={state().settings.root + "\\apps\\" + a().id} onClick={() => reveal("app", a().id)}>{`${state().settings.root}\\apps\\${a().id}`}</button><span>{a().version_app ? `app ${a().version_app}` : "app version unknown"} {a().update_available ? `latest ${a().version_latest ?? "unknown"}` : "latest"}<button class="check-button" title="Check the marketplace for a newer version" onClick={() => void run(() => api.checkUpdates())}>(check)</button></span><span>{a().local ? "local" : `recipe ${a().version_installed ?? "not installed"} ${a().update_available ? `latest ${a().version_latest ?? "unknown"}` : "latest"}`}{a().local ? null : <button class="check-button" title="Check the marketplace for a newer version" onClick={() => void run(() => api.checkUpdates())}>(check)</button>}</span><code>{a().id}</code></footer>
-        </section>}>
-          <section class="app-settings-page">
-            <button class="back-button" onClick={() => { if (dirty(a()) && !confirm("Unsaved settings changes will be lost. Leave without saving?")) return; setAppSettingsOpen(null); }}>← back to app</button>
-            <div class="view-heading"><div><span class="eyebrow">{a().name.toUpperCase()}</span><h1>Settings</h1></div><Show when={dirty(a())}><button class="button primary" disabled={busyApp()} onClick={() => saveDraft(a())}>Save</button></Show></div>
-            <nav class="settings-tabs" role="tablist" aria-label="App settings sections"><For each={appTabs(a())}>{tab => <button class={`settings-tab ${currentTab(a()) === tab ? "active" : ""}`} role="tab" aria-selected={currentTab(a()) === tab} onClick={() => setAppSettingsTab(tab)}>{tabLabel(tab)}</button>}</For></nav>
-            <Show when={currentTab(a()) === PREVIEW_TAB} fallback={<Show when={tabFields(a(), currentTab(a())).length} fallback={<p class="quiet">No settings in this tab.</p>}><div class="fields"><For each={tabFields(a(), currentTab(a()))}>{field => <SettingField app={a()} field={field} value={draftValue(a(), field.key)} settings={drafts()[a().id] ?? a().settings} lock={a().settings_locked.find(lock => lock.key === field.key)} setValue={value => setDraftValue(a(), field.key, value)} choose={() => void chooseFolder(a(), field)} />}</For></div></Show>}>
-              <section class="preference-section"><h2>Preview source</h2>
-                <Show when={state().settings.developer_mode} fallback={<><p class="settings-muted">Developer mode is off. Preview sources are hidden.</p><button class="button" onClick={() => { setAppSettingsOpen(null); setSettingsReturn(a().id); setSettingsOpen(true); setSettingsTab("Preview"); }}>Open settings</button></>}>
-                  <p class="settings-muted">Load only this app's recipe from a branch or pull request. Every other app stays on the default branch. Leave empty for the default branch.</p>
-                  <div class="field-control"><input class="search" aria-label="Branch or pull request for this app" placeholder="Default branch" value={sourceValue(a())} disabled={busyApp()} onInput={e => setSourceValue(a(), e.currentTarget.value)} /><button class="button" disabled={busyApp()} onClick={() => void applyAppSource(a())}>Apply</button><button class="icon-button" disabled={busyApp() || !a().preview} aria-label={`Refresh ${a().name} from its preview source`} title="Refresh the recipe from the current source" onClick={() => reloadAppSource(a())}><Icon name="reload" /></button></div>
-                  <p class="settings-muted">Current source: {a().preview ? <span class="preview-pill">preview ({a().preview})</span> : "default branch"}</p>
-                  <Show when={a().preview}><Show when={panel() !== "restore"}><button class="button" disabled={busyApp()} onClick={() => setPanel("restore")}>Restore to stable</button></Show><Show when={panel() === "restore"}><div class="inline-panel"><p>Reinstall this app from the marketplace's default branch? The preview build is replaced. Settings and user data are preserved.</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={() => { setPanel(null); restoreApp(a()); }}>Restore</button></div></div></Show></Show>
-                </Show>
-              </section>
-            </Show>
-            <section class="preference-section"><h2>Shortcut</h2><p>A desktop shortcut that opens this app in Autark.</p>
-              <button class="button" disabled={busyApp() || !a().installed || shortcutBusy().includes(a().id)} onClick={() => { if (shortcutBusy().includes(a().id)) return; if (mockMode()) { setShortcutDone(ids => [...ids, a().id]); return; } setShortcutBusy(ids => [...ids, a().id]); void run(async () => { try { const next = await api.createShortcut(a().id); setShortcutDone(ids => ids.includes(a().id) ? ids : [...ids, a().id]); return next; } finally { setShortcutBusy(ids => ids.filter(x => x !== a().id)); } }); }}>Create shortcut</button>
-              <Show when={shortcutDone().includes(a().id)}><small class="preference-note">Shortcut created on the desktop. The start options apply every time you open it.</small></Show>
-              <label class="preference-toggle"><input type="checkbox" role="switch" checked={a().prefs.shortcut_autostart} onChange={e => setAppPref(a(), "shortcut_autostart", e.currentTarget.checked)} /><span><b>Also start the app</b></span></label>
-              <label class="preference-toggle"><input type="checkbox" role="switch" checked={a().prefs.shortcut_background} onChange={e => setAppPref(a(), "shortcut_background", e.currentTarget.checked)} /><span><b>Run hidden in the background</b></span></label>
-            </section>
-            <section class="preference-section"><h2>Startup</h2><label class="preference-toggle"><input type="checkbox" role="switch" checked={a().prefs.auto_start} onChange={e => setAppPref(a(), "auto_start", e.currentTarget.checked)} /><span><b>Start when Autark starts</b></span></label></section>
-            <section class="uninstall-section"><h2>Reinstall app</h2><p>Runs the full setup again with the current recipe. Settings and user data are preserved.</p>
-              <Show when={panel() !== "reinstall"}><button class="button" disabled={busyApp() || !a().installed} onClick={() => setPanel("reinstall")}>Reinstall</button></Show>
-              <Show when={panel() === "reinstall"}><div class="inline-panel"><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={() => { setPanel(null); action("reinstall", a()); }}>Reinstall</button></div></div></Show>
-            </section>
-            <section class="uninstall-section"><h2>Uninstall app</h2><p>Remove this app from the launcher. User data and settings are preserved.</p>
-              <Show when={panel() !== "remove"}><button class="button danger-quiet" disabled={busyApp() || !a().installed} onClick={() => { setRemoveText(""); setPanel("remove"); }}>Uninstall</button></Show>
-              <Show when={panel() === "remove"}><div class="inline-panel remove-panel"><label>Type REMOVE<input value={removeText()} onInput={e => setRemoveText(e.currentTarget.value)} /></label><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button danger" disabled={busyApp() || removeText() !== "REMOVE"} onClick={() => { setPanel(null); action("remove", a()); }}>Remove</button></div></div></Show>
-            </section>
-            <footer class="about"><span>Autark <b>v{version()}{import.meta.env.DEV ? " (dev)" : ""}</b></span><span>AGPL-3.0</span><button onClick={() => openUrl("https://github.com/verzly/autark")}>Source</button><button onClick={() => openUrl("https://github.com/verzly/autark-marketplace")}>Marketplace</button></footer>
-          </section>
+        const pageActions = (): AppMainAction[] => [
+          { id: "install", label: () => a().installed ? "Update" : "Install", className: () => `primary ${a().installed && (a().update_available || upstreamNewer(a())) ? "update-ready" : ""}`, visible: () => !a().local, disabled: busyApp, onClick: () => setPanel("install") },
+          { id: "start", label: () => "Start", className: () => "", visible: () => a().can_start, disabled: () => !canStart(), onClick: () => action("start", a()) },
+          { id: "stop", label: () => "Stop", className: () => "", visible: () => a().can_start, disabled: () => !canStop(), onClick: () => action("stop", a()) },
+          { id: "open", label: () => "Open", className: () => "", visible: () => true, disabled: () => busyApp() || !a().url, onClick: () => action("open", a()) },
+          ...a().actions.map(item => ({ id: item.id, label: () => item.label, className: () => "", visible: () => true, disabled: () => busyApp() || !a().installed, onClick: () => item.confirm ? setPanel(`action:${item.id}`) : void run(() => api.runAction(a().id, item.id)) })),
+          { id: "cancel", label: () => "Cancel operation", className: () => "", visible: () => working(p()), disabled: () => false, onClick: () => action("cancel", a()) },
+        ];
+        return <Show when={appSettingsOpen() === a().id} fallback={<AppMainPage id={() => a().id} name={() => a().name}
+          badge={{ src: () => a().icon_data, fallback: () => a().id[0]?.toUpperCase() ?? "", hue: () => hue(a().id) }}
+          version={{ type: "marketplace", appVersion: () => a().version_app, local: () => a().local, recipeVersion: () => a().version_installed, updateAvailable: () => a().update_available, latestRecipeVersion: () => a().version_latest, newerUpstream: () => upstreamNewer(a()), upstreamVersion: () => upstreamVersions()[a().id], preview: () => a().preview }}
+          links={{ homepage: () => a().homepage, license: () => a().license, preview: { visible: () => !!a().preview && a().installed && !a().local, branch: () => a().preview ?? "", disabled: busyApp, appName: () => a().name, onRestore: () => setPanel("restore"), onRefresh: () => reloadAppSource(a()) } }}
+          status={{ phase: p, step: () => a().step, elapsed }}
+          backLabel="Back" onBack={() => { setActive(null); setChooser(false); }} settingsLabel={`${a().name} settings`} onSettings={() => { setPanel(null); setAppSettingsTab("General"); setAppSettingsOpen(a().id); }}
+          actions={pageActions}
+          panels={<><Show when={panel() === "install"}><div class="inline-panel"><p>Setup may install system components through mise and requires network access.</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={confirmInstall}>Confirm</button></div></div></Show><Show when={panel() === "restore"}><div class="inline-panel"><p>Reinstall this app from the marketplace's default branch? The preview build is replaced. Settings and user data are preserved.</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={() => { setPanel(null); restoreApp(a()); }}>Restore</button></div></div></Show><For each={a().actions.filter(item => item.confirm && panel() === `action:${item.id}`)}>{item => <div class="inline-panel"><p>Run {item.label}?</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp() || !a().installed} onClick={() => { setPanel(null); void run(() => api.runAction(a().id, item.id)); }}>Confirm</button></div></div>}</For></>}
+          faq={() => a().faq}
+          metadata={{ type: "marketplace", root: () => state().settings.root, id: () => a().id, appVersion: () => a().version_app, updateAvailable: () => a().update_available, latestVersion: () => a().version_latest, local: () => a().local, recipeVersion: () => a().version_installed, revealPath: () => reveal("app", a().id), checkUpdates: () => void run(() => api.checkUpdates()) }} />}>
+          <AppSettingsPage name={() => a().name} targetId={() => a().id} backLabel={() => "← back to app"} onBack={() => { if (dirty(a()) && !confirm("Unsaved settings changes will be lost. Leave without saving?")) return; setAppSettingsOpen(null); }} tabs={() => appTabs(a())} currentTab={() => currentTab(a())} onTab={tab => setAppSettingsTab(tab)} tabLabel={tabLabel} save={{ visible: () => dirty(a()), disabled: busyApp, onSave: () => saveDraft(a()) }}
+            beforeFields={<Show when={a().settings_schema.some(field => field.key === "pg0_installation_dir")}><section class="preference-section"><h2>pg0 binaries</h2><p class="settings-muted">PostgreSQL payload: {String(a().settings.pg0_installation_dir ?? "unknown")}. The databases stay in this app's folder either way.</p><div class="row-buttons"><button class="button" disabled={busyApp() || dirty(a())} onClick={() => migratePg0(a(), true)}>Move to Autark</button><button class="button" disabled={busyApp() || dirty(a())} onClick={() => migratePg0(a(), false)}>Move into the app</button></div></section></Show>}
+            fields={() => currentTab(a()) === PREVIEW_TAB ? [] : tabFields(a(), currentTab(a()))}
+            renderField={field => <SettingField app={a()} field={field} value={draftValue(a(), field.key)} settings={drafts()[a().id] ?? a().settings} lock={a().settings_locked.find(lock => lock.key === field.key)} setValue={value => setDraftValue(a(), field.key, value)} choose={() => void chooseFolder(a(), field)} />}
+            alternate={{ when: () => currentTab(a()) === PREVIEW_TAB, content: <section class="preference-section"><h2>Preview source</h2><Show when={state().settings.developer_mode} fallback={<><p class="settings-muted">Developer mode is off. Preview sources are hidden.</p><button class="button" onClick={() => { setAppSettingsOpen(null); setSettingsReturn(a().id); setSettingsOpen(true); setSettingsTab("Preview"); }}>Open settings</button></>}><p class="settings-muted">Load only this app's recipe from a branch or pull request. Every other app stays on the default branch. Leave empty for the default branch.</p><div class="field-control"><input class="search" aria-label="Branch or pull request for this app" placeholder="Default branch" value={sourceValue(a())} disabled={busyApp()} onInput={e => setSourceValue(a(), e.currentTarget.value)} /><button class="button" disabled={busyApp()} onClick={() => void applyAppSource(a())}>Apply</button><button class="icon-button" disabled={busyApp() || !a().preview} aria-label={`Refresh ${a().name} from its preview source`} title="Refresh the recipe from the current source" onClick={() => reloadAppSource(a())}><Icon name="reload" /></button></div><p class="settings-muted">Current source: {a().preview ? <span class="preview-pill">preview ({a().preview})</span> : "default branch"}</p><Show when={a().preview}><Show when={panel() !== "restore"}><button class="button" disabled={busyApp()} onClick={() => setPanel("restore")}>Restore to stable</button></Show><Show when={panel() === "restore"}><div class="inline-panel"><p>Reinstall this app from the marketplace's default branch? The preview build is replaced. Settings and user data are preserved.</p><div><button class="button" onClick={() => setPanel(null)}>Cancel</button><button class="button primary" disabled={busyApp()} onClick={() => { setPanel(null); restoreApp(a()); }}>Restore</button></div></div></Show></Show></Show><footer class="metadata"><button title={state().settings.root + "\\apps\\" + a().id} onClick={() => reveal("app", a().id)}>{`${state().settings.root}\\apps\\${a().id}`}</button><span>{a().version_app ? `app ${a().version_app}` : "app version unknown"}</span><code>{a().id}</code></footer></section> }}
+            preferences={{ shortcut: { description: "A desktop shortcut that opens this app in Autark.", disabled: () => !a().installed, busy: () => busyApp() || shortcutBusy().includes(a().id), created: () => shortcutDone().includes(a().id), onCreate: () => { if (shortcutBusy().includes(a().id)) return; if (mockMode()) { setShortcutDone(ids => [...ids, a().id]); return; } setShortcutBusy(ids => [...ids, a().id]); void run(async () => { try { const next = await api.createShortcut(a().id); setShortcutDone(ids => ids.includes(a().id) ? ids : [...ids, a().id]); return next; } finally { setShortcutBusy(ids => ids.filter(x => x !== a().id)); } }); }, autostart: () => a().prefs.shortcut_autostart, setAutostart: value => setAppPref(a(), "shortcut_autostart", value), background: () => a().prefs.shortcut_background, setBackground: value => setAppPref(a(), "shortcut_background", value) }, startup: { checked: () => a().prefs.auto_start, onChange: value => setAppPref(a(), "auto_start", value) } }}
+            reinstall={{ description: "Runs the full setup again with the current recipe. Settings and user data are preserved.", applicable: () => a().installed, disabled: () => busyApp() || !a().installed, onConfirm: () => { setPanel(null); action("reinstall", a()); } }}
+            uninstall={{ description: "Remove this app from the launcher. User data and settings are preserved.", applicable: () => a().installed, disabled: () => busyApp() || !a().installed, onConfirm: () => { setPanel(null); action("remove", a()); } }} />
         </Show>;
       }}</Show>
       </>}>
@@ -913,6 +1106,6 @@ function LogText(props: { line: string }) {
   if (!props.line.startsWith("$ ")) return <>{props.line}</>;
   return <><span class="prompt">$</span>{props.line.slice(1)}</>;
 }
-function Icon(props: { name: "menu" | "gridPlus" | "close" | "min" | "max" | "pencil" | "trash" | "reload" | "download" | "eye" }) {
-  return <svg viewBox="0 0 16 16" aria-hidden="true">{props.name === "menu" ? <path d="M2 4h12M2 8h12M2 12h12" /> : props.name === "trash" ? <><path d="M2.6 4.4h10.8" /><path d="M6.2 4.4V2.9h3.6v1.5" /><path d="M4.1 4.4l.7 8.1a1.1 1.1 0 0 0 1.1 1h4.2a1.1 1.1 0 0 0 1.1-1l.7-8.1" /><path d="M6.7 7v4M9.3 7v4" /></> : props.name === "gridPlus" ? <><rect x="1.5" y="1.5" width="5" height="5" rx="1" /><rect x="9.5" y="1.5" width="5" height="5" rx="1" /><rect x="1.5" y="9.5" width="5" height="5" rx="1" /><path d="M12 9v5m-2.5-2.5h5" /></> : props.name === "close" ? <path d="m4 4 8 8m0-8-8 8" /> : props.name === "min" ? <path d="M3 8h10" /> : props.name === "max" ? <rect x="3.2" y="3.2" width="9.6" height="9.6" rx="1" /> : props.name === "reload" ? <><path d="M13 8a5 5 0 1 1-1.5-3.6" /><path d="M13.2 2.6v3.2h-3.2" /></> : props.name === "download" ? <><path d="M8 2.4v7.2" /><path d="m5 7 3 3 3-3" /><path d="M2.8 12.6h10.4" /></> : props.name === "eye" ? <><path d="M1.6 8s2.4-4.1 6.4-4.1S14.4 8 14.4 8s-2.4 4.1-6.4 4.1S1.6 8 1.6 8Z" /><circle cx="8" cy="8" r="2.1" /></> : <><path d="M10.4 3.1 13 5.7" /><path d="M2.4 13.6 3.3 10 10.6 2.7a1.3 1.3 0 0 1 1.8 0l.9.9a1.3 1.3 0 0 1 0 1.8L6 12.8l-3.6.8Z" /></>}</svg>;
+function Icon(props: { name: "menu" | "gridPlus" | "close" | "min" | "max" | "pencil" | "trash" | "reload" | "download" | "eye" | "back" | "gear" }) {
+  return <svg viewBox="0 0 16 16" aria-hidden="true">{props.name === "menu" ? <path d="M2 4h12M2 8h12M2 12h12" /> : props.name === "trash" ? <><path d="M2.6 4.4h10.8" /><path d="M6.2 4.4V2.9h3.6v1.5" /><path d="M4.1 4.4l.7 8.1a1.1 1.1 0 0 0 1.1 1h4.2a1.1 1.1 0 0 0 1.1-1l.7-8.1" /><path d="M6.7 7v4M9.3 7v4" /></> : props.name === "gridPlus" ? <><rect x="1.5" y="1.5" width="5" height="5" rx="1" /><rect x="9.5" y="1.5" width="5" height="5" rx="1" /><rect x="1.5" y="9.5" width="5" height="5" rx="1" /><path d="M12 9v5m-2.5-2.5h5" /></> : props.name === "close" ? <path d="m4 4 8 8m0-8-8 8" /> : props.name === "min" ? <path d="M3 8h10" /> : props.name === "max" ? <rect x="3.2" y="3.2" width="9.6" height="9.6" rx="1" /> : props.name === "reload" ? <><path d="M13 8a5 5 0 1 1-1.5-3.6" /><path d="M13.2 2.6v3.2h-3.2" /></> : props.name === "download" ? <><path d="M8 2.4v7.2" /><path d="m5 7 3 3 3-3" /><path d="M2.8 12.6h10.4" /></> : props.name === "eye" ? <><path d="M1.6 8s2.4-4.1 6.4-4.1S14.4 8 14.4 8s-2.4 4.1-6.4 4.1S1.6 8 1.6 8Z" /><circle cx="8" cy="8" r="2.1" /></> : props.name === "back" ? <><path d="M13 8H3.2" /><path d="m7 3.8-4.2 4.2L7 12.2" /></> : props.name === "gear" ? <><path d="M6.6 1.7h2.8l.4 1.7c.5.2.9.5 1.3.8l1.7-.5 1.4 2.4-1.2 1.3c.1.4.1.9 0 1.3l1.2 1.3-1.4 2.4-1.7-.5c-.4.3-.8.6-1.3.8l-.4 1.7H6.6l-.4-1.7c-.5-.2-.9-.5-1.3-.8l-1.7.5-1.4-2.4 1.2-1.3a5.3 5.3 0 0 1 0-1.3L1.8 6.1l1.4-2.4 1.7.5c.4-.3.8-.6 1.3-.8z" /><circle cx="8" cy="8" r="2" /></> : <><path d="M10.4 3.1 13 5.7" /><path d="M2.4 13.6 3.3 10 10.6 2.7a1.3 1.3 0 0 1 1.8 0l.9.9a1.3 1.3 0 0 1 0 1.8L6 12.8l-3.6.8Z" /></>}</svg>;
 }

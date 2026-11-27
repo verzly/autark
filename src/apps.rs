@@ -387,6 +387,7 @@ pub struct State {
     pub mise: MiseInfo,
     pub git: tools::GitInfo,
     pub terminal: tools::TerminalInfo,
+    pub pg0: tools::Pg0Info,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -402,6 +403,7 @@ pub struct Core {
     pub mise: MiseInfo,
     pub git: tools::GitInfo,
     pub terminal: tools::TerminalInfo,
+    pub pg0: tools::Pg0Info,
 }
 
 pub struct Shared {
@@ -419,6 +421,7 @@ impl Shared {
             mise: tools::probe(&settings),
             git: tools::probe_git(&settings),
             terminal: tools::probe_terminal(&root),
+            pg0: tools::probe_pg0(&root),
             records: Vec::new(),
             marketplace: MarketplaceInfo {
                 path: marketplace::dir(&root).to_string_lossy().to_string(),
@@ -652,6 +655,12 @@ pub fn wire(shared: &Shared) -> State {
         .cloned()
         .collect();
     let core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
+    let mut pg0 = core.pg0.clone();
+    pg0.used_by = installed_pg0_names(core.records.iter().map(|record| (
+        record.manifest.name.as_str(),
+        record.installed,
+        record.manifest.requirements.pg0,
+    )));
     let busy = !operations.is_empty() || core.marketplace.refreshing;
     State {
         settings: core.settings.clone(),
@@ -664,6 +673,7 @@ pub fn wire(shared: &Shared) -> State {
         mise: core.mise.clone(),
         git: core.git.clone(),
         terminal: core.terminal.clone(),
+        pg0,
     }
 }
 
@@ -709,7 +719,20 @@ pub fn reserve(shared: &Shared, app_id: &str, kind: &str) -> Result<()> {
         .operations
         .lock()
         .unwrap_or_else(|error| error.into_inner());
+    reserve_in(&mut operations, app_id, kind)?;
+    clear_cancel(app_id);
+    Ok(())
+}
+
+fn reserve_in(
+    operations: &mut HashMap<String, Operation>,
+    app_id: &str,
+    kind: &str,
+) -> Result<()> {
     let setup = matches!(kind, "install" | "update");
+    if operations.contains_key("pg0.exe") {
+        bail!("operation_in_progress: a pg0 operation is running");
+    }
     if operations.contains_key(app_id) {
         bail!("operation_in_progress: this app is already busy");
     }
@@ -727,8 +750,108 @@ pub fn reserve(shared: &Shared, app_id: &str, kind: &str) -> Result<()> {
             kind: kind.to_string(),
         },
     );
-    clear_cancel(app_id);
     Ok(())
+}
+
+pub fn pg0_dependents(shared: &Shared) -> Vec<String> {
+    let core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
+    installed_pg0_names(core.records.iter().map(|record| (
+        record.manifest.name.as_str(),
+        record.installed,
+        record.manifest.requirements.pg0,
+    )))
+}
+
+pub fn pg0_removal_preflight(shared: &Shared) -> Result<()> {
+    let names = pg0_dependents(shared);
+    let mut operations = shared.operations.lock().unwrap_or_else(|error| error.into_inner());
+    pg0_preflight_in(&mut operations, &names)
+}
+
+fn installed_pg0_names<'a>(records: impl Iterator<Item = (&'a str, bool, bool)>) -> Vec<String> {
+    let mut names: Vec<String> = records
+        .filter(|(_, installed, requires_pg0)| *installed && *requires_pg0)
+        .map(|(name, _, _)| name.to_string())
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+pub fn reserve_pg0_removal(shared: &Shared) -> Result<()> {
+    let mut operations = shared.operations.lock().unwrap_or_else(|error| error.into_inner());
+    reserve_pg0_in(&mut operations)
+}
+
+fn reserve_pg0_in(operations: &mut HashMap<String, Operation>) -> Result<()> {
+    if !operations.is_empty() {
+        bail!("operation_in_progress: another operation is running");
+    }
+    operations.insert("pg0.exe".to_string(), Operation {
+        app_id: "pg0.exe".to_string(),
+        kind: "pg0_remove".to_string(),
+    });
+    Ok(())
+}
+
+fn pg0_preflight_in(
+    operations: &mut HashMap<String, Operation>,
+    names: &[String],
+) -> Result<()> {
+    if names.is_empty() {
+        return Ok(());
+    }
+    operations.remove("pg0.exe");
+    bail!("operation_in_progress: installed apps use pg0: {}", names.join(", "))
+}
+
+#[cfg(test)]
+mod pg0_tests {
+    use super::*;
+
+    #[test]
+    fn pg0_names_include_installed_stopped_apps_only_and_sort_multiple_names() {
+        let names = installed_pg0_names(
+            [
+                ("Running", true, true),
+                ("Stopped B", true, true),
+                ("Stopped A", true, true),
+                ("Not installed", false, true),
+                ("Private pg0", true, false),
+            ]
+            .into_iter(),
+        );
+        assert_eq!(names, ["Running", "Stopped A", "Stopped B"]);
+    }
+
+    #[test]
+    fn pg0_removal_reservation_conflicts_with_all_recipe_setup_kinds_both_ways() {
+        for kind in ["install", "update", "reinstall", "update_all", "marketplace", "refresh"] {
+            let mut operations = HashMap::new();
+            reserve_pg0_in(&mut operations).unwrap();
+            assert!(reserve_in(&mut operations, "app", kind).is_err(), "{kind}");
+
+            let mut operations = HashMap::new();
+            reserve_in(&mut operations, "app", kind).unwrap();
+            assert!(reserve_pg0_in(&mut operations).is_err(), "{kind}");
+        }
+    }
+
+    #[test]
+    fn pg0_rejected_preflight_releases_and_empty_preflight_keeps_reservation() {
+        let mut operations = HashMap::new();
+        reserve_pg0_in(&mut operations).unwrap();
+        let error = pg0_preflight_in(
+            &mut operations,
+            &["App A".to_string(), "App B".to_string()],
+        );
+        assert!(error.unwrap_err().to_string().contains("App A, App B"));
+        assert!(!operations.contains_key("pg0.exe"));
+
+        reserve_pg0_in(&mut operations).unwrap();
+        pg0_preflight_in(&mut operations, &[]).unwrap();
+        assert!(operations.contains_key("pg0.exe"));
+    }
 }
 
 pub fn release(shared: &Shared, app_id: &str) {
@@ -956,6 +1079,7 @@ pub fn setup(app: &AppHandle, shared: &Shared, id: &str, kind: SetupKind) -> Res
     )?;
     let version = manifest.version.clone();
     mutate(app, shared, id, |record| {
+        record.manifest = manifest.clone();
         record.installed = true;
         record.installed_version = Some(version);
         record.app_version = app_version;
@@ -2059,6 +2183,149 @@ pub fn reload_settings(shared: &Shared, settings: Settings) -> Result<()> {
     Ok(())
 }
 
+/// Copies a directory tree, which fs::copy does not do.
+fn copy_dir(from: &Path, to: &Path) -> Result<()> {
+    fs::create_dir_all(to).with_context(|| format!("cannot create {}", to.display()))?;
+    for entry in fs::read_dir(from).with_context(|| format!("cannot read {}", from.display()))? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &target)?;
+        } else {
+            fs::copy(entry.path(), &target)
+                .with_context(|| format!("cannot copy {}", entry.path().display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// A pg0 installation holds one folder per PostgreSQL version.
+fn pg0_has_installation(dir: &Path) -> bool {
+    fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .any(|entry| entry.path().is_dir())
+        })
+        .unwrap_or(false)
+}
+
+const PG0_MIGRATION_MARKER: &str = ".autark-migration";
+
+fn migration_marker_matches(target: &Path, id: &str) -> bool {
+    fs::read_to_string(target.join(PG0_MIGRATION_MARKER))
+        .is_ok_and(|marker| marker == id)
+}
+
+/// Keeps a path relocatable: root and app prefixes become placeholders.
+fn portable_path(path: &Path, root: &Path, app_dir: &Path) -> String {
+    let text = path.to_string_lossy().to_string();
+    let app = app_dir.to_string_lossy().to_string();
+    let base = root.to_string_lossy().to_string();
+    let rest = |prefix: &str| text.strip_prefix(prefix).map(|rest| rest.replace('\\', "/"));
+    if let Some(rest) = rest(&app) {
+        return format!("{{app}}{rest}");
+    }
+    if let Some(rest) = rest(&base) {
+        return format!("{{root}}{rest}");
+    }
+    text
+}
+
+/// Copies the pg0 PostgreSQL binaries between the app folder and Autark's shared
+/// folder. The instances (the databases) are never touched, and the source stays.
+pub fn migrate_pg0(app: &AppHandle, shared: &Arc<Shared>, id: &str, to_shared: bool) -> Result<()> {
+    // One copy at a time, so two apps cannot publish into the shared folder together.
+    static PG0_MIGRATE: Mutex<()> = Mutex::new(());
+    let _guard = PG0_MIGRATE.lock().unwrap_or_else(|error| error.into_inner());
+    reserve(shared, id, "migrate")?;
+    let result = migrate_pg0_inner(app, shared, id, to_shared);
+    release(shared, id);
+    result
+}
+
+fn migrate_pg0_inner(app: &AppHandle, shared: &Arc<Shared>, id: &str, to_shared: bool) -> Result<()> {
+    let record = find_record(shared, id)?;
+    if !record.installed {
+        bail!("invalid_argument: install the app first");
+    }
+    if matches!(record.phase, Phase::Running | Phase::Starting) {
+        stop_inner(app, shared, id)?;
+    }
+    let settings = shared.plugin_settings();
+    let root = settings.root_path();
+    let app_dir = manifest::app_dir(&root, id);
+    let local = app_dir.join("pg0").join("installation");
+    let shared_dir = tools::pg0_installation(&root);
+    let (source, target) = if to_shared {
+        (local, shared_dir)
+    } else {
+        (shared_dir, local)
+    };
+    if !pg0_has_installation(&source) {
+        bail!("invalid_argument: there is no pg0 installation at {}", source.display());
+    }
+    let marker = target.join(PG0_MIGRATION_MARKER);
+    let resuming = migration_marker_matches(&target, id) && pg0_has_installation(&target);
+    if pg0_has_installation(&target) && !resuming {
+        bail!("invalid_argument: {} already holds a pg0 installation", target.display());
+    }
+    let backup = root.join("backups").join("pg0").join(format!("{id}-{}", now()));
+    if !resuming {
+        log(app, id, format!("copying pg0 binaries to {}", target.display()));
+        copy_dir(&source, &backup)?;
+        let parent = target.parent().context("pg0 target has no parent")?;
+        fs::create_dir_all(parent)?;
+        let staging = parent.join(format!(".pg0-migration-{id}-{}", now()));
+        if let Err(error) = copy_dir(&source, &staging) {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error);
+        }
+        if let Err(error) = fs::write(staging.join(PG0_MIGRATION_MARKER), id) {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error).with_context(|| "cannot write pg0 migration marker");
+        }
+        if let Err(error) = fs::rename(&staging, &target) {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error).with_context(|| format!("cannot publish {}", target.display()));
+        }
+    }
+    let mut values = manifest::load_settings(&app_dir, &record.manifest);
+    values.insert(
+        "pg0_installation_dir".to_string(),
+        Value::String(portable_path(&target, &root, &app_dir)),
+    );
+    manifest::save_settings(&app_dir, &values)?;
+    let _ = fs::remove_file(&marker);
+    mutate(app, shared, id, |record| record.settings = values.clone());
+    log(
+        app,
+        id,
+        format!(
+            "pg0 binaries moved; backup at {}; the old copy stays in place",
+            backup.display()
+        ),
+    );
+    emit_state(app, shared);
+    Ok(())
+}
+
+#[cfg(test)]
+mod pg0_migration_tests {
+    use super::*;
+
+    #[test]
+    fn migration_marker_identifies_retry_and_is_not_an_installation() {
+        let dir = std::env::temp_dir().join(format!("autark-pg0-migration-{}", now()));
+        let target = dir.join("installation");
+        fs::create_dir_all(target.join("16")).unwrap();
+        fs::write(target.join(PG0_MIGRATION_MARKER), "app-id").unwrap();
+        assert!(pg0_has_installation(&target));
+        assert!(migration_marker_matches(&target, "app-id"));
+        assert!(!migration_marker_matches(&target, "other-app"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+}
 pub fn stop_all(shared: &Shared) {
     // The forced terminal exists to outlive Autark: its processes stay up on quit.
     if shared.plugin_settings().force_terminal_operations {

@@ -21,7 +21,7 @@ export interface AppState {
 export interface State {
   settings: Settings; settings_path: string; settings_exists: boolean;
   marketplace: { path: string; url: string; exists: boolean; refreshing: boolean; last_refresh: number | null; source: string; error: { code: string; message: string } | null };
-  apps: AppState[]; operations: { app_id: string; kind: string }[]; busy: boolean; mise: MiseInfo; git: GitInfo; terminal: { bash: string | null; sh: string | null };
+  apps: AppState[]; operations: { app_id: string; kind: string }[]; busy: boolean; mise: MiseInfo; git: GitInfo; terminal: { bash: string | null; sh: string | null }; pg0: { available: boolean; version: string | null; path: string | null; installation: string; source: string | null; used_by: string[] };
 }
 export const mockMode = () => import.meta.env.DEV && !("__TAURI_INTERNALS__" in window);
 const isTauri = () => "__TAURI_INTERNALS__" in window;
@@ -39,6 +39,8 @@ export const api = {
   installMise: () => invoke<State>("install_mise"),
   updateMise: () => invoke<State>("update_mise"),
   installGit: () => invoke<State>("install_git"),
+  installPg0: (force: boolean) => invoke<State>("install_pg0", { force }),
+  uninstallPg0: () => invoke<State>("uninstall_pg0"),
   updateGit: () => invoke<State>("update_git"),
   setBinPath: (enabled: boolean) => invoke<State>("set_bin_path", { enabled }),
   removeBinEntry: (name: string) => invoke<State>("remove_bin_entry", { name }),
@@ -49,6 +51,7 @@ export const api = {
   openAppTab: (app_id: string) => invoke<State>("open_app_tab", { app_id }),
   refreshMarketplace: () => invoke<State>("refresh_marketplace"),
   refreshAppSource: (app_id: string, source?: string) => invoke<State>("refresh_app_source", { app_id, source: source ?? null }),
+  migratePg0: (app_id: string, to_shared: boolean) => invoke<State>("migrate_pg0", { app_id, to_shared }),
   checkUpdates: () => invoke<State>("check_updates"),
   installApp: (app_id: string, approve_effects: boolean) => invoke<State>("install_app", { app_id, approve_effects }),
   updateApp: (app_id: string, approve_effects: boolean) => invoke<State>("update_app", { app_id, approve_effects }),
