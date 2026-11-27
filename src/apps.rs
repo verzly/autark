@@ -109,6 +109,8 @@ pub struct AppState {
     pub update_available: bool,
     pub installed: bool,
     pub phase: Phase,
+    /// A child process is still registered for this app, even if the phase says otherwise.
+    pub running: bool,
     pub settings: Map<String, Value>,
     pub prefs: Prefs,
     pub settings_schema: Vec<AppSetting>,
@@ -278,7 +280,7 @@ impl AppRecord {
             )
     }
 
-    fn wire(&self) -> AppState {
+    fn wire(&self, running: bool) -> AppState {
         let elapsed_secs = self
             .started_at
             .map(|started| now().saturating_sub(started));
@@ -295,6 +297,7 @@ impl AppRecord {
             update_available: self.update_available(),
             installed: self.installed,
             phase: self.phase,
+            running,
             settings: self.settings.clone(),
             prefs: self.prefs.clone(),
             settings_schema: self.manifest.settings.clone(),
@@ -746,6 +749,13 @@ pub fn wire(shared: &Shared) -> State {
         .values()
         .cloned()
         .collect();
+    let live: Vec<String> = shared
+        .children
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .keys()
+        .cloned()
+        .collect();
     let core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
     let mut pg0 = core.pg0.clone();
     pg0.used_by = installed_pg0_names(core.records.iter().map(|record| (
@@ -759,7 +769,7 @@ pub fn wire(shared: &Shared) -> State {
         settings_path: settings::settings_path().to_string_lossy().to_string(),
         settings_exists: settings::settings_path().exists(),
         marketplace: core.marketplace.clone(),
-        apps: core.records.iter().map(|record| record.wire()).collect(),
+        apps: core.records.iter().map(|record| record.wire(live.iter().any(|id| *id == record.manifest.id))).collect(),
         operations,
         busy,
         mise: core.mise.clone(),
@@ -1199,7 +1209,11 @@ pub fn install(app: &AppHandle, shared: &Shared, id: &str, kind: SetupKind) -> R
     if let Err(error) = &result {
         let info = ErrorInfo::from_error(error);
         mutate(app, shared, id, |record| {
-            record.phase = Phase::Failed;
+            // A refused or failed setup must not hide a live app: keep the run phase
+            // so Stop stays available, otherwise the process is unreachable.
+            if !matches!(record.phase, Phase::Running | Phase::Starting) {
+                record.phase = Phase::Failed;
+            }
             record.last_error = Some(info);
             record.step = None;
         });

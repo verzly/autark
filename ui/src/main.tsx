@@ -1020,7 +1020,7 @@ type AppMainAction = { id: string; label: () => string; className: () => string;
         const busyApp = () => appBusy(a());
         const elapsed = () => a().elapsed_secs ?? (a().started_at ? Math.max(0, clock() - a().started_at!) : null);
         const canStart = () => !busyApp() && a().installed && a().can_start && p() === "installed";
-        const canStop = () => !busyApp() && a().can_start && (p() === "running" || p() === "starting");
+        const canStop = () => a().can_start && p() !== "stopping" && (p() === "running" || p() === "starting" || a().running);
         const confirmInstall = () => { setPanel(null); action(a().installed ? "update" : "install", a()); };
         const pageActions = (): AppMainAction[] => [
           { id: "install", label: () => a().installed ? "Update" : "Install", className: () => `primary ${a().installed && (a().update_available || upstreamNewer(a()) || a().source_reinstall_required) ? "update-ready" : ""}`, visible: () => !a().local, disabled: busyApp, onClick: () => setPanel("install"), title: () => a().source_reinstall_required ? "Reinstall required to apply selected source" : a().installed ? "Update" : "Install" },
