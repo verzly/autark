@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Index, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
 import type { AppSetting, AppState, Phase, State } from "./bridge";
 import { api, mockMode } from "./bridge";
@@ -60,6 +60,8 @@ const sentence = (text: string) => text ? text[0].toUpperCase() + text.slice(1) 
 const hue = (id: string) => { let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h) % 360; };
 const duration = (s: number) => `${Math.floor(s / 60)}m ${String(Math.floor(s % 60)).padStart(2, "0")}s`;
 const calver = (version: string | null) => version ? version.match(/^\d+\.\d+\.\d+/)?.[0] ?? version : "version unknown";
+// Rolling window: the oldest line drops when the cap is reached, the rest stay put.
+const LOG_LINES = 500;
 const AUTARK_TAB = "__autark__";
 // Built-in tools with a real logo; everything else falls back to its first letter.
 const builtinLogo = (name: string) => {
@@ -139,7 +141,7 @@ export default function App() {
     api.onState(s => { setState(s); setRequestError(""); }).then(f => offState = f);
     api.onFocus(id => { if (!id) return; setSettingsOpen(false); setAppSettingsOpen(null); setChooser(false); setActive(id); }).then(f => offFocus = f);
     api.onLog(({ app_id, line }) => setBuffers(prev => {
-      const next = [...(prev[app_id] ?? []), line].slice(-500);
+      const next = [...(prev[app_id] ?? []), line].slice(-LOG_LINES);
       // Only an environment-shaped failure gets the reinstall hint; a real app error does not.
       if (/^app exited \(exit code: [1-9]/.test(line) && /(ModuleNotFoundError|No module named|ImportError|FileNotFoundError|WinError 2\b|not recognized as an internal or external command|Access is denied|Permission denied)/i.test(next.join("\n"))) {
         next.push("Tip: a broken install can cause this. Reinstall in the app settings rebuilds it from scratch.");
@@ -741,7 +743,7 @@ type AppMainAction = { id: string; label: () => string; className: () => string;
       <Show when={props.faq().length > 0 && appTab() === "faq"}><section class="faq"><For each={props.faq()}>{item => <details class="faq-item"><summary>{item.question}</summary><p>{item.answer}</p></details>}</For></section></Show>
       <Show when={props.faq().length === 0 || appTab() === "output"}>
         <section class="output-section"><div class="output-wrap"><div class="output" ref={output} onScroll={() => output && setFollow(output.scrollHeight - output.scrollTop - output.clientHeight < 24)}>
-          <Show when={logs().length} fallback={<span class="quiet">Operation output will appear here.</span>}><For each={logEntriesFor(logs())}>{entry => entry.spacer ? <div class="log-spacer" aria-hidden="true" /> : <div class={`log ${lineTone(entry.line)}`}><LogText line={entry.line} /></div>}</For></Show>
+          <Show when={logs().length} fallback={<span class="quiet">Operation output will appear here.</span>}><Index each={logEntriesFor(logs())}>{entry => <Show when={!entry().spacer} fallback={<div class="log-spacer" aria-hidden="true" />}><div class={`log ${lineTone(entry().line)}`}><LogText line={entry().line} /></div></Show>}</Index></Show>
         </div><Show when={!follow() && logs().length}><button class="jump" onClick={() => { if (output) output.scrollTop = output.scrollHeight; setFollow(true); }}>Jump to latest</button></Show></div></section>
       </Show>
       <footer class="metadata">{props.metadata.type === "builtin" ? <><span>{props.metadata.path() ?? "not resolved"}</span><code>{props.metadata.name()}</code></> : <>
