@@ -911,6 +911,7 @@ fn main() {
             refresh_app_source,
             migrate_pg0,
             install_pg0,
+            uninstall_pg0,
             check_updates,
             install_app,
             update_app,
@@ -1015,6 +1016,24 @@ async fn install_pg0(
     let handle = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         crate::tools::install_pg0(&handle, "pg0.exe", &settings, &root, force)
+    })
+    .await
+    .map_err(|error| CmdError::new("internal", error.to_string()))??;
+    {
+        let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
+        core.pg0 = crate::tools::probe_pg0(&after);
+    }
+    Ok(apps::wire(&shared))
+}
+
+#[tauri::command]
+async fn uninstall_pg0(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> CmdResult<State> {
+    let settings = shared.inner().plugin_settings();
+    let root = settings.root_path();
+    let after = root.clone();
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::tools::uninstall_pg0(&handle, "pg0.exe", &settings, &root)
     })
     .await
     .map_err(|error| CmdError::new("internal", error.to_string()))??;

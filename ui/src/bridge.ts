@@ -40,6 +40,7 @@ export const api = {
   updateMise: () => invoke<State>("update_mise"),
   installGit: () => invoke<State>("install_git"),
   installPg0: (force: boolean) => invoke<State>("install_pg0", { force }),
+  uninstallPg0: () => invoke<State>("uninstall_pg0"),
   updateGit: () => invoke<State>("update_git"),
   setBinPath: (enabled: boolean) => invoke<State>("set_bin_path", { enabled }),
   removeBinEntry: (name: string) => invoke<State>("remove_bin_entry", { name }),

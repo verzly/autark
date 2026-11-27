@@ -148,6 +148,19 @@ pub fn install_pg0(
     Ok(())
 }
 
+/// Removes pg0 from Autark's mise and drops the shim. The tool entry stays in
+/// the generated config, so a later install puts it back.
+pub fn uninstall_pg0(app: &AppHandle, id: &str, settings: &Settings, root: &Path) -> Result<()> {
+    if resolve(settings, root).is_some() {
+        let mut command = git_command(settings, root);
+        command.args(["uninstall", "pg0"]);
+        let _ = command.output();
+    }
+    let _ = fs::remove_file(pg0_exe(root));
+    let _ = fs::remove_file(pg0_shim(root));
+    apps::log(app, id, "pg0 removed from Autark".to_string());
+    Ok(())
+}
 fn pg0_shim(root: &Path) -> PathBuf {
     root.join("runtime")
         .join("mise-data")
