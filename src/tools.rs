@@ -117,7 +117,7 @@ pub fn install_pg0(
     force: bool,
 ) -> Result<()> {
     let resolved = resolve(settings, root);
-    if let Some(mise) = resolved {
+    if resolved.is_some() {
         for sub in ["mise-data", "mise-config", "mise-cache", "mise-state", "tmp"] {
             fs::create_dir_all(root.join("runtime").join(sub))?;
         }
@@ -125,7 +125,7 @@ pub fn install_pg0(
             .context("cannot write mise global config")?;
         fs::write(git_postinstall(root), GIT_POSTINSTALL_PS)
             .context("cannot write the git postinstall step")?;
-        let mut command = Command::new(&mise);
+        let mut command = git_command(settings, root);
         command.args(["install"]);
         if force {
             command.arg("--force");
