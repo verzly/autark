@@ -1079,6 +1079,7 @@ pub fn setup(app: &AppHandle, shared: &Shared, id: &str, kind: SetupKind) -> Res
     )?;
     let version = manifest.version.clone();
     mutate(app, shared, id, |record| {
+        record.manifest = manifest.clone();
         record.installed = true;
         record.installed_version = Some(version);
         record.app_version = app_version;

@@ -229,9 +229,9 @@ export default function App() {
       const spacer = index > 0 && (/^\$ /.test(line) || (notice && !previousNotice));
       return [...(spacer ? [{ id: `${index}-spacer`, line: "", spacer: true }] : []), { id: `${index}-line`, line, spacer: false }];
     });
-  const run = async (fn: () => Promise<State | void>) => {
+  const run = async (fn: () => Promise<State | void>, updateActive = true) => {
     setBusy(true); setRequestError("");
-    try { const next = await fn(); if (next) { const current = active(); setState(next); if (!isBuiltin(current) && current !== AUTARK_TAB) setActive(next.settings.active_tab ?? (current === null ? null : AUTARK_TAB)); } return true; }
+    try { const next = await fn(); if (next) { const current = active(); setState(next); if (updateActive && !isBuiltin(current) && current !== AUTARK_TAB) setActive(next.settings.active_tab ?? (current === null ? null : AUTARK_TAB)); } return true; }
     catch (e) { setRequestError(errText(e)); return false; }
     finally { setBusy(false); }
   };
@@ -239,7 +239,7 @@ export default function App() {
     if (id === AUTARK_TAB) { setActive(AUTARK_TAB); setChooser(false); }
     else { setActive(id); setChooser(false); }
     setSettingsOpen(false);
-    if (!mockMode()) void run(() => api.setActiveTab(id === AUTARK_TAB ? null : id));
+    if (!mockMode()) persistActiveTab();
   };
   const openApp = (id: string) => {
     if (openIds().includes(id)) {
@@ -266,6 +266,18 @@ export default function App() {
     if (id === AUTARK_TAB) setAutarkTab(true);
   };
   const persistTab = (chosen: string) => chosen !== AUTARK_TAB && !isBuiltin(chosen) ? chosen : null;
+  const persistedActive = () => {
+    const id = active();
+    return id && id !== AUTARK_TAB && !isBuiltin(id) ? id : null;
+  };
+  let activeTabWrite = Promise.resolve();
+  const persistActiveTab = () => {
+    if (mockMode()) return;
+    const id = persistedActive();
+    activeTabWrite = activeTabWrite.then(() => api.setActiveTab(id)).then(() => {
+      if (persistedActive() !== id) persistActiveTab();
+    }).catch(() => undefined);
+  };
   const closeTab = (id: string, event: MouseEvent) => {
     event.stopPropagation();
     const wasActive = active() === id;
@@ -278,10 +290,9 @@ export default function App() {
     }
     void run(async () => {
       const closed = await api.closeTab(id);
-      if (!wasActive || !chosen) return closed;
-      if (chosen === AUTARK_TAB || isBuiltin(chosen)) { setState(closed); return undefined; }
-      return await api.setActiveTab(chosen);
-    });
+      if (wasActive && active() === chosen) persistActiveTab();
+      return closed;
+    }, false);
   };
   const builtinName = (id: string | null) => (id ?? "").replace(/\.exe$/i, "");
   const isBuiltin = (id: string | null) => builtinTabs().includes(id ?? "");
@@ -302,7 +313,7 @@ export default function App() {
       setState(s => ({ ...s, settings: { ...s.settings, active_tab: persistTab(chosen) } }));
       return;
     }
-    if (persistTab(chosen)) void run(() => api.setActiveTab(chosen));
+    persistActiveTab();
   };
   const closeAutarkTab = (event: MouseEvent) => {
     event.stopPropagation();
@@ -316,7 +327,7 @@ export default function App() {
       setState(s => ({ ...s, settings: { ...s.settings, active_tab: persistTab(chosen) } }));
       return;
     }
-    if (persistTab(chosen)) void run(() => api.setActiveTab(chosen));
+    persistActiveTab();
   };
   // Never leave the window empty: a closed or unknown tab opens the Autark tab again.
   createEffect(() => {
