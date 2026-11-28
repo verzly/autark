@@ -205,6 +205,30 @@ pub fn bin_dir(root: &Path) -> PathBuf {
     root.join("bin")
 }
 
+/// bin refuses to start when `BIN_CONFIG` points at a missing file, so every bin
+/// call gets the same config file. bin also asks for a download directory on its
+/// first run, so a fresh config names Autark's bin folder and never prompts.
+pub fn bin_config(root: &Path) -> PathBuf {
+    root.join("runtime").join("bin-config").join("config.json")
+}
+
+pub fn ensure_bin_config(root: &Path) -> PathBuf {
+    let path = bin_config(root);
+    if !path.is_file() {
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let seed = serde_json::json!({
+            "default_path": bin_dir(root).to_string_lossy(),
+            "bins": {},
+        });
+        if let Err(error) = fs::write(&path, seed.to_string()) {
+            eprintln!("could not create the bin config: {error}");
+        }
+    }
+    path
+}
+
 pub fn local_mise(root: &Path) -> PathBuf {
     let new = bin_dir(root).join("mise.exe");
     if new.exists() { new } else { root.join("runtime").join("bin").join("mise.exe") }
@@ -256,7 +280,10 @@ pub(crate) fn environment(command: &mut Command, root: &Path) {
         .env("MISE_CONFIG_DIR", runtime.join("mise-config"))
         .env("MISE_CACHE_DIR", runtime.join("mise-cache"))
         .env("MISE_STATE_DIR", runtime.join("mise-state"))
-        .env("MISE_TMP_DIR", runtime.join("tmp"));
+        .env("MISE_TMP_DIR", runtime.join("tmp"))
+        // bin keeps one install and one config for every shell, app and tool.
+        .env("BIN_INSTALL_DIR", bin_dir(root))
+        .env("BIN_CONFIG", ensure_bin_config(root));
 }
 
 fn run_version(path: &Path, root: &Path) -> Option<String> {
@@ -377,6 +404,74 @@ pub fn self_update(app: &AppHandle, id: &str, root: &Path) -> Result<()> {
     environment(&mut command, root);
     apps::run_tool_streaming(app, id, "updating mise".to_string(), command)
 }
+
+pub fn bin_exe(root: &Path) -> PathBuf {
+    bin_dir(root).join("bin.exe")
+}
+
+/// Installs the latest bin release into Autark's bin and lets bin register
+/// itself, so `bin update` keeps bin and every installed tool current.
+pub fn install_bin(app: &AppHandle, id: &str, root: &Path) -> Result<()> {
+    fs::create_dir_all(bin_dir(root))?;
+    let target = bin_exe(root);
+    let temp = target.with_extension("new");
+    let script = BIN_DOWNLOAD.replace("@TEMP@", &ps_quote(&temp)).replace("@TARGET@", &ps_quote(&target));
+    let mut command = new_command("powershell");
+    command.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script]);
+    apps::run_tool_streaming(app, id, "downloading bin".to_string(), command)?;
+    if !target.is_file() {
+        bail!("internal: the downloaded bin binary is missing");
+    }
+    let mut command = new_command(&target);
+    command.args(["install", "github.com/marcosnils/bin", "--force"]);
+    environment(&mut command, root);
+    let result = apps::run_tool_streaming(app, id, "registering bin".to_string(), command);
+    // Replacing the running bin leaves its previous file behind on Windows.
+    let _ = fs::remove_file(bin_dir(root).join(".bin.exe.old"));
+    result
+}
+
+/// Runs bin's own updater. Without a name every tool is updated, which also
+/// covers bin itself once it is registered.
+pub fn update_bin(app: &AppHandle, id: &str, root: &Path, name: Option<&str>) -> Result<()> {
+    let path = bin_exe(root);
+    if !path.is_file() {
+        bail!("invalid_argument: bin is not installed");
+    }
+    let mut command = new_command(&path);
+    command.arg("update");
+    if let Some(name) = name {
+        command.arg(name);
+    }
+    environment(&mut command, root);
+    let label = name.map(|name| format!("updating {name} with bin")).unwrap_or_else(|| "updating tools with bin".to_string());
+    apps::run_tool_streaming(app, id, label, command)
+}
+
+fn ps_quote(path: &Path) -> String {
+    path.to_string_lossy().replace('\'', "''")
+}
+
+/// Latest bin release, checksum checked before the temp file replaces bin.exe.
+const BIN_DOWNLOAD: &str = r#"$ErrorActionPreference='Stop'
+$headers=@{'User-Agent'='autark'}
+$release=Invoke-RestMethod -Uri 'https://api.github.com/repos/marcosnils/bin/releases/latest' -Headers $headers
+$arch=if ($env:PROCESSOR_ARCHITECTURE -like 'ARM64') { 'arm64' } else { 'amd64' }
+$asset=$release.assets | Where-Object { $_.name -like ('*windows_' + $arch + '.exe') } | Select-Object -First 1
+if (-not $asset) { throw ('no windows_' + $arch + ' asset in the latest bin release') }
+Invoke-WebRequest -Uri $asset.browser_download_url -OutFile '@TEMP@' -UseBasicParsing
+$sums=$release.assets | Where-Object { $_.name -eq 'checksums.txt' } | Select-Object -First 1
+if ($sums) {
+  $text=(Invoke-WebRequest -Uri $sums.browser_download_url -UseBasicParsing).Content
+  $line=($text -split "`n" | Where-Object { $_ -match [regex]::Escape($asset.name) } | Select-Object -First 1)
+  if ($line) {
+    $expected=($line -split '\s+')[0].ToLower()
+    $actual=(Get-FileHash -Algorithm SHA256 '@TEMP@').Hash.ToLower()
+    if ($expected -ne $actual) { throw 'bin checksum mismatch' }
+  }
+}
+Move-Item -Force '@TEMP@' '@TARGET@'
+Write-Output ('bin ' + $release.tag_name + ' installed')"#;
 
 /// Autark's mise global config. git lives here, so every mise run of Autark sees it.
 pub fn global_config(root: &Path) -> PathBuf {

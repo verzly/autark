@@ -11,7 +11,7 @@ apps that are described by the marketplace (see `docs/marketplace-v1.md`). Autar
 <root>/marketplace/                  git clone of verzly/autark-marketplace
 <root>/local-apps/<key>/             user-supplied app.json and optional icon
 <root>/runtime/mise-data|mise-config|mise-cache|mise-state|tmp|bin
-<root>/bin/                         Autark-owned portable binaries, including mise.exe
+<root>/bin/                         Autark-owned portable binaries, including mise.exe and bin.exe
 <root>/apps/<id>/app.json            manifest snapshot copied at install time
 <root>/apps/<id>/installed.json      { "version": "recipe", "app_version": "real", "installed_at": 0 }
 <root>/apps/<id>/settings.json       per-app user settings
@@ -43,11 +43,14 @@ When an app runs, its environment is scoped like this:
 | `MISE_CONFIG_DIR` | `{root}/runtime/mise-config` |
 | `MISE_CACHE_DIR` | `{root}/runtime/mise-cache` |
 | `MISE_STATE_DIR` | `{root}/runtime/mise-state` |
+| `BIN_INSTALL_DIR` | `{root}/bin` |
+| `BIN_CONFIG` | `{root}/runtime/bin-config/config.json` |
 | `UV_CACHE_DIR` | `{app}/runtime/uv-cache` |
 
 The parent environment is cleared first and only a whitelist is passed through (PATH, SystemRoot, WINDIR,
 COMSPEC, PATHEXT, SystemDrive, ProgramData, ProgramFiles(x86), NUMBER_OF_PROCESSORS, USERNAME, TEMP/TMP
-sources). Manifest `env` entries are applied last. `root` is configurable and lives in settings.
+sources). `{root}/bin` is prepended to PATH, so setup steps and launched apps call bin and the binaries it
+installs by name. Manifest `env` entries are applied last. `root` is configurable and lives in settings.
 
 ## crates
 

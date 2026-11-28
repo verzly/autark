@@ -1446,7 +1446,19 @@ fn apply_environment(
         .env("MISE_CONFIG_DIR", runtime.join("mise-config"))
         .env("MISE_CACHE_DIR", runtime.join("mise-cache"))
         .env("MISE_STATE_DIR", runtime.join("mise-state"))
-        .env("MISE_TMP_DIR", runtime.join("tmp"));
+        .env("MISE_TMP_DIR", runtime.join("tmp"))
+        // bin keeps one install and one config for every shell, app and tool.
+        .env("BIN_INSTALL_DIR", crate::tools::bin_dir(root))
+        .env("BIN_CONFIG", crate::tools::ensure_bin_config(root));
+    // Autark's bin folder comes first, so recipes and the apps they launch call
+    // the tools installed there by name, the way the terminal already does.
+    let mut path_entries = vec![crate::tools::bin_dir(root)];
+    path_entries.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    if let Ok(path) = std::env::join_paths(path_entries) {
+        command.env("PATH", path);
+    }
     // A var listed in `env_keep_parent` keeps the parent value when the machine
     // defines that exact name, so a machine-wide HF_HOME is never shadowed while
     // the other listed names still come from the manifest.

@@ -111,6 +111,8 @@ export default function App() {
     if (!entries.some(entry => entry.name.toLowerCase() === "git.exe")) entries.push({ name: "git.exe", path: state().git.path ?? "", version: state().git.version, size: 0 });
     // pg0 ships inside an app Python environment until it is copied into Autark bin.
     if (!entries.some(entry => entry.name.toLowerCase() === "pg0.exe")) entries.push({ name: "pg0.exe", path: state().pg0.path ?? "", version: state().pg0.version, size: 0 });
+    // bin is installed by Autark and then updates itself and every tool it manages.
+    if (!entries.some(entry => entry.name.toLowerCase() === "bin.exe")) entries.push({ name: "bin.exe", path: "", version: null, size: 0 });
     // The detail page reads state().pg0.version, so a bin copy must not report a different one.
     return entries.map(entry => entry.name.toLowerCase() === "pg0.exe" ? { ...entry, version: state().pg0.version } : entry)
       .filter(entry => `${entry.name} ${entry.version ?? ""}`.toLowerCase().includes(search().toLowerCase()));
@@ -190,6 +192,25 @@ export default function App() {
     if (name === "git.exe") return state().git.installed;
     if (name === "pg0.exe") return state().pg0.available && !!state().pg0.path?.startsWith(state().settings.root);
     return state().mise.bin.some(entry => entry.name.toLowerCase() === name);
+  };
+  const binAvailable = () => state().mise.bin.some(entry => entry.name.toLowerCase() === "bin.exe");
+  const binEntry = (name: string) => state().mise.bin.find(entry => entry.name.toLowerCase() === name.toLowerCase());
+  const builtinVersion = (id: string | null) => {
+    const name = id?.toLowerCase();
+    if (!name) return null;
+    if (name === "git.exe") return state().git.version;
+    if (name === "pg0.exe") return state().pg0.version;
+    if (name === "mise.exe") return state().mise.version;
+    return binEntry(name)?.version ?? null;
+  };
+  const builtinOwnership = (id: string | null) => {
+    const name = id?.toLowerCase();
+    if (!name) return "Not installed";
+    if (name === "git.exe") return state().git.installed ? "By Autark" : state().git.external?.from_mise ? "By mise" : state().git.external ? "By your machine" : "Not installed";
+    if (name === "pg0.exe") return state().pg0.available ? "By Autark" : "Not installed";
+    if (name === "mise.exe") return state().mise.source === "local" ? "By Autark" : "By your machine";
+    if (name === "bin.exe") return binAvailable() ? "By Autark" : "Not installed";
+    return binAvailable() ? "By bin" : "Not installed";
   };
   const localSelected = () => {
     const selected = state().mise.path;
@@ -957,18 +978,23 @@ type AppMainAction = { id: string; label: () => string; className: () => string;
                   const title = entry.name.replace(/\.exe$/i, "");
                   const isGit = entry.name.toLowerCase() === "git.exe";
                   const isPg0 = entry.name.toLowerCase() === "pg0.exe";
+                  const isBin = entry.name.toLowerCase() === "bin.exe";
+                  const binAvailable = state().mise.bin.some(item => item.name.toLowerCase() === "bin.exe");
+                  const byBin = binAvailable && !isGit && !isPg0 && !isBin && entry.name.toLowerCase() !== "mise.exe";
                   const git = state().git;
                   const systemMise = isResolvedMise(entry.name);
-                  const tag = isGit ? (git.installed ? "By Autark" : git.external?.from_mise ? "By mise" : git.external ? "By your machine" : "Not installed") : isPg0 ? (state().pg0.available && state().pg0.path?.startsWith(state().settings.root) ? "By Autark" : "Not installed") : systemMise ? "Not installed" : "By Autark";
-                  const external = isGit ? git.external?.path ?? null : isPg0 ? state().pg0.source ?? state().pg0.path ?? null : state().mise.path;
+                  const tag = isGit ? (git.installed ? "By Autark" : git.external?.from_mise ? "By mise" : git.external ? "By your machine" : "Not installed") : isPg0 ? (state().pg0.available && state().pg0.path?.startsWith(state().settings.root) ? "By Autark" : "Not installed") : isBin ? (binAvailable ? "By Autark" : "Not installed") : byBin ? "By bin" : systemMise ? "Not installed" : "By Autark";
+                  const external = isGit ? git.external?.path ?? null : isPg0 ? state().pg0.source ?? state().pg0.path ?? null : entry.path || null;
                   return <article role="listitem" class={`market-card ${selected() === i() ? "market-selected" : ""}`} onMouseEnter={() => setSelected(i())}>
                     <div class="market-card-head"><span class="badge large" style={{ "--hue": hue(entry.name) }}><Show when={builtinLogo(entry.name)} fallback={title[0]?.toUpperCase()}>{src => <img src={src()} alt="" />}</Show></span><div><h2>{title}</h2><code>{entry.name}</code></div><span class="local-tag">{tag}</span></div>
-                    <p class="market-description">{isGit ? "Installed once by Autark's mise, next to the rest of its runtime." : isPg0 ? "Installed by Autark's mise. Apps share the payload only after you move it into Autark." : systemMise ? "Autark runs every app through this mise." : "Managed in Autark's own bin folder."}</p>
-                    <Show when={isGit ? git.installed : isPg0 ? state().pg0.available : !systemMise}><div class="market-versions"><span>Version <b>{entry.version ?? "unknown"}</b></span><span>By <b>{isGit ? "Autark" : isPg0 ? "Autark" : state().mise.source}</b></span></div>
-                      <div class="market-links"><span>{isGit ? git.path : isPg0 ? state().pg0.path ?? "not resolved" : state().mise.bin_path}</span></div></Show>
+                    <p class="market-description">{isGit ? "Installed once by Autark's mise, next to the rest of its runtime." : isPg0 ? "Installed by Autark's mise. Apps share the payload only after you move it into Autark." : isBin ? "Installs any GitHub release into Autark's bin and updates the tools it manages." : byBin ? "Installed and updated by bin from its GitHub releases." : systemMise ? "Autark runs every app through this mise." : "Managed in Autark's own bin folder."}</p>
+                    <Show when={isGit ? git.installed : isPg0 ? state().pg0.available : isBin ? binAvailable : byBin || !systemMise}><div class="market-versions"><span>Version <b>{entry.version ?? "unknown"}</b></span><span>By <b>{isGit ? "Autark" : isPg0 ? "Autark" : isBin ? "Autark" : byBin ? "bin" : state().mise.source}</b></span></div>
+                      <div class="market-links"><span>{isGit ? git.path : isPg0 ? state().pg0.path ?? "not resolved" : entry.path || state().mise.bin_path}</span></div></Show>
                     <div class="market-actions">
                       <Show when={!systemMise}><button class="button market-action icon-only" aria-label={`Show ${title}`} title="Show" onClick={() => openBuiltin(entry.name)}><Icon name="eye" /></button></Show>
-                      <Show when={!isGit && !isPg0 && !systemMise}><button class="button primary market-action" disabled={busy()} onClick={() => { openBuiltin(entry.name); void run(() => api.updateMise()); }}>Update</button></Show>
+                      <Show when={entry.name.toLowerCase() === "mise.exe" && !systemMise}><button class="button primary market-action" disabled={busy()} onClick={() => { openBuiltin(entry.name); void run(() => api.updateMise()); }}>Update</button></Show>
+                      <Show when={isBin}><Show when={binAvailable} fallback={<button class="button primary market-action" disabled={busy()} title="Download bin into Autark's bin folder" onClick={() => { openBuiltin(entry.name); void run(() => api.installBin()); }}>Install</button>}><button class="button primary market-action" disabled={busy()} title="Run bin update for bin and the tools it manages" onClick={() => { openBuiltin(entry.name); void run(() => api.updateBin()); }}>Update</button></Show></Show>
+                      <Show when={byBin}><button class="button primary market-action" disabled={busy()} title={`Run bin update ${title.toLowerCase()}`} onClick={() => { openBuiltin(entry.name); void run(() => api.updateBin(title)); }}>Update</button></Show>
                       <Show when={isGit}><Show when={git.installed} fallback={<button class="button primary market-action" disabled={busy() || !state().mise.available} onClick={() => { openBuiltin(entry.name); void run(() => api.installGit()); }}>Install</button>}><button class="button primary market-action" disabled={busy()} onClick={() => { openBuiltin(entry.name); void run(() => api.updateGit()); }}>Update</button></Show></Show>
                       <Show when={isPg0}><Show when={state().pg0.available} fallback={<button class="button primary market-action" disabled={busy()} title="Install pg0 with Autark's mise" onClick={() => { openBuiltin(entry.name); void run(() => api.installPg0(false)); }}>Install</button>}><button class="button primary market-action" disabled={busy()} title="Install the latest pg0 with Autark's mise" onClick={() => { openBuiltin(entry.name); void run(() => api.installPg0(true)); }}>Update</button></Show></Show>
                       <Show when={!systemMise && !isGit && !isPg0}>
@@ -993,7 +1019,7 @@ type AppMainAction = { id: string; label: () => string; className: () => string;
         <Show when={!builtinSettings()}>
           <AppMainPage id={() => active() ?? ""} name={() => builtinName(active())}
             badge={{ src: () => builtinLogo(active() ?? ""), fallback: () => builtinName(active())[0]?.toUpperCase() ?? "", hue: () => hue(active() ?? "") }}
-            version={{ type: "builtin", version: () => active()?.toLowerCase() === "git.exe" ? state().git.version : active()?.toLowerCase() === "pg0.exe" ? state().pg0.version : state().mise.version, ownership: () => active()?.toLowerCase() === "git.exe" ? (state().git.installed ? "By Autark" : state().git.external?.from_mise ? "By mise" : state().git.external ? "By your machine" : "Not installed") : active()?.toLowerCase() === "pg0.exe" ? (state().pg0.available ? "By Autark" : "Not installed") : state().mise.source === "local" ? "By Autark" : "By your machine" }}
+            version={{ type: "builtin", version: () => builtinVersion(active()), ownership: () => builtinOwnership(active()) }}
             backLabel="Back to built-in apps" onBack={() => { setMarketFilter("builtin"); showChooser(); }} settingsLabel="Settings" onSettings={() => { setBuiltinSettingsTab("General"); setBuiltinSettings(true); }}
             actions={() => {
               const id = active()?.toLowerCase();
@@ -1005,9 +1031,12 @@ type AppMainAction = { id: string; label: () => string; className: () => string;
                 { id: "git-update", label: () => "Update", className: () => "primary", visible: () => id === "git.exe" && state().git.installed, disabled: busy, onClick: () => void run(() => api.updateGit()) },
                 { id: "pg0-install", label: () => "Install", className: () => "primary", visible: () => id === "pg0.exe" && !state().pg0.available, disabled: busy, onClick: () => void run(() => api.installPg0(false)) },
                 { id: "pg0-update", label: () => "Update", className: () => "primary", visible: () => id === "pg0.exe" && state().pg0.available, disabled: busy, onClick: () => void run(() => api.installPg0(true)) },
+                { id: "bin-install", label: () => "Install", className: () => "primary", visible: () => id === "bin.exe" && !state().mise.bin.some(entry => entry.name.toLowerCase() === "bin.exe"), disabled: busy, onClick: () => void run(() => api.installBin()) },
+                { id: "bin-update", label: () => "Update", className: () => "primary", visible: () => id === "bin.exe" && state().mise.bin.some(entry => entry.name.toLowerCase() === "bin.exe"), disabled: busy, onClick: () => void run(() => api.updateBin()) },
+                { id: "bin-managed-update", label: () => "Update with bin", className: () => "primary", visible: () => !!id && !["mise.exe", "git.exe", "pg0.exe", "bin.exe"].includes(id) && state().mise.bin.some(entry => entry.name.toLowerCase() === "bin.exe"), disabled: busy, onClick: () => void run(() => api.updateBin((active() ?? "").replace(/\.exe$/i, ""))) },
               ];
             }}
-            faq={() => []} metadata={{ type: "builtin", path: () => active()?.toLowerCase() === "git.exe" ? state().git.path ?? "not resolved" : active()?.toLowerCase() === "pg0.exe" ? state().pg0.path ?? "not resolved" : state().mise.path ?? "not resolved", name: () => builtinName(active()) }} />
+            faq={() => []} metadata={{ type: "builtin", path: () => active()?.toLowerCase() === "git.exe" ? state().git.path ?? "not resolved" : active()?.toLowerCase() === "pg0.exe" ? state().pg0.path ?? "not resolved" : binEntry(active() ?? "")?.path || state().mise.path || state().mise.bin_path, name: () => builtinName(active()) }} />
         </Show>
       </Show>
       <Show when={!chooser() && !settingsOpen() && active() === AUTARK_TAB}><section class="empty-state"><div class="empty-mark">autark</div>
@@ -1093,6 +1122,47 @@ type AppMainAction = { id: string; label: () => string; className: () => string;
   </div>;
 }
 
+type FolderEntry = { path: string; distros: string[] };
+
+function FolderListField(props: { field: AppSetting; value: unknown; disabled: boolean; setValue: (v: unknown) => void }) {
+  const [distros, setDistros] = createSignal<string[]>([]);
+  const [failed, setFailed] = createSignal(false);
+  onMount(() => {
+    if (mockMode()) { setDistros(["Ubuntu", "Debian"]); return; }
+    void api.wslDistros().then(setDistros).catch(() => setFailed(true));
+  });
+  const entries = (): FolderEntry[] => Array.isArray(props.value) ? props.value as FolderEntry[] : [];
+  const write = (next: FolderEntry[]) => props.setValue(next);
+  const add = async () => {
+    let picked: string | null = null;
+    try { picked = mockMode() ? `C:\\dev\\project-${entries().length + 1}` : await api.pickDirectory("folder"); }
+    catch { setFailed(true); return; }
+    if (!picked || entries().some(entry => entry.path.toLowerCase() === picked!.toLowerCase())) return;
+    write([...entries(), { path: picked, distros: [] }]);
+  };
+  const toggle = (index: number, name: string) => write(entries().map((entry, i) => {
+    if (i !== index) return entry;
+    const currently = name === "all" ? ["all"] : entry.distros.filter(distro => distro !== "all");
+    const next = name === "all" ? ["all"] : currently.includes(name) ? currently.filter(distro => distro !== name) : [...currently, name];
+    return { ...entry, distros: next };
+  }));
+  return <label class="field"><span>{props.field.label}</span>
+    <div class="folder-list">
+      <For each={entries()}>{(entry, i) => <div class="folder-row">
+        <div class="folder-row-head"><code>{entry.path}</code><button class="button" disabled={props.disabled} onClick={() => write(entries().filter((_, j) => j !== i()))}>Remove</button></div>
+        <div class="folder-distros">
+          <button class="button" aria-pressed={entry.distros.includes("all")} disabled={props.disabled} onClick={() => toggle(i(), "all")}>All</button>
+          <For each={distros()}>{name => <button class="button" aria-pressed={entry.distros.includes(name)} disabled={props.disabled} onClick={() => toggle(i(), name)}>{name}</button>}</For>
+        </div>
+      </div>}</For>
+      <div class="row-buttons"><button class="button" disabled={props.disabled} onClick={() => void add()}>Add folder</button></div>
+      <Show when={entries().length === 0}><small>No folder yet. Add one and pick the targets it runs on.</small></Show>
+      <Show when={failed() || (distros().length === 0 && !mockMode())}><small class="setting-lock-note">No WSL distro was found. "All" still runs on every distro WSL reports at start.</small></Show>
+      <Show when={props.field.help}><small>{props.field.help}</small></Show>
+    </div>
+  </label>;
+}
+
 function SettingField(props: { app: AppState; field: AppSetting; value: unknown; settings: Record<string, unknown>; lock?: AppState["settings_locked"][number]; setValue: (v: unknown) => void; choose: () => void }) {
   const [probe, setProbe] = createSignal<{ ok: boolean; text: string } | null>(null);
   const [probing, setProbing] = createSignal(false);
@@ -1112,6 +1182,7 @@ function SettingField(props: { app: AppState; field: AppSetting; value: unknown;
     finally { setProbing(false); }
   };
   const value = () => props.lock ? props.lock.value : String(props.value ?? props.field.default ?? "");
+  if (props.field.kind === "folders") return <FolderListField field={props.field} value={props.value ?? props.field.default} disabled={Boolean(props.lock)} setValue={props.setValue} />;
   return <label class="field"><span>{props.field.label}</span><Show when={props.field.kind === "boolean"} fallback={
     <><div class="field-control"><input classList={{ locked: Boolean(props.lock) }} disabled={Boolean(props.lock)} type={props.field.kind === "number" || props.field.kind === "port" ? "number" : "text"} value={value()} onInput={e => { setProbe(null); props.setValue(props.field.kind === "number" || props.field.kind === "port" ? Number(e.currentTarget.value) : e.currentTarget.value); }} /><Show when={props.field.kind === "path" || props.field.kind === "file"}><button class="button" disabled={Boolean(props.lock)} onClick={props.choose}>Choose</button></Show><Show when={check}><button class="button" disabled={Boolean(props.lock) || probing()} onClick={() => void runProbe()}>{check === "endpoint" ? "Test" : "Check"}</button></Show><Show when={check === "model"}><button class="button" disabled={Boolean(props.lock) || probing()} onClick={() => void runModels()}>Models</button></Show><Show when={probe()}>{result => <span class={`probe-result ${result().ok ? "ok" : "fail"}`} title={result().text}>{result().ok ? "OK" : "FAIL"}: {result().text}</span>}</Show></div><Show when={models()}>{ids => <div class="model-list">{ids().map(id => <button class="button" onClick={() => props.setValue(id)}>{id}</button>)}</div>}</Show></>
   }><input type="checkbox" role="switch" disabled={Boolean(props.lock)} checked={props.lock ? props.lock.value.toLowerCase() === "true" : Boolean(props.value ?? props.field.default)} onChange={e => props.setValue(e.currentTarget.checked)} /></Show><Show when={props.field.kind === "path"}><small>{"{app}"} is this app's folder, for example {"{app}/huggingface"}. Paths inside it are stored that way.</small></Show><Show when={props.lock}><small class="setting-lock-note">Set by the system environment ({props.lock?.var}). Autark cannot change it.</small></Show><Show when={props.field.help}><small>{props.field.help}</small></Show></label>;

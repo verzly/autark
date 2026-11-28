@@ -913,6 +913,9 @@ fn main() {
             refresh_app_source,
             migrate_pg0,
             install_pg0,
+            install_bin,
+            update_bin,
+            wsl_distros,
             uninstall_pg0,
             check_updates,
             install_app,
@@ -1064,6 +1067,66 @@ async fn install_pg0(
     apps::release(&shared, "pg0.exe");
     result?;
     Ok(apps::wire(&shared))
+}
+
+#[tauri::command]
+async fn install_bin(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> CmdResult<State> {
+    apps::reserve(&shared, "bin.exe", "install")?;
+    let root = shared.inner().plugin_settings().root_path();
+    let handle = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        crate::tools::install_bin(&handle, "bin.exe", &root)
+    })
+    .await
+    .map_err(|error| CmdError::new("internal", error.to_string()))
+    .and_then(|result| result.map_err(CmdError::from));
+    apps::release(&shared, "bin.exe");
+    result?;
+    Ok(apps::wire(&shared))
+}
+
+#[tauri::command]
+async fn update_bin(
+    app: AppHandle,
+    shared: TauriState<'_, Arc<Shared>>,
+    name: Option<String>,
+) -> CmdResult<State> {
+    apps::reserve(&shared, "bin.exe", "update")?;
+    let root = shared.inner().plugin_settings().root_path();
+    let handle = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        crate::tools::update_bin(&handle, "bin.exe", &root, name.as_deref())
+    })
+    .await
+    .map_err(|error| CmdError::new("internal", error.to_string()))
+    .and_then(|result| result.map_err(CmdError::from));
+    apps::release(&shared, "bin.exe");
+    result?;
+    Ok(apps::wire(&shared))
+}
+
+/// The WSL distros the settings picker offers. Never starts WSL.
+#[tauri::command]
+fn wsl_distros() -> Vec<String> {
+    let output = match crate::tools::new_command("wsl.exe").args(["-l", "-q"]).output() {
+        Ok(output) if output.status.success() => output,
+        _ => return Vec::new(),
+    };
+    let bytes = output.stdout;
+    // wsl.exe writes UTF-16LE; a UTF-8 payload from a wrapper has no NUL bytes.
+    let text = if bytes.contains(&0) && bytes.len() % 2 == 0 {
+        let units: Vec<u16> = bytes.chunks_exact(2).map(|pair| u16::from_le_bytes([pair[0], pair[1]])).collect();
+        String::from_utf16_lossy(&units)
+    } else {
+        String::from_utf8_lossy(&bytes).to_string()
+    };
+    let mut distros: Vec<String> = Vec::new();
+    for name in text.split(['\0', '\r', '\n']).map(str::trim).filter(|name| !name.is_empty()) {
+        if !distros.iter().any(|seen| seen.eq_ignore_ascii_case(name)) {
+            distros.push(name.to_string());
+        }
+    }
+    distros
 }
 
 #[tauri::command]

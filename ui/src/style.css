@@ -162,6 +162,12 @@ a:hover,a:visited:hover{color:#fff;text-decoration-color:#8a8a8a}
 /* icon button and the reload button share one row on the right of the marketplace setting */
 .row-buttons{display:flex;align-items:center;gap:8px;margin-top:5px}
 .row-buttons .button{margin-top:0}
+.folder-list{display:flex;flex-direction:column;gap:8px}
+.folder-row{display:flex;flex-direction:column;gap:6px;padding:9px 10px;border:1px solid #2a2a2a;border-radius:6px;background:#121212}
+.folder-row-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.folder-row-head code{overflow:hidden;color:#cfcfcf;font:11px var(--mono);text-overflow:ellipsis;white-space:nowrap}
+.folder-distros{display:flex;flex-wrap:wrap;gap:6px}
+.folder-distros .button[aria-pressed=true]{border-color:#647c9b;background:#233043;color:#eee}
 
 /* loading screens lock the page behind them */
 body.is-loading{overflow:hidden}
