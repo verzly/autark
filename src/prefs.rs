@@ -8,6 +8,7 @@ pub struct Prefs {
     pub auto_start: bool,
     pub shortcut_autostart: bool,
     pub shortcut_background: bool,
+    pub source_ref: Option<String>,
 }
 
 pub fn load(app_dir: &Path) -> Prefs {

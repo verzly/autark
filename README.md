@@ -51,9 +51,13 @@ pnpm --dir ui build
 cargo build --release
 ```
 
-For development use `scripts/dev.ps1`. It stops a leftover `autark.exe` first:
-a running instance locks `target\debug\autark.exe` and cargo then fails with
-`failed to remove file ... (os error 5)`.
+For development use `scripts/dev.ps1`. It stops a leftover debug `autark.exe`
+first: a running debug build locks `target\debug\autark.exe` and cargo then fails
+with `failed to remove file ... (os error 5)`. A release Autark keeps running.
+
+The dev build uses the `com.datarose.autark-dev` identifier from
+`tauri.dev.conf.json`, so its window, WebView profile and single-instance lock
+are separate from the release app and both can run at the same time.
 
 The binary lands in `target\release\autark.exe`. Releases are built by
 `.github/workflows/release.yml`; run `scripts/calver.ps1` locally if you need to
