@@ -5,7 +5,8 @@ export interface DetectedMise { path: string; version: string | null }
 export interface MiseInfo { available: boolean; source: string; path: string | null; version: string | null; local_path: string; bin_path: string; bin_in_path: boolean; bin: BinEntry[]; detected: DetectedMise[]; force_local: boolean }
 export interface GitExternal { path: string; version: string | null; from_mise: boolean }
 export interface GitInfo { installed: boolean; version: string | null; path: string | null; external: GitExternal | null }
-export interface AppSetting { key: string; label: string; kind: "text" | "number" | "port" | "boolean" | "path" | "file"; default: unknown; help?: string | null; group?: string | null }
+export interface BinInfo { available: boolean; installed: boolean; external: boolean; path: string | null; local_path: string; install_dir: string; detected: DetectedMise[] }
+export interface AppSetting { key: string; label: string; kind: "text" | "number" | "port" | "boolean" | "path" | "file" | "folders"; default: unknown; help?: string | null; group?: string | null }
 export interface AppAction { id: string; label: string; confirm: boolean }
 export interface SettingsLock { key: string; var: string; value: string }
 export interface AppPrefs { auto_start: boolean; shortcut_autostart: boolean; shortcut_background: boolean; source_ref: string | null }
@@ -21,7 +22,7 @@ export interface AppState {
 export interface State {
   settings: Settings; settings_path: string; settings_exists: boolean;
   marketplace: { path: string; url: string; exists: boolean; refreshing: boolean; last_refresh: number | null; source: string; error: { code: string; message: string } | null };
-  apps: AppState[]; operations: { app_id: string; kind: string }[]; busy: boolean; mise: MiseInfo; git: GitInfo; terminal: { bash: string | null; sh: string | null }; pg0: { available: boolean; version: string | null; path: string | null; installation: string; source: string | null; used_by: string[] };
+  apps: AppState[]; operations: { app_id: string; kind: string }[]; busy: boolean; mise: MiseInfo; bin: BinInfo; git: GitInfo; terminal: { bash: string | null; sh: string | null }; pg0: { available: boolean; version: string | null; path: string | null; installation: string; source: string | null; used_by: string[] };
 }
 export const mockMode = () => import.meta.env.DEV && !("__TAURI_INTERNALS__" in window);
 const isTauri = () => "__TAURI_INTERNALS__" in window;
@@ -33,7 +34,7 @@ async function invoke<T>(command: string, args?: Record<string, unknown>): Promi
 export const api = {
   getState: () => invoke<State>("get_state"),
   saveSettings: (settings: Settings, moveFolder?: boolean) => invoke<State>("save_settings", { settings, ...(moveFolder === undefined ? {} : { move_folder: moveFolder }) }),
-  pickDirectory: (target: "root_parent") => invoke<string | null>("pick_directory", { target }),
+  pickDirectory: (target: string) => invoke<string | null>("pick_directory", { target }),
   pickFile: (title: string, kind?: "json" | "exe" | "any") => invoke<string | null>("pick_file", { title, kind }),
   setMisePath: (path: string | null) => invoke<State>("set_mise_path", { path }),
   installMise: () => invoke<State>("install_mise"),
@@ -41,6 +42,10 @@ export const api = {
   installGit: () => invoke<State>("install_git"),
   installPg0: (force: boolean) => invoke<State>("install_pg0", { force }),
   uninstallPg0: () => invoke<State>("uninstall_pg0"),
+  installBin: () => invoke<State>("install_bin"),
+  chooseBinPath: (path: string | null) => invoke<State>("choose_bin_path", { path }),
+  updateBin: (name?: string) => invoke<State>("update_bin", { name: name ?? null }),
+  wslDistros: () => invoke<string[]>("wsl_distros"),
   updateGit: () => invoke<State>("update_git"),
   setBinPath: (enabled: boolean) => invoke<State>("set_bin_path", { enabled }),
   removeBinEntry: (name: string) => invoke<State>("remove_bin_entry", { name }),

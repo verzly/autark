@@ -108,10 +108,16 @@ This declaration does not install pg0, select a shared PostgreSQL binaries folde
 { "key": "port", "label": "Port", "kind": "port", "default": 8888, "help": "..." }
 ```
 
-`kind` is one of `text`, `number`, `port`, `boolean`, `path`, `file`. `path` opens a folder picker; `file` opens a file picker. Keys must be unique per app. Autark stores the
+`kind` is one of `text`, `number`, `port`, `boolean`, `path`, `file`, `folders`. `path` opens a folder picker; `file` opens a file picker. Keys must be unique per app. Autark stores the
 values in `<app>/settings.json` next to the installed manifest and exposes them to commands through
 `{settings.<key>}`. Values are validated before an operation starts: a `port` must be 1-65535. A default value
 may itself contain placeholders, for example `"default": "{app}/huggingface"`.
+
+A `folders` setting holds a list of `{ "path": "<folder>", "distros": ["<name>", ...] }` entries. The app page
+edits it with a folder picker and a chip per WSL distro next to each folder; `"all"` in the list means every
+distro reported at start, and an empty list skips that folder. Because the value is not a string, `{settings.<key>}`
+expands to its JSON form, so a recipe receives it in an environment variable and parses it. An entry needs a
+non-empty path and a distro list.
 
 An optional `"group": "Model"` puts the setting on its own tab of the app settings page. Settings without a group
 share the default tab; the tabs follow the order the groups first appear in the recipe.

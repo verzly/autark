@@ -42,6 +42,8 @@ pub enum SettingKind {
     Boolean,
     Path,
     File,
+    /// Folder list with a per-folder target selection, such as WSL distros.
+    Folders,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -466,6 +468,24 @@ fn validate_value(kind: SettingKind, key: &str, value: &Value) -> Result<()> {
                 bail!("invalid_argument: setting `{key}` must be a port between 1 and 65535");
             }
         }
+        SettingKind::Folders => {
+            let items = value
+                .as_array()
+                .with_context(|| format!("invalid_argument: setting `{key}` must be a list"))?;
+            for item in items {
+                let path = item.get("path").and_then(Value::as_str).unwrap_or("").trim();
+                if path.is_empty() {
+                    bail!("invalid_argument: setting `{key}` needs a path for every entry");
+                }
+                let distros = item
+                    .get("distros")
+                    .and_then(Value::as_array)
+                    .with_context(|| format!("invalid_argument: setting `{key}` needs a distro list for every entry"))?;
+                if distros.iter().any(|entry| entry.as_str().map(str::trim).unwrap_or("").is_empty()) {
+                    bail!("invalid_argument: setting `{key}` has an empty distro name");
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -584,6 +604,21 @@ pub fn snapshot_manifest(app: &Path, manifest: &Manifest) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn folders_setting_takes_paths_with_distro_lists() {
+        let empty = serde_json::json!([]);
+        assert!(validate_value(SettingKind::Folders, "folders", &empty).is_ok());
+        let missing_distros = serde_json::json!([{ "path": "C:\\dev" }]);
+        assert!(validate_value(SettingKind::Folders, "folders", &missing_distros).is_err());
+        let blank_path = serde_json::json!([{ "path": " ", "distros": [] }]);
+        assert!(validate_value(SettingKind::Folders, "folders", &blank_path).is_err());
+        let good = serde_json::json!([
+            { "path": "C:\\dev", "distros": ["all"] },
+            { "path": "D:\\shared", "distros": [] },
+        ]);
+        assert!(validate_value(SettingKind::Folders, "folders", &good).is_ok());
+    }
 
     #[test]
     fn pg0_requirement_defaults_to_false_and_accepts_true_or_false() {
