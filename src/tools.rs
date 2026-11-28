@@ -46,6 +46,22 @@ pub struct MiseInfo {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct BinInfo {
+    /// A bin.exe Autark can run, either its own copy or one found elsewhere.
+    pub available: bool,
+    /// Autark downloaded bin into its own bin folder.
+    pub installed: bool,
+    /// The running bin.exe lives outside Autark's bin folder.
+    pub external: bool,
+    pub path: Option<String>,
+    pub local_path: String,
+    /// Where bin installs tools, independent of which bin.exe runs.
+    pub install_dir: String,
+    /// Other bin.exe files on the PATH, offered in the wizard.
+    pub detected: Vec<DetectedMise>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct Pg0Info {
     pub available: bool,
     pub version: Option<String>,
@@ -409,6 +425,41 @@ pub fn bin_exe(root: &Path) -> PathBuf {
     bin_dir(root).join("bin.exe")
 }
 
+/// Autark's own bin.exe wins; otherwise the configured file, then the PATH.
+pub fn resolve_bin(settings: &Settings, root: &Path) -> Option<PathBuf> {
+    let own = bin_exe(root);
+    if own.is_file() {
+        return Some(own);
+    }
+    if let Some(path) = settings.bin_path.as_deref().map(PathBuf::from).filter(|path| path.is_file()) {
+        return Some(path);
+    }
+    where_tool("bin").into_iter().next()
+}
+
+/// Every bin call gets Autark's config, so an external bin.exe still installs
+/// into Autark's bin folder instead of its own download directory.
+pub fn probe_bin(settings: &Settings, root: &Path) -> BinInfo {
+    let own = bin_exe(root);
+    let installed = own.is_file();
+    let own_key = own.to_string_lossy().to_lowercase();
+    let detected: Vec<DetectedMise> = where_tool("bin")
+        .into_iter()
+        .filter(|candidate| candidate.to_string_lossy().to_lowercase() != own_key)
+        .map(|candidate| DetectedMise { path: candidate.to_string_lossy().to_string(), version: None })
+        .collect();
+    let resolved = resolve_bin(settings, root);
+    BinInfo {
+        available: resolved.is_some(),
+        installed,
+        external: resolved.as_ref().is_some_and(|path| *path != own),
+        path: resolved.map(|path| path.to_string_lossy().to_string()),
+        local_path: own.to_string_lossy().to_string(),
+        install_dir: bin_dir(root).to_string_lossy().to_string(),
+        detected,
+    }
+}
+
 /// Installs the latest bin release into Autark's bin and lets bin register
 /// itself, so `bin update` keeps bin and every installed tool current.
 pub fn install_bin(app: &AppHandle, id: &str, root: &Path) -> Result<()> {
@@ -433,11 +484,8 @@ pub fn install_bin(app: &AppHandle, id: &str, root: &Path) -> Result<()> {
 
 /// Runs bin's own updater. Without a name every tool is updated, which also
 /// covers bin itself once it is registered.
-pub fn update_bin(app: &AppHandle, id: &str, root: &Path, name: Option<&str>) -> Result<()> {
-    let path = bin_exe(root);
-    if !path.is_file() {
-        bail!("invalid_argument: bin is not installed");
-    }
+pub fn update_bin(app: &AppHandle, id: &str, settings: &Settings, root: &Path, name: Option<&str>) -> Result<()> {
+    let path = resolve_bin(settings, root).context("invalid_argument: bin is not installed")?;
     let mut command = new_command(&path);
     command.arg("update");
     if let Some(name) = name {

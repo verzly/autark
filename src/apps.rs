@@ -462,6 +462,7 @@ pub struct State {
     pub operations: Vec<Operation>,
     pub busy: bool,
     pub mise: MiseInfo,
+    pub bin: tools::BinInfo,
     pub git: tools::GitInfo,
     pub terminal: tools::TerminalInfo,
     pub pg0: tools::Pg0Info,
@@ -478,6 +479,7 @@ pub struct Core {
     pub records: Vec<AppRecord>,
     pub marketplace: MarketplaceInfo,
     pub mise: MiseInfo,
+    pub bin: tools::BinInfo,
     pub git: tools::GitInfo,
     pub terminal: tools::TerminalInfo,
     pub pg0: tools::Pg0Info,
@@ -496,6 +498,7 @@ impl Shared {
         let mut core = Core {
             settings: settings.clone(),
             mise: tools::probe(&settings),
+            bin: tools::probe_bin(&settings, &settings.root_path()),
             git: tools::probe_git(&settings),
             terminal: tools::probe_terminal(&root),
             pg0: tools::probe_pg0(&root),
@@ -772,6 +775,7 @@ pub fn wire(shared: &Shared) -> State {
         operations,
         busy,
         mise: core.mise.clone(),
+        bin: core.bin.clone(),
         git: core.git.clone(),
         terminal: core.terminal.clone(),
         pg0,
@@ -1398,6 +1402,7 @@ pub fn run_tool_streaming(app: &AppHandle, id: &str, label: String, command: Com
 pub fn refresh_mise(shared: &Arc<Shared>) {
     let mut core = shared.core.lock().unwrap_or_else(|error| error.into_inner());
     core.mise = tools::probe(&core.settings);
+    core.bin = tools::probe_bin(&core.settings, &core.settings.root_path());
     core.git = tools::probe_git(&core.settings);
     core.terminal = tools::probe_terminal(&core.settings.root_path());
 }

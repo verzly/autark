@@ -16,6 +16,9 @@ pub struct Settings {
     pub folder_name: String,
     pub force_local_mise: bool,
     pub mise_path: Option<String>,
+    /// An existing bin.exe outside Autark's bin folder; installs still land in
+    /// Autark's bin folder because Autark always points bin at its own config.
+    pub bin_path: Option<String>,
     pub bin_in_path: bool,
     pub open_tabs: Vec<String>,
     pub active_tab: Option<String>,
@@ -57,6 +60,7 @@ impl Default for Settings {
             folder_name: DEFAULT_FOLDER_NAME.to_string(),
             force_local_mise: false,
             mise_path: None,
+            bin_path: None,
             bin_in_path: false,
             open_tabs: Vec::new(),
             active_tab: None,

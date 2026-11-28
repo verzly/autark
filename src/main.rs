@@ -236,6 +236,7 @@ async fn save_settings(
     }
     let mise_changed = settings.mise_path != current.mise_path
         || settings.force_local_mise != current.force_local_mise
+        || settings.bin_path != current.bin_path
         || settings.bin_in_path != current.bin_in_path;
     let task_shared = inner.clone();
     tauri::async_runtime::spawn_blocking(move || -> CmdResult<()> {
@@ -915,6 +916,7 @@ fn main() {
             install_pg0,
             install_bin,
             update_bin,
+            choose_bin_path,
             wsl_distros,
             uninstall_pg0,
             check_updates,
@@ -1072,7 +1074,8 @@ async fn install_pg0(
 #[tauri::command]
 async fn install_bin(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> CmdResult<State> {
     apps::reserve(&shared, "bin.exe", "install")?;
-    let root = shared.inner().plugin_settings().root_path();
+    let settings = shared.inner().plugin_settings();
+    let root = settings.root_path();
     let handle = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         crate::tools::install_bin(&handle, "bin.exe", &root)
@@ -1082,7 +1085,22 @@ async fn install_bin(app: AppHandle, shared: TauriState<'_, Arc<Shared>>) -> Cmd
     .and_then(|result| result.map_err(CmdError::from));
     apps::release(&shared, "bin.exe");
     result?;
+    apps::refresh_mise(shared.inner());
     Ok(apps::wire(&shared))
+}
+
+/// Points Autark at an existing bin.exe. Bin still works in Autark's bin folder.
+#[tauri::command(rename_all = "snake_case")]
+async fn choose_bin_path(shared: TauriState<'_, Arc<Shared>>, path: Option<String>) -> CmdResult<State> {
+    let inner = shared.inner().clone();
+    {
+        let mut settings = inner.plugin_settings();
+        settings.bin_path = path;
+        settings.save()?;
+        apps::reload_settings(&inner, settings)?;
+    }
+    apps::refresh_mise(&inner);
+    Ok(apps::wire(&inner))
 }
 
 #[tauri::command]
@@ -1092,10 +1110,11 @@ async fn update_bin(
     name: Option<String>,
 ) -> CmdResult<State> {
     apps::reserve(&shared, "bin.exe", "update")?;
-    let root = shared.inner().plugin_settings().root_path();
+    let settings = shared.inner().plugin_settings();
+    let root = settings.root_path();
     let handle = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        crate::tools::update_bin(&handle, "bin.exe", &root, name.as_deref())
+        crate::tools::update_bin(&handle, "bin.exe", &settings, &root, name.as_deref())
     })
     .await
     .map_err(|error| CmdError::new("internal", error.to_string()))
