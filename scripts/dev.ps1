@@ -2,7 +2,9 @@ $ErrorActionPreference = 'Stop'
 # A running autark.exe locks the debug executable, so cargo cannot replace it.
 # Only the debug build is stopped: a release Autark can keep running next to it.
 $targetDir = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).target_directory
-$debugExe = Join-Path $targetDir 'debug\autark.exe'
+# CARGO_BUILD_TARGET moves the debug output under target\<triple>\debug.
+$debugDir = if ($env:CARGO_BUILD_TARGET) { Join-Path $targetDir "$($env:CARGO_BUILD_TARGET)\debug" } else { Join-Path $targetDir 'debug' }
+$debugExe = Join-Path $debugDir 'autark.exe'
 Get-Process autark -ErrorAction SilentlyContinue |
     Where-Object { $_.Path -and $_.Path -ieq $debugExe } |
     Stop-Process -Force

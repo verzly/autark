@@ -1133,9 +1133,9 @@ function lineTone(line: string) {
 }
 
 function LogText(props: { line: string }) {
-  if (!props.line) return <>&nbsp;</>;
-  if (!props.line.startsWith("$ ")) return <>{props.line}</>;
-  return <><span class="prompt">$</span>{props.line.slice(1)}</>;
+  // Index would otherwise keep the first layout: read the line inside reactive expressions.
+  const text = () => props.line.startsWith("$ ") ? props.line.slice(1) : props.line;
+  return <><Show when={props.line.startsWith("$ ")}><span class="prompt">$</span></Show>{text() || "\u00a0"}</>;
 }
 function Icon(props: { name: "menu" | "gridPlus" | "close" | "min" | "max" | "pencil" | "trash" | "reload" | "download" | "eye" | "back" | "gear" }) {
   return <svg viewBox="0 0 16 16" aria-hidden="true">{props.name === "menu" ? <path d="M2 4h12M2 8h12M2 12h12" /> : props.name === "trash" ? <><path d="M2.6 4.4h10.8" /><path d="M6.2 4.4V2.9h3.6v1.5" /><path d="M4.1 4.4l.7 8.1a1.1 1.1 0 0 0 1.1 1h4.2a1.1 1.1 0 0 0 1.1-1l.7-8.1" /><path d="M6.7 7v4M9.3 7v4" /></> : props.name === "gridPlus" ? <><rect x="1.5" y="1.5" width="5" height="5" rx="1" /><rect x="9.5" y="1.5" width="5" height="5" rx="1" /><rect x="1.5" y="9.5" width="5" height="5" rx="1" /><path d="M12 9v5m-2.5-2.5h5" /></> : props.name === "close" ? <path d="m4 4 8 8m0-8-8 8" /> : props.name === "min" ? <path d="M3 8h10" /> : props.name === "max" ? <rect x="3.2" y="3.2" width="9.6" height="9.6" rx="1" /> : props.name === "reload" ? <><path d="M13 8a5 5 0 1 1-1.5-3.6" /><path d="M13.2 2.6v3.2h-3.2" /></> : props.name === "download" ? <><path d="M8 2.4v7.2" /><path d="m5 7 3 3 3-3" /><path d="M2.8 12.6h10.4" /></> : props.name === "eye" ? <><path d="M1.6 8s2.4-4.1 6.4-4.1S14.4 8 14.4 8s-2.4 4.1-6.4 4.1S1.6 8 1.6 8Z" /><circle cx="8" cy="8" r="2.1" /></> : props.name === "back" ? <><path d="M13 8H3.2" /><path d="m7 3.8-4.2 4.2L7 12.2" /></> : props.name === "gear" ? <><path d="M6.6 1.7h2.8l.4 1.7c.5.2.9.5 1.3.8l1.7-.5 1.4 2.4-1.2 1.3c.1.4.1.9 0 1.3l1.2 1.3-1.4 2.4-1.7-.5c-.4.3-.8.6-1.3.8l-.4 1.7H6.6l-.4-1.7c-.5-.2-.9-.5-1.3-.8l-1.7.5-1.4-2.4 1.2-1.3a5.3 5.3 0 0 1 0-1.3L1.8 6.1l1.4-2.4 1.7.5c.4-.3.8-.6 1.3-.8z" /><circle cx="8" cy="8" r="2" /></> : <><path d="M10.4 3.1 13 5.7" /><path d="M2.4 13.6 3.3 10 10.6 2.7a1.3 1.3 0 0 1 1.8 0l.9.9a1.3 1.3 0 0 1 0 1.8L6 12.8l-3.6.8Z" /></>}</svg>;
